@@ -47,6 +47,7 @@ type mockShellModel struct {
 	focus               mockFocus
 	helpExpanded        bool
 	composerText        string
+	replyTo             *composerReplyContext
 	nextSend            int
 	activeSend          *queuedComposerSend
 	sendQueue           []queuedComposerSend
@@ -77,9 +78,19 @@ const (
 )
 
 type queuedComposerSend struct {
-	ID      int
-	Channel string
-	Text    string
+	ID               int
+	Channel          string
+	Text             string
+	Draft            string
+	ReplyToMessageID string
+	Action           bool
+	Reply            *composerReplyContext
+}
+
+type composerReplyContext struct {
+	MessageID string
+	Author    string
+	Text      string
 }
 
 type mockShellLayout struct {
@@ -177,7 +188,7 @@ func newMockShellModelWithClock(channel string, cfg config.Config, clock animati
 		status: ConnectionState{
 			Status:  ConnectionConnected,
 			Channel: channel,
-			Detail:  "mock source ready",
+			Detail:  "mock source ready: no network",
 			At:      connectedAt,
 		},
 		messages:       seededMockMessages(channel, connectedAt),
@@ -296,6 +307,16 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == mockFocusComposer {
 				m.deleteComposerRune()
 			}
+		case tea.KeyEsc:
+			m.replyTo = nil
+		case tea.KeyUp:
+			if m.focus == mockFocusChat {
+				m.selectReplyMessage(-1)
+			}
+		case tea.KeyDown:
+			if m.focus == mockFocusChat {
+				m.selectReplyMessage(1)
+			}
 		case tea.KeyCtrlU:
 			if m.focus == mockFocusComposer {
 				m.composerText = ""
@@ -316,6 +337,10 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'q' {
 				return m, tea.Quit
+			}
+			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'r' {
+				m.startReplyMode()
+				return m, nil
 			}
 			if m.focus == mockFocusComposer {
 				m.composerText += string(msg.Runes)
@@ -497,14 +522,21 @@ func (m mockShellModel) composerView(layout mockShellLayout) string {
 	}
 	input = " " + fitLine(input, clampMin(layout.width-4, 1))
 	if !layout.composerFramed {
+		if m.replyTo != nil {
+			input = m.replyContextLine(layout.width) + "\n" + input
+		}
 		return fitBlock(input, layout.width, layout.composerHeight)
 	}
 
-	box := lipgloss.JoinVertical(
-		lipgloss.Left,
+	lines := []string{}
+	if m.replyTo != nil && layout.composerContentHeight >= 3 {
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4")).Italic(true).Render(m.replyContextLine(layout.width-4)))
+	}
+	lines = append(lines,
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#8bd5ff")).Render(label),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#a6adc8")).Render(input),
 	)
+	box := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
 	if layout.composerContentHeight == 1 {
 		box = lipgloss.NewStyle().Foreground(lipgloss.Color("#a6adc8")).Render(input)
@@ -594,6 +626,10 @@ func (m mockShellModel) layout() mockShellLayout {
 
 	layout.composerHeight = 4
 	layout.composerContentHeight = 2
+	if m.replyTo != nil {
+		layout.composerHeight++
+		layout.composerContentHeight++
+	}
 	layout.composerFramed = width >= 5
 	if height < 10 {
 		layout.composerHeight = 3
@@ -780,7 +816,8 @@ func (m *mockShellModel) scheduleRevealTick() tea.Cmd {
 }
 
 func (m *mockShellModel) queueComposerSend() (tea.Model, tea.Cmd) {
-	text := strings.TrimSpace(m.composerText)
+	draft := strings.TrimSpace(m.composerText)
+	text, action := composerSendText(draft)
 	if text == "" {
 		return *m, nil
 	}
@@ -792,11 +829,16 @@ func (m *mockShellModel) queueComposerSend() (tea.Model, tea.Cmd) {
 
 	m.nextSend++
 	m.sendQueue = append(m.sendQueue, queuedComposerSend{
-		ID:      m.nextSend,
-		Channel: m.channel,
-		Text:    text,
+		ID:               m.nextSend,
+		Channel:          m.channel,
+		Text:             text,
+		Draft:            draft,
+		ReplyToMessageID: replyMessageID(m.replyTo),
+		Action:           action,
+		Reply:            cloneComposerReply(m.replyTo),
 	})
 	m.composerText = ""
+	m.replyTo = nil
 	m.sendState = composerSendQueued
 	m.sendFeedback = fmt.Sprintf("queued for #%s", m.channel)
 	return *m, m.startNextComposerSend()
@@ -811,8 +853,19 @@ func (m *mockShellModel) startNextComposerSend() tea.Cmd {
 	m.activeSend = &next
 	m.sendState = composerSendSending
 	m.sendFeedback = fmt.Sprintf("sending to #%s", next.Channel)
+	if next.ReplyToMessageID != "" {
+		m.sendFeedback = "sending reply to " + replyAuthor(next.Reply)
+	}
+	if next.Action {
+		m.sendFeedback = "sending action to #" + next.Channel
+	}
 	client := m.client
-	req := SendRequest{Channel: next.Channel, Text: next.Text}
+	req := SendRequest{
+		Channel:          next.Channel,
+		Text:             next.Text,
+		ReplyToMessageID: next.ReplyToMessageID,
+		Action:           next.Action,
+	}
 	return func() tea.Msg {
 		result, err := client.Send(context.Background(), req)
 		return composerSendCompletedMsg{id: next.ID, result: result, err: err}
@@ -829,13 +882,17 @@ func (m mockShellModel) completeComposerSend(msg composerSendCompletedMsg) (tea.
 	if msg.err != nil {
 		m.sendState = composerSendFailed
 		m.sendFeedback = "failed: " + credentialSafeSendDetail(msg.err)
-		m.restoreComposerText(m.drainUnsentComposerText(sent)...)
+		texts, reply := m.drainUnsentComposerSends(sent)
+		m.restoreComposerText(texts...)
+		m.replyTo = reply
 		return m, nil
 	}
 	if msg.result.RateLimited {
 		m.sendState = composerSendRateLimited
 		m.sendFeedback = "rate limited: " + sendResultDetail(msg.result)
-		m.restoreComposerText(m.drainUnsentComposerText(sent)...)
+		texts, reply := m.drainUnsentComposerSends(sent)
+		m.restoreComposerText(texts...)
+		m.replyTo = reply
 		return m, nil
 	}
 
@@ -844,14 +901,15 @@ func (m mockShellModel) completeComposerSend(msg composerSendCompletedMsg) (tea.
 	return m, m.startNextComposerSend()
 }
 
-func (m *mockShellModel) drainUnsentComposerText(active queuedComposerSend) []string {
+func (m *mockShellModel) drainUnsentComposerSends(active queuedComposerSend) ([]string, *composerReplyContext) {
 	texts := make([]string, 0, len(m.sendQueue)+1)
-	texts = append(texts, active.Text)
+	texts = append(texts, active.restoreText())
 	for _, queued := range m.sendQueue {
-		texts = append(texts, queued.Text)
+		texts = append(texts, queued.restoreText())
 	}
+	reply := commonReplyContext(active, m.sendQueue)
 	m.sendQueue = nil
-	return texts
+	return texts, reply
 }
 
 func (m *mockShellModel) restoreComposerText(texts ...string) {
@@ -882,6 +940,71 @@ func sendResultDetail(result SendResult) string {
 	return "accepted"
 }
 
+func (s queuedComposerSend) restoreText() string {
+	if s.Draft != "" {
+		return s.Draft
+	}
+	if s.Action {
+		return "/me " + s.Text
+	}
+	return s.Text
+}
+
+func composerSendText(draft string) (string, bool) {
+	text := strings.TrimSpace(draft)
+	lower := strings.ToLower(text)
+	if lower == "/me" {
+		return "", true
+	}
+	if strings.HasPrefix(lower, "/me ") || strings.HasPrefix(lower, "/me\t") {
+		return strings.TrimSpace(text[len("/me"):]), true
+	}
+	return text, false
+}
+
+func replyMessageID(reply *composerReplyContext) string {
+	if reply == nil {
+		return ""
+	}
+	return reply.MessageID
+}
+
+func cloneComposerReply(reply *composerReplyContext) *composerReplyContext {
+	if reply == nil {
+		return nil
+	}
+	copied := *reply
+	return &copied
+}
+
+func replyAuthor(reply *composerReplyContext) string {
+	if reply == nil || reply.Author == "" {
+		return "message"
+	}
+	return reply.Author
+}
+
+func commonReplyContext(active queuedComposerSend, queued []queuedComposerSend) *composerReplyContext {
+	all := make([]queuedComposerSend, 0, len(queued)+1)
+	all = append(all, active)
+	all = append(all, queued...)
+
+	var common *composerReplyContext
+	for _, send := range all {
+		if send.ReplyToMessageID == "" {
+			return nil
+		}
+		if common == nil {
+			common = cloneComposerReply(send.Reply)
+			continue
+		}
+		if send.ReplyToMessageID != common.MessageID {
+			return nil
+		}
+	}
+	return common
+}
+
 func mockAnimationConfig(mode string) animation.Config {
 	cfg := animation.DefaultConfig()
 	switch animation.Mode(mode) {
@@ -905,6 +1028,100 @@ func (m *mockShellModel) deleteComposerRune() {
 	m.composerText = string(runes[:len(runes)-1])
 }
 
+func (m *mockShellModel) selectReplyMessage(delta int) {
+	messages := m.replyableMessages()
+	if len(messages) == 0 {
+		return
+	}
+
+	index := -1
+	currentID := replyMessageID(m.replyTo)
+	for i, message := range messages {
+		if message.ID == currentID {
+			index = i
+			break
+		}
+	}
+	if index == -1 {
+		if delta < 0 {
+			index = len(messages) - 1
+		} else {
+			index = 0
+		}
+	} else {
+		index += delta
+		if index < 0 {
+			index = 0
+		}
+		if index >= len(messages) {
+			index = len(messages) - 1
+		}
+	}
+
+	m.replyTo = replyContextFromMessage(messages[index])
+}
+
+func (m *mockShellModel) startReplyMode() {
+	if m.replyTo == nil {
+		m.selectReplyMessage(-1)
+	}
+	if m.replyTo != nil {
+		m.focus = mockFocusComposer
+	}
+}
+
+func (m mockShellModel) replyableMessages() []twitch.ChatMessage {
+	messages := make([]twitch.ChatMessage, 0, len(m.messages))
+	for _, message := range m.messages {
+		if strings.TrimSpace(message.ID) != "" {
+			messages = append(messages, message)
+		}
+	}
+	return messages
+}
+
+func replyContextFromMessage(message twitch.ChatMessage) *composerReplyContext {
+	author := displayReplyAuthor(message)
+	text := compactReplyText(message.Text)
+	if text == "" && len(message.Fragments) > 0 {
+		var builder strings.Builder
+		for _, fragment := range message.Fragments {
+			builder.WriteString(fragment.Text)
+		}
+		text = compactReplyText(builder.String())
+	}
+	return &composerReplyContext{
+		MessageID: message.ID,
+		Author:    author,
+		Text:      text,
+	}
+}
+
+func displayReplyAuthor(message twitch.ChatMessage) string {
+	if message.DisplayName != "" {
+		return message.DisplayName
+	}
+	if message.AuthorLogin != "" {
+		return message.AuthorLogin
+	}
+	return "unknown"
+}
+
+func compactReplyText(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
+
+func (m mockShellModel) replyContextLine(width int) string {
+	if m.replyTo == nil {
+		return ""
+	}
+	line := " Replying to " + replyAuthor(m.replyTo)
+	if m.replyTo.Text != "" {
+		line += ": " + m.replyTo.Text
+	}
+	return fitLine(line, clampMin(width, 1))
+}
+
 func (m mockShellModel) focusName() string {
 	if m.focus == mockFocusComposer {
 		return "composer"
@@ -924,13 +1141,13 @@ func (m mockShellModel) helpLines(width, height int) []string {
 		if width < 38 {
 			return []string{" tab focus | ? help"}
 		}
-		return []string{" tab focus | ? help | pg scroll | q quit | ctrl+c quit | " + source}
+		return []string{" tab focus | ? help | pg scroll | r reply | esc cancel | q quit | ctrl+c quit | " + source}
 	}
 
 	lines := []string{
 		" tab focus: chat/composer",
-		" pgup/pgdn: scroll chat | ?: compact help",
-		" q: quit from chat | ctrl+c: quit | " + source,
+		" up/down: select reply | r: reply | esc: cancel reply",
+		" pgup/pgdn: scroll chat | ?: compact help | q: quit | ctrl+c: quit | " + source,
 	}
 	if width < 38 {
 		lines = []string{

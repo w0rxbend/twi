@@ -229,6 +229,23 @@ func TestRowsExposeRepresentativeFragmentKinds(t *testing.T) {
 	}
 }
 
+func TestRowsExposeActionFragment(t *testing.T) {
+	msg := twitch.ChatMessage{
+		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),
+		DisplayName: "dancer",
+		Type:        twitch.MessageTypeAction,
+		Text:        "waves at chat",
+	}
+
+	rows := Rows(msg, DefaultOptions(80))
+	if got, want := rows[0].Plain(), "20:00 * dancer waves at chat"; got != want {
+		t.Fatalf("row = %q, want %q", got, want)
+	}
+	if !hasKind(rows, FragmentAction) {
+		t.Fatalf("rows missing %s fragment: %#v", FragmentAction, rows)
+	}
+}
+
 func TestTextRowUsesFallbackAuthor(t *testing.T) {
 	msg := twitch.ChatMessage{
 		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),

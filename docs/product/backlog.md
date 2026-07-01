@@ -5,8 +5,8 @@ Status: First focused agent-loop tasks derived from `PLAN.md`.
 Progress as of the initial swarm pass:
 
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
-- Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, the one-channel Twitch IRC read adapter, and the active-channel composer send queue.
-- Remaining near-term work: richer live-chat validation, reply/action sends, and later asset/image fallbacks.
+- Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, the one-channel Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, and `/me` action sends.
+- Remaining near-term work: richer live-chat validation and asset/image fallbacks.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -117,7 +117,7 @@ Follow-ups: Add room state, notice, moderation, and reconnect edge cases.
 
 ## Task 9
 
-Task: Implement composer send path and send queue. Status: implemented for active-channel normal sends.
+Task: Implement composer send path and send queue. Status: implemented for active-channel normal sends, selected-message replies, and `/me` action sends.
 Owner lane: Twitch integration engineer.
 Goal: Send messages from the TUI without losing user text on failure.
 Context: MVP needs IRC `Say` for the active channel and visible send status.
@@ -126,7 +126,7 @@ Implementation notes: Queue sends through commands; clear composer only after ch
 Acceptance criteria: User can send a message to the active channel; failures show a reason and preserve text.
 Verification: Fake sender success/failure tests; manual send to test channel; `go test ./internal/app ./internal/twitch`.
 Risks: Twitch send restrictions may vary by account/channel.
-Follow-ups: Add replies and `/me`.
+Follow-ups: Validate live reply/action behavior with user-owned Twitch credentials.
 
 ## Task 10
 

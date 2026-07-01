@@ -387,6 +387,212 @@ func TestLiveShellRateLimitedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	}
 }
 
+func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.T) {
+	client := NewFakeChatClient(1)
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.messages = []twitch.ChatMessage{
+		{
+			ID:          "",
+			Channel:     "example",
+			Timestamp:   time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
+			DisplayName: "system",
+			Text:        "no ID",
+			Type:        twitch.MessageTypeNotice,
+		},
+		{
+			ID:          "parent-1",
+			Channel:     "example",
+			Timestamp:   time.Date(2026, 7, 2, 12, 0, 1, 0, time.UTC),
+			DisplayName: "viewer",
+			Text:        "question for chat",
+			Type:        twitch.MessageTypeChat,
+		},
+	}
+	model.composerText = "draft reply"
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("select reply returned command %#v, want nil", cmd)
+	}
+	if model.replyTo == nil || model.replyTo.MessageID != "parent-1" {
+		t.Fatalf("replyTo = %#v, want parent-1 context", model.replyTo)
+	}
+	for _, want := range []string{"Replying to viewer", "question for chat"} {
+		if !strings.Contains(model.View(), want) {
+			t.Fatalf("reply context view missing %q:\n%s", want, model.View())
+		}
+	}
+
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("esc returned command %#v, want nil", cmd)
+	}
+	if model.replyTo != nil {
+		t.Fatalf("replyTo after esc = %#v, want nil", model.replyTo)
+	}
+	if got, want := model.composerText, "draft reply"; got != want {
+		t.Fatalf("composerText after esc = %q, want %q", got, want)
+	}
+	if strings.Contains(model.View(), "Replying to viewer") {
+		t.Fatalf("reply context still visible after esc:\n%s", model.View())
+	}
+}
+
+func TestLiveShellRStartsReplyModeAndReplySendUsesParentID(t *testing.T) {
+	client := NewFakeChatClient(1)
+	if err := client.QueueSendResult(SendResult{AcceptedAt: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)}, nil); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.messages = []twitch.ChatMessage{
+		{
+			ID:          "parent-1",
+			Channel:     "example",
+			Timestamp:   time.Date(2026, 7, 2, 12, 0, 1, 0, time.UTC),
+			DisplayName: "older",
+			Text:        "older message",
+			Type:        twitch.MessageTypeChat,
+		},
+		{
+			ID:          "parent-2",
+			Channel:     "example",
+			Timestamp:   time.Date(2026, 7, 2, 12, 0, 2, 0, time.UTC),
+			DisplayName: "latest",
+			Text:        "latest message",
+			Type:        twitch.MessageTypeChat,
+		},
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("r returned command %#v, want nil", cmd)
+	}
+	if model.replyTo == nil || model.replyTo.MessageID != "parent-2" || model.focus != mockFocusComposer {
+		t.Fatalf("reply mode = replyTo %#v focus %v, want latest parent and composer focus", model.replyTo, model.focus)
+	}
+
+	model.composerText = " thanks "
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("reply Enter returned nil command, want send command")
+	}
+	completed := cmd().(composerSendCompletedMsg)
+	updated, _ = model.Update(completed)
+	model = updated.(mockShellModel)
+
+	sent := client.SentRequests()
+	if len(sent) != 1 {
+		t.Fatalf("SentRequests length = %d, want 1", len(sent))
+	}
+	if got, want := sent[0].ReplyToMessageID, "parent-2"; got != want {
+		t.Fatalf("ReplyToMessageID = %q, want %q", got, want)
+	}
+	if got, want := sent[0].Text, "thanks"; got != want {
+		t.Fatalf("Text = %q, want %q", got, want)
+	}
+	if sent[0].Action {
+		t.Fatalf("Action = true, want false for normal reply")
+	}
+	if model.replyTo != nil {
+		t.Fatalf("replyTo after successful reply send = %#v, want nil", model.replyTo)
+	}
+}
+
+func TestLiveShellMeInputQueuesActionSend(t *testing.T) {
+	client := NewFakeChatClient(1)
+	if err := client.QueueSendResult(SendResult{AcceptedAt: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)}, nil); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.focus = mockFocusComposer
+	model.composerText = " /me waves at chat "
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("/me Enter returned nil command, want send command")
+	}
+	completed := cmd().(composerSendCompletedMsg)
+	updated, _ = model.Update(completed)
+	model = updated.(mockShellModel)
+
+	sent := client.SentRequests()
+	if len(sent) != 1 {
+		t.Fatalf("SentRequests length = %d, want 1", len(sent))
+	}
+	if got, want := sent[0].Text, "waves at chat"; got != want {
+		t.Fatalf("Text = %q, want stripped action body %q", got, want)
+	}
+	if !sent[0].Action {
+		t.Fatal("Action = false, want true")
+	}
+}
+
+func TestLiveShellFailedReplyRestoresReplyContext(t *testing.T) {
+	client := NewFakeChatClient(1)
+	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.focus = mockFocusComposer
+	model.replyTo = &composerReplyContext{MessageID: "parent-1", Author: "viewer", Text: "original"}
+	model.composerText = "reply body"
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	completed := cmd().(composerSendCompletedMsg)
+	updated, _ = model.Update(completed)
+	model = updated.(mockShellModel)
+
+	if got, want := model.composerText, "reply body"; got != want {
+		t.Fatalf("composerText after failed reply = %q, want %q", got, want)
+	}
+	if model.replyTo == nil || model.replyTo.MessageID != "parent-1" {
+		t.Fatalf("replyTo after failed reply = %#v, want parent-1", model.replyTo)
+	}
+}
+
+func TestLiveShellFailedMixedQueueDoesNotMisapplyReplyContext(t *testing.T) {
+	client := NewFakeChatClient(2)
+	if err := client.QueueSendResult(SendResult{}, fmt.Errorf("network unavailable")); err != nil {
+		t.Fatalf("QueueSendResult returned error: %v", err)
+	}
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	model.focus = mockFocusComposer
+	model.replyTo = &composerReplyContext{MessageID: "parent-1", Author: "viewer", Text: "original"}
+	model.composerText = "reply body"
+
+	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if firstCmd == nil {
+		t.Fatal("first reply Enter returned nil command, want send command")
+	}
+
+	model.composerText = "plain followup"
+	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if secondCmd != nil {
+		t.Fatalf("queued follow-up returned command %#v while first send active, want nil", secondCmd)
+	}
+
+	completed := firstCmd().(composerSendCompletedMsg)
+	updated, _ = model.Update(completed)
+	model = updated.(mockShellModel)
+
+	for _, want := range []string{"reply body", "plain followup"} {
+		if !strings.Contains(model.composerText, want) {
+			t.Fatalf("composerText after failed mixed queue = %q, want it to contain %q", model.composerText, want)
+		}
+	}
+	if model.replyTo != nil {
+		t.Fatalf("replyTo after failed mixed queue = %#v, want nil to avoid wrong parent", model.replyTo)
+	}
+}
+
 func TestMockShellFastModeRevealsIncomingMessage(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	model := newMockShellModelWithClock("example", config.Default(), clock)

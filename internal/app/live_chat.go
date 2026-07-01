@@ -88,6 +88,9 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 	if text == "" {
 		return SendResult{}, errors.New("message text cannot be empty")
 	}
+	if req.Action {
+		text = actionWireText(text)
+	}
 	if req.ReplyToMessageID != "" {
 		if err := c.transport.Reply(ctx, req.Channel, req.ReplyToMessageID, text); err != nil {
 			return SendResult{}, errors.New(credentialSafeSendDetail(err))
@@ -98,6 +101,10 @@ func (c *LiveChatClient) Send(ctx context.Context, req SendRequest) (SendResult,
 		return SendResult{}, errors.New(credentialSafeSendDetail(err))
 	}
 	return SendResult{AcceptedAt: time.Now()}, nil
+}
+
+func actionWireText(text string) string {
+	return "\x01ACTION " + strings.TrimSpace(text) + "\x01"
 }
 
 func (c *LiveChatClient) Close() error {

@@ -199,6 +199,63 @@ func TestLiveChatClientSendRedactsTransportErrors(t *testing.T) {
 	}
 }
 
+func TestLiveChatClientSendReplyUsesTransportReply(t *testing.T) {
+	transport := newFakeTwitchTransport(2)
+	client, err := NewLiveChatClient(context.Background(), transport, 2)
+	if err != nil {
+		t.Fatalf("NewLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	_, err = client.Send(context.Background(), SendRequest{
+		Channel:          "example",
+		Text:             "thanks",
+		ReplyToMessageID: "parent-1",
+	})
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+
+	replies := transport.repliesSent()
+	if len(replies) != 1 {
+		t.Fatalf("replies length = %d, want 1", len(replies))
+	}
+	if replies[0] != (SendRequest{Channel: "example", Text: "thanks", ReplyToMessageID: "parent-1"}) {
+		t.Fatalf("reply request = %#v, want transport reply with parent ID", replies[0])
+	}
+	if got := transport.sendsSent(); len(got) != 0 {
+		t.Fatalf("normal sends length = %d, want 0 for reply path", len(got))
+	}
+}
+
+func TestLiveChatClientSendActionUsesIRCActionText(t *testing.T) {
+	transport := newFakeTwitchTransport(2)
+	client, err := NewLiveChatClient(context.Background(), transport, 2)
+	if err != nil {
+		t.Fatalf("NewLiveChatClient returned error: %v", err)
+	}
+	defer client.Close()
+	<-client.ConnectionStates()
+
+	_, err = client.Send(context.Background(), SendRequest{
+		Channel: "example",
+		Text:    "waves at chat",
+		Action:  true,
+	})
+	if err != nil {
+		t.Fatalf("Send returned error: %v", err)
+	}
+
+	sends := transport.sendsSent()
+	if len(sends) != 1 {
+		t.Fatalf("sends length = %d, want 1", len(sends))
+	}
+	if got, want := sends[0].Text, "\x01ACTION waves at chat\x01"; got != want {
+		t.Fatalf("action wire text = %q, want %q", got, want)
+	}
+}
+
 func TestLiveShellConsumesClientMessagesAndConnectionStates(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
@@ -249,6 +306,7 @@ type fakeTwitchTransport struct {
 	closed    bool
 	sendErr   error
 	sends     []SendRequest
+	replies   []SendRequest
 }
 
 func newFakeTwitchTransport(buffer int) *fakeTwitchTransport {
@@ -269,8 +327,11 @@ func (t *fakeTwitchTransport) Send(_ context.Context, channel, text string) erro
 	return t.sendErr
 }
 
-func (t *fakeTwitchTransport) Reply(context.Context, string, string, string) error {
-	return nil
+func (t *fakeTwitchTransport) Reply(_ context.Context, channel, parentMessageID, text string) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.replies = append(t.replies, SendRequest{Channel: channel, Text: text, ReplyToMessageID: parentMessageID})
+	return t.sendErr
 }
 
 func (t *fakeTwitchTransport) Close() error {
@@ -291,4 +352,20 @@ func (t *fakeTwitchTransport) connectCalled() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.connected
+}
+
+func (t *fakeTwitchTransport) sendsSent() []SendRequest {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]SendRequest, len(t.sends))
+	copy(out, t.sends)
+	return out
+}
+
+func (t *fakeTwitchTransport) repliesSent() []SendRequest {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]SendRequest, len(t.replies))
+	copy(out, t.replies)
+	return out
 }
