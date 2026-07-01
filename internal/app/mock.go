@@ -31,6 +31,8 @@ type mockShellModel struct {
 	channel             string
 	animationMode       string
 	imageMode           string
+	sourceDetail        string
+	client              ChatClient
 	status              ConnectionState
 	messages            []twitch.ChatMessage
 	incoming            []twitch.ChatMessage
@@ -77,6 +79,16 @@ type mockIncomingMessageMsg struct {
 
 type mockAnimationTickMsg struct{}
 
+type chatClientMessageMsg struct {
+	message twitch.ChatMessage
+	ok      bool
+}
+
+type chatClientConnectionStateMsg struct {
+	state ConnectionState
+	ok    bool
+}
+
 // RunMock starts the deterministic non-network mock chat shell. When stdout is
 // not an interactive terminal, it writes the initial Bubble Tea view and exits
 // so tests and redirected commands do not block waiting for keyboard input.
@@ -87,6 +99,30 @@ func RunMock(w io.Writer, cfg config.Config) error {
 	}
 
 	model := newMockShellModel(channel, cfg)
+	if !isInteractiveTerminal(w) {
+		_, err := fmt.Fprintln(w, model.View())
+		return err
+	}
+
+	program := tea.NewProgram(model, tea.WithOutput(w), tea.WithAltScreen())
+	_, err := program.Run()
+	return err
+}
+
+// RunClient starts the Bubble Tea chat shell against a real app-facing chat
+// client. The client is closed when the shell exits.
+func RunClient(w io.Writer, cfg config.Config, client ChatClient) error {
+	if client == nil {
+		return fmt.Errorf("missing chat client")
+	}
+	defer client.Close()
+
+	channel := "chat"
+	if len(cfg.DefaultChannels) > 0 {
+		channel = cfg.DefaultChannels[0]
+	}
+
+	model := newLiveShellModel(channel, cfg, client)
 	if !isInteractiveTerminal(w) {
 		_, err := fmt.Fprintln(w, model.View())
 		return err
@@ -108,6 +144,7 @@ func newMockShellModelWithClock(channel string, cfg config.Config, clock animati
 		channel:       channel,
 		animationMode: string(animationConfig.Mode),
 		imageMode:     cfg.Features.ImageMode,
+		sourceDetail:  "mock source: no network",
 		status: ConnectionState{
 			Status:  ConnectionConnected,
 			Channel: channel,
@@ -116,6 +153,32 @@ func newMockShellModelWithClock(channel string, cfg config.Config, clock animati
 		},
 		messages:       seededMockMessages(channel, connectedAt),
 		incoming:       incomingMockMessages(channel, connectedAt),
+		revealQueue:    animation.NewQueue(animationConfig, clock),
+		activeMessages: make(map[string]twitch.ChatMessage),
+		width:          defaultMockWidth,
+		height:         defaultMockHeight,
+		focus:          mockFocusChat,
+	}
+}
+
+func newLiveShellModel(channel string, cfg config.Config, client ChatClient) mockShellModel {
+	return newLiveShellModelWithClock(channel, cfg, client, nil)
+}
+
+func newLiveShellModelWithClock(channel string, cfg config.Config, client ChatClient, clock animation.Clock) mockShellModel {
+	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
+	return mockShellModel{
+		channel:       channel,
+		animationMode: string(animationConfig.Mode),
+		imageMode:     cfg.Features.ImageMode,
+		sourceDetail:  "live IRC",
+		client:        client,
+		status: ConnectionState{
+			Status:  ConnectionConnecting,
+			Channel: channel,
+			Detail:  "connecting to Twitch IRC",
+			At:      time.Now(),
+		},
 		revealQueue:    animation.NewQueue(animationConfig, clock),
 		activeMessages: make(map[string]twitch.ChatMessage),
 		width:          defaultMockWidth,
@@ -185,7 +248,7 @@ func incomingMockMessages(channel string, startedAt time.Time) []twitch.ChatMess
 }
 
 func (m mockShellModel) Init() tea.Cmd {
-	return m.nextIncomingCommand()
+	return tea.Batch(m.nextIncomingCommand(), m.nextClientMessageCommand(), m.nextConnectionStateCommand())
 }
 
 func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -240,6 +303,40 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.clampScroll()
 		return m, tea.Batch(cmds...)
+	case chatClientMessageMsg:
+		if !msg.ok {
+			m.status = ConnectionState{
+				Status:  ConnectionDisconnected,
+				Channel: m.channel,
+				Detail:  "chat message stream closed",
+				At:      time.Now(),
+			}
+			return m, nil
+		}
+		var cmds []tea.Cmd
+		if revealCmd := m.enqueueMessage(msg.message); revealCmd != nil {
+			cmds = append(cmds, revealCmd)
+		}
+		cmds = append(cmds, m.nextClientMessageCommand())
+		m.clampScroll()
+		return m, tea.Batch(cmds...)
+	case chatClientConnectionStateMsg:
+		if !msg.ok {
+			if m.status.Status != ConnectionClosed {
+				m.status = ConnectionState{
+					Status:  ConnectionDisconnected,
+					Channel: m.channel,
+					Detail:  "connection state stream closed",
+					At:      time.Now(),
+				}
+			}
+			return m, nil
+		}
+		m.status = msg.state
+		if m.status.Channel == "" {
+			m.status.Channel = m.channel
+		}
+		return m, m.nextConnectionStateCommand()
 	case mockAnimationTickMsg:
 		m.revealTickScheduled = false
 		result := m.revealQueue.Advance()
@@ -555,6 +652,28 @@ func (m mockShellModel) nextIncomingCommand() tea.Cmd {
 	})
 }
 
+func (m mockShellModel) nextClientMessageCommand() tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	messages := m.client.Messages()
+	return func() tea.Msg {
+		message, ok := <-messages
+		return chatClientMessageMsg{message: message, ok: ok}
+	}
+}
+
+func (m mockShellModel) nextConnectionStateCommand() tea.Cmd {
+	if m.client == nil {
+		return nil
+	}
+	states := m.client.ConnectionStates()
+	return func() tea.Msg {
+		state, ok := <-states
+		return chatClientConnectionStateMsg{state: state, ok: ok}
+	}
+}
+
 func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	layout := m.layout()
 	rowWidth := layout.width
@@ -651,6 +770,10 @@ func (m mockShellModel) focusName() string {
 }
 
 func (m mockShellModel) helpLines(width, height int) []string {
+	source := m.sourceDetail
+	if source == "" {
+		source = "chat source"
+	}
 	if !m.helpExpanded {
 		if width < 20 {
 			return []string{" tab | ?"}
@@ -658,13 +781,13 @@ func (m mockShellModel) helpLines(width, height int) []string {
 		if width < 38 {
 			return []string{" tab focus | ? help"}
 		}
-		return []string{" tab focus | ? help | pg scroll | q quit | ctrl+c quit | no network"}
+		return []string{" tab focus | ? help | pg scroll | q quit | ctrl+c quit | " + source}
 	}
 
 	lines := []string{
 		" tab focus: chat/composer",
 		" pgup/pgdn: scroll chat | ?: compact help",
-		" q: quit from chat | ctrl+c: quit | mock source: no network",
+		" q: quit from chat | ctrl+c: quit | " + source,
 	}
 	if width < 38 {
 		lines = []string{

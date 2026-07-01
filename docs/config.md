@@ -6,6 +6,7 @@ This document describes the configuration model for `twi`. The repo is still in 
 
 - Config loading exists for flat `key = value` files, environment variables, and selected CLI overrides.
 - `twi config show` and `twi config path` exist in the bootstrap CLI.
+- `twi chat --channel <channel>` uses `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN` for the current one-channel Twitch IRC read path.
 - Config output redacts OAuth tokens and client secrets.
 - Nested TOML tables are not implemented yet; keep bootstrap config files flat.
 
@@ -47,7 +48,7 @@ Planned variables from `PLAN.md`:
 | Variable | Secret | Purpose |
 | --- | --- | --- |
 | `TWI_TWITCH_USERNAME` | No | Twitch login for IRC auth. |
-| `TWI_TWITCH_OAUTH_TOKEN` | Yes | OAuth token for Twitch chat. |
+| `TWI_TWITCH_OAUTH_TOKEN` | Yes | Twitch IRC OAuth token with `chat:read` for live reads; later send support will require `chat:edit`. |
 | `TWI_TWITCH_CLIENT_ID` | Usually no | Twitch app client ID for Helix/API calls. |
 | `TWI_TWITCH_CLIENT_SECRET` | Yes | Client secret if a future OAuth flow needs it. |
 | `TWI_DEFAULT_CHANNELS` | No | Default channel list. |

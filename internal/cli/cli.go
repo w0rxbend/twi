@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/w0rxbend/twi/internal/app"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/twitch"
 )
 
 const usage = `twi is a terminal Twitch chat client.
@@ -34,6 +36,20 @@ Environment:
   TWI_EMOTE_MODE
   TWI_ANIMATION_MODE
 `
+
+var newLiveChatClient = func(ctx context.Context, cfg config.Config) (app.ChatClient, error) {
+	transport, err := twitch.NewIRCClient(twitch.IRCConfig{
+		Username:   cfg.Twitch.Username,
+		OAuthToken: cfg.Twitch.OAuthToken,
+		Channels:   cfg.DefaultChannels[:1],
+	})
+	if err != nil {
+		return nil, err
+	}
+	return app.NewLiveChatClient(ctx, transport, 0)
+}
+
+var runLiveChat = app.RunClient
 
 // Run executes the command line entrypoint. It returns a process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
@@ -101,13 +117,39 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "no channel configured; pass --channel or set TWI_DEFAULT_CHANNELS")
 		return 2
 	}
-	if cfg.Twitch.Username == "" || cfg.Twitch.OAuthToken == "" {
-		fmt.Fprintln(stderr, "missing Twitch credentials; set TWI_TWITCH_USERNAME and TWI_TWITCH_OAUTH_TOKEN or run `twi chat --mock`")
+	if len(cfg.DefaultChannels) > 1 {
+		fmt.Fprintln(stderr, "live Twitch chat currently supports one channel; pass one --channel")
+		return 2
+	}
+	if err := validateLiveChatConfig(cfg); err != nil {
+		fmt.Fprintln(stderr, err)
 		return 2
 	}
 
-	fmt.Fprintln(stderr, "real Twitch chat transport is planned but not implemented in this bootstrap slice")
-	return 2
+	client, err := newLiveChatClient(context.Background(), cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "start Twitch IRC chat: %v\n", err)
+		return 1
+	}
+	if err := runLiveChat(stdout, cfg, client); err != nil {
+		fmt.Fprintf(stderr, "live chat: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func validateLiveChatConfig(cfg config.Config) error {
+	var missing []string
+	if strings.TrimSpace(cfg.Twitch.Username) == "" {
+		missing = append(missing, "TWI_TWITCH_USERNAME")
+	}
+	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		missing = append(missing, "TWI_TWITCH_OAUTH_TOKEN")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing Twitch credentials: set %s for live chat, or run `twi chat --mock`; OAuth token must include chat:read", strings.Join(missing, " and "))
+	}
+	return nil
 }
 
 func runConfig(args []string, stdout, stderr io.Writer) int {

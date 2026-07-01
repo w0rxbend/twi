@@ -5,8 +5,8 @@ Status: First focused agent-loop tasks derived from `PLAN.md`.
 Progress as of the initial swarm pass:
 
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
-- Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, and module tool directives for `govulncheck`/`staticcheck`.
-- Remaining near-term work: rendering/motion checkpoint validation and the real Twitch IRC adapter.
+- Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, and the one-channel Twitch IRC read adapter.
+- Remaining near-term work: composer send queue, richer live-chat validation, and later asset/image fallbacks.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
