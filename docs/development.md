@@ -12,6 +12,8 @@ This document summarizes the development workflow and architecture for `twi`. Th
 - A CLI/config foundation exists with a deterministic non-network Bubble Tea mock shell; real Twitch dependencies are still planned.
 - The mock shell handles resize, chat/composer focus via `tab`, expanded help via `?`, page-key viewport scrolling, composer text entry, and reduced narrow-width status/help text.
 - `internal/app` owns the UI-facing chat boundary, deterministic fake chat client, and Bubble Tea mock shell; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
+- `internal/render` converts normalized messages into width-bounded rows of semantic fragments for timestamps, badges, usernames, replies, notices, actions, deleted messages, mentions, emoji fallbacks, and Twitch emote-token fallbacks.
+- `internal/theme` owns palette data and contrast correction for user-supplied foreground colors before render fragments are styled.
 
 ## Architecture Lanes
 

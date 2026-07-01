@@ -1,48 +1,770 @@
 package render
 
 import (
-	"fmt"
+	"sort"
 	"strings"
+	"time"
+	"unicode"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/rivo/uniseg"
+	"github.com/w0rxbend/twi/internal/theme"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
-func TextRow(msg twitch.ChatMessage, width int) string {
-	if width < 24 {
-		width = 24
-	}
+const (
+	defaultWidth       = 80
+	minimumRenderWidth = 8
+)
 
-	timeText := msg.Timestamp.Local().Format("15:04")
-	author := msg.DisplayName
-	if author == "" {
-		author = msg.AuthorLogin
-	}
-	if author == "" {
-		author = "unknown"
-	}
+// FragmentKind identifies the semantic role of a render fragment.
+type FragmentKind string
 
-	prefix := fmt.Sprintf("%s %-14s ", timeText, author)
-	available := width - len(prefix)
-	if available < 12 {
-		available = 12
-	}
+const (
+	FragmentTimestamp     FragmentKind = "timestamp"
+	FragmentBadge         FragmentKind = "badge"
+	FragmentUsername      FragmentKind = "username"
+	FragmentText          FragmentKind = "text"
+	FragmentMention       FragmentKind = "mention"
+	FragmentReply         FragmentKind = "reply"
+	FragmentNotice        FragmentKind = "notice"
+	FragmentAction        FragmentKind = "action"
+	FragmentDeleted       FragmentKind = "deleted"
+	FragmentEmojiFallback FragmentKind = "emoji_fallback"
+	FragmentEmoteFallback FragmentKind = "emote_fallback"
+)
 
-	text := strings.TrimSpace(msg.Text)
-	text = truncateRunes(text, available)
-	return prefix + text
+// FragmentStyle describes terminal styling that can be applied without
+// changing a fragment's layout width.
+type FragmentStyle struct {
+	Foreground    string
+	Background    string
+	Bold          bool
+	Italic        bool
+	Strikethrough bool
 }
 
-func truncateRunes(value string, limit int) string {
+// Fragment is a normalized, styled segment of a rendered chat message.
+type Fragment struct {
+	Kind  FragmentKind
+	Text  string
+	Style FragmentStyle
+	Ref   twitch.AssetRef
+}
+
+// Width returns the terminal cell width of the fragment's fallback text.
+func (f Fragment) Width() int {
+	return textWidth(f.Text)
+}
+
+// Row is a width-bounded collection of render fragments.
+type Row struct {
+	Fragments []Fragment
+}
+
+// Plain returns the row fallback text without terminal styling.
+func (r Row) Plain() string {
+	var builder strings.Builder
+	for _, fragment := range r.Fragments {
+		builder.WriteString(fragment.Text)
+	}
+	return builder.String()
+}
+
+// String returns the row with ANSI styling applied.
+func (r Row) String() string {
+	var builder strings.Builder
+	for _, fragment := range r.Fragments {
+		builder.WriteString(renderFragment(fragment))
+	}
+	return builder.String()
+}
+
+// Width returns the terminal cell width of the row fallback text.
+func (r Row) Width() int {
+	return textWidth(r.Plain())
+}
+
+// Options controls message rendering and wrapping.
+type Options struct {
+	Width   int
+	Palette theme.Palette
+}
+
+// DefaultOptions returns renderer options using the default theme palette.
+func DefaultOptions(width int) Options {
+	return Options{
+		Width:   width,
+		Palette: theme.DefaultPalette(),
+	}
+}
+
+// Rows renders a normalized Twitch chat message into width-bounded rows.
+func Rows(msg twitch.ChatMessage, opts Options) []Row {
+	if opts.Width <= 0 {
+		opts.Width = defaultWidth
+	}
+	if opts.Width < minimumRenderWidth {
+		opts.Width = minimumRenderWidth
+	}
+	if opts.Palette == (theme.Palette{}) {
+		opts.Palette = theme.DefaultPalette()
+	}
+
+	prefix := messagePrefix(msg, opts)
+	content := messageContent(msg, opts)
+	rows := wrap(prefix, content, opts.Width)
+	if len(rows) == 0 {
+		return []Row{{Fragments: prefix}}
+	}
+	return rows
+}
+
+// PlainRows renders fallback text rows for callers that do their own styling.
+func PlainRows(msg twitch.ChatMessage, width int) []string {
+	rows := Rows(msg, DefaultOptions(width))
+	plain := make([]string, 0, len(rows))
+	for _, row := range rows {
+		plain = append(plain, row.Plain())
+	}
+	return plain
+}
+
+// StringRows renders ANSI-styled rows.
+func StringRows(msg twitch.ChatMessage, width int) []string {
+	rows := Rows(msg, DefaultOptions(width))
+	rendered := make([]string, 0, len(rows))
+	for _, row := range rows {
+		rendered = append(rendered, row.String())
+	}
+	return rendered
+}
+
+// TextRow returns the first plain row for older single-row callers.
+func TextRow(msg twitch.ChatMessage, width int) string {
+	rows := PlainRows(msg, width)
+	if len(rows) == 0 {
+		return ""
+	}
+	return rows[0]
+}
+
+func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
+	foreground := opts.Palette.Foreground
+	muted := opts.Palette.Muted
+	accent := opts.Palette.Accent
+	authorColor := usernameColor(msg, opts.Palette)
+
+	author := displayAuthor(msg)
+	includeTimestamp := opts.Width >= 16
+	includeBadges := opts.Width >= 28 && len(msg.Badges) > 0
+	targetWidth := targetPrefixWidth(opts.Width)
+
+	for {
+		fixedWidth := 2
+		if msg.Type == twitch.MessageTypeAction {
+			fixedWidth = 3
+		}
+		if includeTimestamp {
+			fixedWidth += 6
+		}
+		if includeBadges {
+			for _, badge := range msg.Badges {
+				fixedWidth += textWidth(badgeLabel(badge)) + 1
+			}
+		}
+
+		maxAuthorWidth := targetWidth - fixedWidth
+		if maxAuthorWidth >= 3 || (!includeBadges && !includeTimestamp) {
+			author = truncateCells(author, maxAuthorWidth)
+			break
+		}
+		if includeBadges {
+			includeBadges = false
+			continue
+		}
+		includeTimestamp = false
+	}
+
+	var fragments []Fragment
+	if includeTimestamp {
+		fragments = append(fragments, Fragment{
+			Kind: FragmentTimestamp,
+			Text: timestampText(msg.Timestamp) + " ",
+			Style: FragmentStyle{
+				Foreground: muted,
+			},
+		})
+	}
+	if includeBadges {
+		for _, badge := range msg.Badges {
+			fragments = append(fragments, Fragment{
+				Kind: FragmentBadge,
+				Text: badgeLabel(badge) + " ",
+				Style: FragmentStyle{
+					Foreground: accent,
+					Bold:       true,
+				},
+			})
+		}
+	}
+	if msg.Type == twitch.MessageTypeAction {
+		fragments = append(fragments, Fragment{
+			Kind: FragmentAction,
+			Text: "* ",
+			Style: FragmentStyle{
+				Foreground: accent,
+				Bold:       true,
+			},
+		})
+	}
+
+	fragments = append(fragments, Fragment{
+		Kind: FragmentUsername,
+		Text: author,
+		Style: FragmentStyle{
+			Foreground: authorColor,
+			Bold:       true,
+		},
+	})
+
+	separator := ": "
+	if msg.Type == twitch.MessageTypeAction {
+		separator = " "
+	}
+	fragments = append(fragments, Fragment{
+		Kind: FragmentText,
+		Text: separator,
+		Style: FragmentStyle{
+			Foreground: foreground,
+		},
+	})
+	return fragments
+}
+
+func messageContent(msg twitch.ChatMessage, opts Options) []Fragment {
+	if msg.Deleted {
+		return []Fragment{{
+			Kind: FragmentDeleted,
+			Text: "[message deleted]",
+			Style: FragmentStyle{
+				Foreground:    opts.Palette.Muted,
+				Italic:        true,
+				Strikethrough: true,
+			},
+		}}
+	}
+
+	var fragments []Fragment
+	if msg.Reply != nil {
+		reply := "reply to " + emptyFallback(msg.Reply.ParentAuthor, "unknown")
+		if msg.Reply.ParentText != "" {
+			reply += ": " + compactWhitespace(msg.Reply.ParentText)
+		}
+		fragments = append(fragments, Fragment{
+			Kind: FragmentReply,
+			Text: reply + " ",
+			Style: FragmentStyle{
+				Foreground: opts.Palette.Muted,
+				Italic:     true,
+			},
+		})
+	}
+
+	if msg.Type == twitch.MessageTypeNotice || msg.Type == twitch.MessageTypeSystem {
+		fragments = append(fragments, Fragment{
+			Kind: FragmentNotice,
+			Text: "[notice] ",
+			Style: FragmentStyle{
+				Foreground: opts.Palette.Warning,
+				Bold:       true,
+			},
+		})
+	}
+
+	if len(msg.Fragments) > 0 {
+		fragments = append(fragments, normalizedFragments(msg.Fragments, opts)...)
+		return fragments
+	}
+	if len(msg.Emotes) > 0 {
+		fragments = append(fragments, emoteFallbackFragments(msg, opts)...)
+		return fragments
+	}
+	fragments = append(fragments, splitTextFragments(msg.Text, opts)...)
+	return fragments
+}
+
+func normalizedFragments(in []twitch.MessageFragment, opts Options) []Fragment {
+	var out []Fragment
+	for _, fragment := range in {
+		text := fragment.Text
+		if text == "" && fragment.Ref.ID != "" {
+			text = ":" + fragment.Ref.ID + ":"
+		}
+		switch fragment.Type {
+		case twitch.FragmentMention:
+			out = append(out, Fragment{
+				Kind: FragmentMention,
+				Text: text,
+				Style: FragmentStyle{
+					Foreground: opts.Palette.Accent,
+					Bold:       true,
+				},
+				Ref: fragment.Ref,
+			})
+		case twitch.FragmentEmote:
+			out = append(out, Fragment{
+				Kind: FragmentEmoteFallback,
+				Text: text,
+				Style: FragmentStyle{
+					Foreground: opts.Palette.Success,
+					Bold:       true,
+				},
+				Ref: fragment.Ref,
+			})
+		case twitch.FragmentEmoji:
+			out = append(out, Fragment{
+				Kind: FragmentEmojiFallback,
+				Text: text,
+				Style: FragmentStyle{
+					Foreground: opts.Palette.Foreground,
+				},
+				Ref: fragment.Ref,
+			})
+		case twitch.FragmentBits:
+			out = append(out, Fragment{
+				Kind: FragmentText,
+				Text: text,
+				Style: FragmentStyle{
+					Foreground: opts.Palette.Warning,
+					Bold:       true,
+				},
+				Ref: fragment.Ref,
+			})
+		default:
+			out = append(out, splitTextFragments(text, opts)...)
+		}
+	}
+	return coalesceAdjacent(out)
+}
+
+func emoteFallbackFragments(msg twitch.ChatMessage, opts Options) []Fragment {
+	textRunes := []rune(msg.Text)
+	if len(textRunes) == 0 {
+		return nil
+	}
+
+	emotes := make([]twitch.Emote, len(msg.Emotes))
+	copy(emotes, msg.Emotes)
+	sort.SliceStable(emotes, func(i, j int) bool {
+		if emotes[i].Start == emotes[j].Start {
+			return emotes[i].End < emotes[j].End
+		}
+		return emotes[i].Start < emotes[j].Start
+	})
+
+	fragments := make([]Fragment, 0, len(emotes)*2+1)
+	cursor := 0
+	for _, emote := range emotes {
+		start := emote.Start
+		end := emote.End
+		if start < cursor || start < 0 || end < start || end >= len(textRunes) {
+			continue
+		}
+		if cursor < start {
+			fragments = append(fragments, splitTextFragments(string(textRunes[cursor:start]), opts)...)
+		}
+		token := string(textRunes[start : end+1])
+		if token == "" {
+			token = emptyFallback(emote.Name, ":"+emote.ID+":")
+		}
+		fragments = append(fragments, Fragment{
+			Kind: FragmentEmoteFallback,
+			Text: token,
+			Style: FragmentStyle{
+				Foreground: opts.Palette.Success,
+				Bold:       true,
+			},
+			Ref: twitch.AssetRef{
+				Kind: "twitch_emote",
+				ID:   emote.ID,
+			},
+		})
+		cursor = end + 1
+	}
+	if cursor < len(textRunes) {
+		fragments = append(fragments, splitTextFragments(string(textRunes[cursor:]), opts)...)
+	}
+	return coalesceAdjacent(fragments)
+}
+
+func splitTextFragments(text string, opts Options) []Fragment {
+	if text == "" {
+		return nil
+	}
+
+	var fragments []Fragment
+	var textBuffer strings.Builder
+	flushText := func() {
+		if textBuffer.Len() == 0 {
+			return
+		}
+		fragments = append(fragments, Fragment{
+			Kind: FragmentText,
+			Text: textBuffer.String(),
+			Style: FragmentStyle{
+				Foreground: opts.Palette.Foreground,
+			},
+		})
+		textBuffer.Reset()
+	}
+
+	graphemes := graphemeStrings(text)
+	for i := 0; i < len(graphemes); {
+		cluster := graphemes[i]
+		if cluster == "@" && i+1 < len(graphemes) && isMentionPart(graphemes[i+1]) {
+			flushText()
+			start := i
+			i += 2
+			for i < len(graphemes) && isMentionPart(graphemes[i]) {
+				i++
+			}
+			fragments = append(fragments, Fragment{
+				Kind: FragmentMention,
+				Text: strings.Join(graphemes[start:i], ""),
+				Style: FragmentStyle{
+					Foreground: opts.Palette.Accent,
+					Bold:       true,
+				},
+			})
+			continue
+		}
+		if isEmojiCluster(cluster) {
+			flushText()
+			fragments = append(fragments, Fragment{
+				Kind: FragmentEmojiFallback,
+				Text: cluster,
+				Style: FragmentStyle{
+					Foreground: opts.Palette.Foreground,
+				},
+			})
+			i++
+			continue
+		}
+		textBuffer.WriteString(cluster)
+		i++
+	}
+	flushText()
+	return coalesceAdjacent(fragments)
+}
+
+func wrap(prefix, content []Fragment, width int) []Row {
+	if width <= 0 {
+		return nil
+	}
+
+	prefix = fitFragments(prefix, width)
+	prefixWidth := fragmentsWidth(prefix)
+	indentWidth := prefixWidth
+	if indentWidth >= width {
+		indentWidth = width / 2
+	}
+
+	current := Row{Fragments: cloneFragments(prefix)}
+	used := prefixWidth
+	rows := make([]Row, 0, 2)
+	for _, fragment := range content {
+		if isAtomicFragment(fragment) {
+			fragmentWidth := fragment.Width()
+			if fragmentWidth == 0 {
+				continue
+			}
+			if used+fragmentWidth > width && used > indentWidth {
+				rows = append(rows, current)
+				current = continuationRow(indentWidth)
+				used = indentWidth
+			}
+			if used+fragmentWidth > width && used == indentWidth && used > 0 && fragmentWidth <= width {
+				current = Row{}
+				used = 0
+			}
+			if used+fragmentWidth <= width {
+				appendFragment(&current, fragment)
+				used += fragmentWidth
+				continue
+			}
+		}
+
+		for _, cluster := range graphemeStrings(fragment.Text) {
+			if cluster == "\n" {
+				rows = append(rows, current)
+				current = continuationRow(indentWidth)
+				used = indentWidth
+				continue
+			}
+
+			clusterWidth := textWidth(cluster)
+			if used+clusterWidth > width && used > indentWidth {
+				rows = append(rows, current)
+				current = continuationRow(indentWidth)
+				used = indentWidth
+				if strings.TrimSpace(cluster) == "" {
+					continue
+				}
+			}
+			if used+clusterWidth > width && used == indentWidth && used > 0 {
+				rows = append(rows, current)
+				current = continuationRow(0)
+				used = 0
+			}
+
+			next := fragment
+			next.Text = cluster
+			appendFragment(&current, next)
+			used += clusterWidth
+		}
+	}
+	rows = append(rows, current)
+	return rows
+}
+
+func isAtomicFragment(fragment Fragment) bool {
+	switch fragment.Kind {
+	case FragmentMention, FragmentEmojiFallback, FragmentEmoteFallback:
+		return true
+	default:
+		return false
+	}
+}
+
+func continuationRow(indentWidth int) Row {
+	if indentWidth <= 0 {
+		return Row{}
+	}
+	return Row{Fragments: []Fragment{{
+		Kind: FragmentText,
+		Text: strings.Repeat(" ", indentWidth),
+	}}}
+}
+
+func appendFragment(row *Row, fragment Fragment) {
+	if fragment.Text == "" {
+		return
+	}
+	lastIndex := len(row.Fragments) - 1
+	if lastIndex >= 0 && sameFragmentStyle(row.Fragments[lastIndex], fragment) {
+		row.Fragments[lastIndex].Text += fragment.Text
+		return
+	}
+	row.Fragments = append(row.Fragments, fragment)
+}
+
+func coalesceAdjacent(in []Fragment) []Fragment {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Fragment, 0, len(in))
+	for _, fragment := range in {
+		row := Row{Fragments: out}
+		appendFragment(&row, fragment)
+		out = row.Fragments
+	}
+	return out
+}
+
+func sameFragmentStyle(a, b Fragment) bool {
+	return a.Kind == b.Kind &&
+		a.Style == b.Style &&
+		a.Ref == b.Ref
+}
+
+func renderFragment(fragment Fragment) string {
+	style := lipgloss.NewStyle()
+	if fragment.Style.Foreground != "" {
+		style = style.Foreground(lipgloss.Color(fragment.Style.Foreground))
+	}
+	if fragment.Style.Background != "" {
+		style = style.Background(lipgloss.Color(fragment.Style.Background))
+	}
+	if fragment.Style.Bold {
+		style = style.Bold(true)
+	}
+	if fragment.Style.Italic {
+		style = style.Italic(true)
+	}
+	if fragment.Style.Strikethrough {
+		style = style.Strikethrough(true)
+	}
+	return style.Render(fragment.Text)
+}
+
+func usernameColor(msg twitch.ChatMessage, palette theme.Palette) string {
+	if msg.AuthorColor == "" {
+		return palette.Accent
+	}
+	return theme.ContrastCorrectedForeground(msg.AuthorColor, palette.Background, palette.Foreground)
+}
+
+func displayAuthor(msg twitch.ChatMessage) string {
+	if msg.DisplayName != "" {
+		return msg.DisplayName
+	}
+	if msg.AuthorLogin != "" {
+		return msg.AuthorLogin
+	}
+	if msg.Type == twitch.MessageTypeNotice {
+		return "notice"
+	}
+	if msg.Type == twitch.MessageTypeSystem {
+		return "system"
+	}
+	return "unknown"
+}
+
+func timestampText(timestamp time.Time) string {
+	if timestamp.IsZero() {
+		return "--:--"
+	}
+	return timestamp.Local().Format("15:04")
+}
+
+func badgeLabel(badge twitch.Badge) string {
+	name := emptyFallback(badge.SetID, "badge")
+	if badge.ID != "" && badge.ID != "1" {
+		name += "/" + badge.ID
+	}
+	return "[" + name + "]"
+}
+
+func targetPrefixWidth(width int) int {
+	switch {
+	case width < 16:
+		return maxInt(4, width/2)
+	case width < 32:
+		return maxInt(8, width-10)
+	case width < 56:
+		return maxInt(16, width/2)
+	default:
+		return 32
+	}
+}
+
+func fitFragments(fragments []Fragment, width int) []Fragment {
+	if width <= 0 {
+		return nil
+	}
+	out := make([]Fragment, 0, len(fragments))
+	used := 0
+	for _, fragment := range fragments {
+		remaining := width - used
+		if remaining <= 0 {
+			break
+		}
+		next := fragment
+		next.Text = truncateCells(fragment.Text, remaining)
+		if next.Text == "" {
+			continue
+		}
+		if len(out) > 0 && sameFragmentStyle(out[len(out)-1], next) {
+			out[len(out)-1].Text += next.Text
+		} else {
+			out = append(out, next)
+		}
+		used += textWidth(next.Text)
+	}
+	return out
+}
+
+func truncateCells(value string, limit int) string {
 	if limit <= 0 {
 		return ""
 	}
-
-	runes := []rune(value)
-	if len(runes) <= limit {
+	if textWidth(value) <= limit {
 		return value
 	}
 	if limit <= 3 {
-		return string(runes[:limit])
+		return takeCells(value, limit)
 	}
-	return string(runes[:limit-3]) + "..."
+	return takeCells(value, limit-3) + "..."
+}
+
+func takeCells(value string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	var builder strings.Builder
+	used := 0
+	for _, cluster := range graphemeStrings(value) {
+		width := textWidth(cluster)
+		if used+width > limit {
+			break
+		}
+		builder.WriteString(cluster)
+		used += width
+	}
+	return builder.String()
+}
+
+func graphemeStrings(value string) []string {
+	graphemes := uniseg.NewGraphemes(value)
+	out := make([]string, 0, len(value))
+	for graphemes.Next() {
+		out = append(out, graphemes.Str())
+	}
+	return out
+}
+
+func fragmentsWidth(fragments []Fragment) int {
+	width := 0
+	for _, fragment := range fragments {
+		width += fragment.Width()
+	}
+	return width
+}
+
+func textWidth(value string) int {
+	return uniseg.StringWidth(value)
+}
+
+func isMentionPart(cluster string) bool {
+	for _, r := range cluster {
+		return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+	}
+	return false
+}
+
+func isEmojiCluster(cluster string) bool {
+	for _, r := range cluster {
+		switch {
+		case r >= 0x1F000 && r <= 0x1FAFF:
+			return true
+		case r >= 0x2600 && r <= 0x27BF:
+			return true
+		}
+	}
+	return false
+}
+
+func emptyFallback(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func compactWhitespace(value string) string {
+	return strings.Join(strings.Fields(value), " ")
+}
+
+func cloneFragments(in []Fragment) []Fragment {
+	out := make([]Fragment, len(in))
+	copy(out, in)
+	return out
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

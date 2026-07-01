@@ -224,16 +224,7 @@ func (m mockShellModel) statusLine(width int) string {
 }
 
 func (m mockShellModel) chatView(layout mockShellLayout) string {
-	rowWidth := layout.width
-	if layout.chatFramed {
-		rowWidth = layout.width - 4
-	}
-	rowWidth = clampMin(rowWidth, 1)
-
-	rows := make([]string, 0, len(m.messages))
-	for _, msg := range m.messages {
-		rows = append(rows, fitLine(render.TextRow(msg, rowWidth), rowWidth))
-	}
+	rows := m.chatRows(layout)
 	rows = visibleRows(rows, layout.chatContentHeight, m.scrollOffset)
 
 	if len(rows) < layout.chatContentHeight {
@@ -258,6 +249,22 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 		BorderForeground(borderColor).
 		Padding(0, 1).
 		Render(content)
+}
+
+func (m mockShellModel) chatRows(layout mockShellLayout) []string {
+	rowWidth := layout.width
+	if layout.chatFramed {
+		rowWidth = layout.width - 4
+	}
+	rowWidth = clampMin(rowWidth, 1)
+
+	rows := make([]string, 0, len(m.messages))
+	for _, msg := range m.messages {
+		for _, row := range render.PlainRows(msg, rowWidth) {
+			rows = append(rows, fitLine(row, rowWidth))
+		}
+	}
+	return rows
 }
 
 func (m mockShellModel) composerView(layout mockShellLayout) string {
@@ -444,11 +451,13 @@ func (m *mockShellModel) clampScroll() {
 }
 
 func (m mockShellModel) maxScrollOffset() int {
-	visible := m.layout().chatContentHeight
-	if visible <= 0 || len(m.messages) <= visible {
+	layout := m.layout()
+	visible := layout.chatContentHeight
+	rows := m.chatRows(layout)
+	if visible <= 0 || len(rows) <= visible {
 		return 0
 	}
-	return len(m.messages) - visible
+	return len(rows) - visible
 }
 
 func (m *mockShellModel) deleteComposerRune() {
