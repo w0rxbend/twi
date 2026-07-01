@@ -51,6 +51,10 @@ var newLiveChatClient = func(ctx context.Context, cfg config.Config) (app.ChatCl
 
 var runLiveChat = app.RunClient
 
+var buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) app.DoctorReport {
+	return app.DoctorWithOptions(ctx, cfg, app.DoctorOptions{ConfigLoadError: cfgErr})
+}
+
 // Run executes the command line entrypoint. It returns a process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -197,19 +201,21 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
-	if err != nil {
-		fmt.Fprintf(stderr, "load config: %v\n", err)
-		return 1
+	environ := os.Environ()
+	overrides := config.Overrides{ConfigPath: cfgPath}
+	cfg, loadErr := config.Load(environ, overrides)
+	if loadErr != nil {
+		fallback, err := config.LoadEnvOnly(environ, overrides)
+		if err != nil {
+			fmt.Fprintf(stderr, "load config: %v\n", err)
+			return 1
+		}
+		cfg = fallback
 	}
 
-	report := app.Doctor(cfg)
+	report := buildDoctorReport(context.Background(), cfg, loadErr)
 	for _, check := range report.Checks {
-		status := "ok"
-		if !check.OK {
-			status = "warn"
-		}
-		fmt.Fprintf(stdout, "[%s] %s: %s\n", status, check.Name, check.Detail)
+		fmt.Fprintf(stdout, "[%s] %s: %s\n", check.Status, check.Name, check.Detail)
 	}
 	return 0
 }

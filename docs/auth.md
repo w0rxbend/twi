@@ -50,9 +50,27 @@ Future token storage should prefer:
 
 Refresh tokens should be used when available and appropriate for the selected OAuth flow.
 
-## Startup Checks
+## Startup And Doctor Checks
 
-When auth validation is implemented, startup and `twi doctor` should check:
+Startup currently checks that username and OAuth token are present before opening
+live IRC chat. `twi doctor` reports credential presence without printing raw
+credential values.
+
+Current `twi doctor` behavior:
+
+- Reports Twitch username, OAuth token, client ID, and client secret as
+  `present` or `missing`.
+- Reports missing username or OAuth token as warnings because mock mode and
+  non-network diagnostics can still run.
+- Reports token validation as `not available` when an OAuth token is present but
+  no token validation client is wired in yet.
+- Names the required IRC scopes, `chat:read` and `chat:edit`, when scope
+  validation is unavailable or fails.
+- Redacts OAuth tokens and client secrets from diagnostic details and validation
+  errors.
+
+When richer auth validation is implemented, startup and `twi doctor` should also
+check:
 
 - A token is present when real Twitch chat is requested.
 - The token is valid.

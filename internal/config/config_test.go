@@ -62,3 +62,22 @@ func TestRedactedStringDoesNotLeakSecrets(t *testing.T) {
 		t.Fatalf("redacted output = %q, want two redactions", output)
 	}
 }
+
+func TestLoadEnvOnlySkipsConfigFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad.toml")
+	if err := os.WriteFile(path, []byte("not a key value line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadEnvOnly([]string{"TWI_TWITCH_USERNAME=env_user"}, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Path != path {
+		t.Fatalf("path = %q, want %q", cfg.Path, path)
+	}
+	if cfg.Twitch.Username != "env_user" {
+		t.Fatalf("username = %q, want env_user", cfg.Twitch.Username)
+	}
+}

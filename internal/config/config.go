@@ -69,6 +69,27 @@ func Load(environ []string, overrides Overrides) (Config, error) {
 	return cfg, nil
 }
 
+func LoadEnvOnly(environ []string, overrides Overrides) (Config, error) {
+	cfg := Default()
+
+	path := overrides.ConfigPath
+	if path == "" {
+		defaultPath, err := DefaultPath()
+		if err != nil {
+			return Config{}, err
+		}
+		path = defaultPath
+	}
+	cfg.Path = path
+
+	applyEnv(&cfg, environ)
+	if len(overrides.Channels) > 0 {
+		cfg.DefaultChannels = normalizeChannels(overrides.Channels)
+	}
+
+	return cfg, nil
+}
+
 func Default() Config {
 	return Config{
 		Features: FeatureConfig{
@@ -88,6 +109,14 @@ func DefaultPath() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "twi", "config.toml"), nil
+}
+
+func DefaultCacheDir() (string, error) {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "twi"), nil
 }
 
 func (c Config) RedactedString() string {

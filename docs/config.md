@@ -8,6 +8,10 @@ This document describes the configuration model for `twi`. The repo is still in 
 - `twi config show` and `twi config path` exist in the bootstrap CLI.
 - `twi chat --channel <channel>` uses `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN` for the current one-channel Twitch IRC read path.
 - Config output redacts OAuth tokens and client secrets.
+- `twi doctor` reports the effective config file path, credential presence,
+  selected feature modes, Twitch IRC reachability, terminal hints, Kitty graphics
+  signals, and cache directory writability without printing token or client
+  secret values.
 - Nested TOML tables are not implemented yet; keep bootstrap config files flat.
 
 ## Precedence
@@ -139,6 +143,32 @@ twitch_client_secret = "[redacted]"
 
 It should not print token prefixes, token suffixes, or raw client secrets.
 
+## Doctor Output
+
+`twi doctor` prints one `[ok]` or `[warn]` line per diagnostic. Warnings do not
+make the command fail; they identify missing credentials, missing config files,
+unknown terminal capabilities, unavailable Kitty graphics signals, missing token
+validation, or other degraded optional behavior.
+
+The current diagnostics include:
+
+- Config file path existence/readability.
+- Twitch username, OAuth token, client ID, and client secret presence.
+- Channel count, with a warning when no channel or multiple live IRC channels
+  are configured.
+- Token validation status. Until a validator is wired in, a present token is
+  reported as present but scopes are reported as not verified.
+- Twitch IRC reachability to `irc.chat.twitch.tv:6697`.
+- Terminal, true-color/256-color, and mouse capability hints from environment
+  variables.
+- Kitty/Ghostty graphics signals and the active image fallback state.
+- Cache directory writability using a single fixed-content probe file that is
+  removed immediately.
+- Selected image, avatar, emoji, emote, Kitty, and animation modes.
+
+Secrets are never included in doctor details. OAuth tokens and client secrets
+are redacted from validation and probe errors before output is formatted.
+
 ## MVP vs Future Behavior
 
 MVP target:
@@ -148,6 +178,8 @@ MVP target:
 - Load animation mode.
 - Load basic image fallback settings.
 - Redact secrets in all config output.
+- Report effective diagnostics through `twi doctor` without requiring
+  credentials.
 
 Future target:
 
@@ -155,4 +187,4 @@ Future target:
 - Secure token storage.
 - Full terminal image mode controls.
 - Cache sizing and pruning configuration.
-- Doctor output that explains effective config and degraded states.
+- Token identity, expiry, and scope validation through a Twitch API client.

@@ -69,7 +69,10 @@ The app should detect terminal image capability before enabling image rendering.
 - Cache directory writability.
 - Config and environment image mode settings.
 
-`twi doctor` should eventually report the detected image capability and active fallback mode.
+`twi doctor` now reports terminal color hints, Kitty/Ghostty environment
+signals, cache directory writability, and the selected image/avatar/emoji/emote
+modes. These are diagnostic hints only; inline image rendering is still behind
+future asset and terminal-renderer work.
 
 ## Configuration
 
@@ -121,12 +124,15 @@ Cache behavior should:
 
 ## Troubleshooting Targets
 
-`twi doctor` should eventually distinguish:
+`twi doctor` currently distinguishes:
 
-- Kitty graphics supported.
-- Kitty graphics unavailable.
+- Kitty/Ghostty graphics signals detected from environment hints.
+- Kitty graphics unavailable or unknown, with text fallbacks active.
 - Image mode disabled by config.
-- Cache directory not writable.
+- Cache directory writable or not writable.
+
+Future diagnostics should also distinguish:
+
 - Asset download failed.
 - Helix metadata lookup failed.
 - Image render failed but fallback is active.

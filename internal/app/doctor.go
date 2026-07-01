@@ -1,10 +1,28 @@
 package app
 
 import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
 	"os"
+	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
 
 	"github.com/w0rxbend/twi/internal/config"
 )
+
+const (
+	DoctorStatusOK   DoctorStatus = "ok"
+	DoctorStatusWarn DoctorStatus = "warn"
+)
+
+var oauthPattern = regexp.MustCompile(`(?i)oauth:[^\s]+`)
+
+type DoctorStatus string
 
 type DoctorReport struct {
 	Checks []DoctorCheck
@@ -12,40 +30,337 @@ type DoctorReport struct {
 
 type DoctorCheck struct {
 	Name   string
-	OK     bool
+	Status DoctorStatus
 	Detail string
 }
 
-func Doctor(cfg config.Config) DoctorReport {
+type DoctorOptions struct {
+	Environ           []string
+	CacheDir          string
+	ConfigLoadError   error
+	ReachabilityProbe ReachabilityProbe
+	TokenValidator    TokenValidator
+}
+
+type ReachabilityProbe func(context.Context) error
+
+type TokenValidator func(context.Context, config.TwitchConfig) (TokenValidation, error)
+
+type TokenValidation struct {
+	Valid  bool
+	Scopes []string
+	Detail string
+}
+
+func Doctor(ctx context.Context, cfg config.Config) DoctorReport {
+	return DoctorWithOptions(ctx, cfg, DoctorOptions{
+		Environ:           os.Environ(),
+		ReachabilityProbe: ProbeTwitchIRCReachability,
+	})
+}
+
+func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOptions) DoctorReport {
+	if opts.Environ == nil {
+		opts.Environ = os.Environ()
+	}
+	if opts.ReachabilityProbe == nil {
+		opts.ReachabilityProbe = ProbeTwitchIRCReachability
+	}
+
 	checks := []DoctorCheck{
-		{Name: "config path", OK: cfg.Path != "", Detail: cfg.Path},
-		{Name: "username", OK: cfg.Twitch.Username != "", Detail: present(cfg.Twitch.Username)},
-		{Name: "oauth token", OK: cfg.Twitch.OAuthToken != "", Detail: present(cfg.Twitch.OAuthToken)},
-		{Name: "channels", OK: len(cfg.DefaultChannels) > 0, Detail: channelDetail(cfg.DefaultChannels)},
-		{Name: "terminal", OK: os.Getenv("TERM") != "", Detail: envDetail("TERM")},
-		{Name: "kitty images", OK: cfg.Features.EnableKittyImages, Detail: cfg.Features.ImageMode},
-		{Name: "animation", OK: cfg.Features.AnimationMode != "off", Detail: cfg.Features.AnimationMode},
+		configPathCheck(cfg.Path, opts.ConfigLoadError),
+		credentialCheck("twitch username", cfg.Twitch.Username, "live chat unavailable until TWI_TWITCH_USERNAME is set"),
+		credentialCheck("oauth token", cfg.Twitch.OAuthToken, "live chat unavailable until TWI_TWITCH_OAUTH_TOKEN is set"),
+		credentialCheck("client id", cfg.Twitch.ClientID, "optional Helix/API features unavailable"),
+		credentialCheck("client secret", cfg.Twitch.ClientSecret, "optional OAuth client-secret flow unavailable"),
+		channelsCheck(cfg.DefaultChannels),
+		tokenValidationCheck(ctx, cfg, opts.TokenValidator),
+		reachabilityCheck(ctx, opts.ReachabilityProbe),
+		terminalCheck(opts.Environ),
+		colorCheck(opts.Environ),
+		mouseCheck(opts.Environ),
+		kittyGraphicsCheck(cfg, opts.Environ),
+		cacheCheck(opts.CacheDir),
+		featureModesCheck(cfg.Features),
+	}
+
+	for i := range checks {
+		checks[i].Detail = redactSensitive(checks[i].Detail, cfg)
 	}
 	return DoctorReport{Checks: checks}
 }
 
-func present(value string) string {
-	if value == "" {
-		return "missing"
+func ProbeTwitchIRCReachability(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+	defer cancel()
+
+	dialer := net.Dialer{Timeout: 800 * time.Millisecond}
+	conn, err := dialer.DialContext(ctx, "tcp", "irc.chat.twitch.tv:6697")
+	if err != nil {
+		return err
 	}
-	return "present"
+	return conn.Close()
 }
 
-func envDetail(key string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+func configPathCheck(path string, loadErr error) DoctorCheck {
+	if strings.TrimSpace(path) == "" {
+		return warnCheck("config file", "path unavailable")
 	}
-	return "missing"
+	if loadErr != nil {
+		return warnCheck("config file", fmt.Sprintf("%s (load failed: %v; using env/defaults)", path, loadErr))
+	}
+	info, err := os.Stat(path)
+	switch {
+	case err == nil && !info.IsDir():
+		file, err := os.Open(path)
+		if err != nil {
+			return warnCheck("config file", fmt.Sprintf("%s (not readable: %v)", path, err))
+		}
+		if err := file.Close(); err != nil {
+			return warnCheck("config file", fmt.Sprintf("%s (close failed: %v)", path, err))
+		}
+		return okCheck("config file", fmt.Sprintf("%s (readable)", path))
+	case err == nil && info.IsDir():
+		return warnCheck("config file", fmt.Sprintf("%s is a directory", path))
+	case errors.Is(err, os.ErrNotExist):
+		return warnCheck("config file", fmt.Sprintf("%s (not found; using env/defaults)", path))
+	default:
+		return warnCheck("config file", fmt.Sprintf("%s (%v)", path, err))
+	}
 }
 
-func channelDetail(channels []string) string {
-	if len(channels) == 0 {
-		return "none configured"
+func credentialCheck(name, value, missingDetail string) DoctorCheck {
+	if strings.TrimSpace(value) == "" {
+		return warnCheck(name, "missing; "+missingDetail)
 	}
-	return channels[0]
+	return okCheck(name, "present")
+}
+
+func channelsCheck(channels []string) DoctorCheck {
+	switch len(channels) {
+	case 0:
+		return warnCheck("channels", "none configured; pass --channel or set TWI_DEFAULT_CHANNELS")
+	case 1:
+		return okCheck("channels", "one configured")
+	default:
+		return warnCheck("channels", fmt.Sprintf("%d configured; live IRC currently supports one", len(channels)))
+	}
+}
+
+func tokenValidationCheck(ctx context.Context, cfg config.Config, validator TokenValidator) DoctorCheck {
+	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return warnCheck("token validation", "skipped; OAuth token missing")
+	}
+	if validator == nil {
+		return warnCheck("token validation", "not available; required scopes chat:read and chat:edit were not verified")
+	}
+
+	validation, err := validator(ctx, cfg.Twitch)
+	if err != nil {
+		return warnCheck("token validation", fmt.Sprintf("failed: %v", err))
+	}
+	missing := missingScopes(validation.Scopes, []string{"chat:read", "chat:edit"})
+	if !validation.Valid {
+		detail := strings.TrimSpace(validation.Detail)
+		if detail == "" {
+			detail = "token reported invalid"
+		}
+		return warnCheck("token validation", detail)
+	}
+	if len(missing) > 0 {
+		return warnCheck("token validation", "missing required scopes: "+strings.Join(missing, ", "))
+	}
+	return okCheck("token validation", "valid with required scopes chat:read and chat:edit")
+}
+
+func reachabilityCheck(ctx context.Context, probe ReachabilityProbe) DoctorCheck {
+	if probe == nil {
+		return warnCheck("twitch reachability", "not checked")
+	}
+	if err := probe(ctx); err != nil {
+		return warnCheck("twitch reachability", fmt.Sprintf("irc.chat.twitch.tv:6697 unreachable: %v", err))
+	}
+	return okCheck("twitch reachability", "irc.chat.twitch.tv:6697 reachable")
+}
+
+func terminalCheck(environ []string) DoctorCheck {
+	term := envMap(environ)["TERM"]
+	switch {
+	case term == "":
+		return warnCheck("terminal", "TERM missing; terminal capability detection is limited")
+	case term == "dumb":
+		return warnCheck("terminal", "TERM=dumb; rich TUI features may be unavailable")
+	default:
+		return okCheck("terminal", "TERM="+term)
+	}
+}
+
+func colorCheck(environ []string) DoctorCheck {
+	env := envMap(environ)
+	term := env["TERM"]
+	colorTerm := strings.ToLower(env["COLORTERM"])
+	switch {
+	case strings.Contains(colorTerm, "truecolor"), strings.Contains(colorTerm, "24bit"):
+		return okCheck("terminal color", "true-color signal via COLORTERM")
+	case strings.Contains(term, "truecolor"), strings.Contains(term, "24bit"), strings.Contains(term, "direct"):
+		return okCheck("terminal color", "true-color signal via TERM")
+	case strings.Contains(term, "256color"):
+		return okCheck("terminal color", "256-color signal via TERM")
+	default:
+		return warnCheck("terminal color", "no true-color or 256-color signal; colors will use conservative fallbacks")
+	}
+}
+
+func mouseCheck(environ []string) DoctorCheck {
+	term := envMap(environ)["TERM"]
+	if term == "" || term == "dumb" {
+		return warnCheck("terminal mouse", "mouse support unknown; keyboard controls remain primary")
+	}
+	return okCheck("terminal mouse", "terminal advertises interactive capabilities; mouse behavior remains optional")
+}
+
+func kittyGraphicsCheck(cfg config.Config, environ []string) DoctorCheck {
+	if !cfg.Features.EnableKittyImages || modeDisabled(cfg.Features.ImageMode) {
+		return okCheck("kitty graphics", "disabled by config; text fallbacks active")
+	}
+	env := envMap(environ)
+	switch {
+	case env["KITTY_WINDOW_ID"] != "":
+		return okCheck("kitty graphics", "Kitty signal detected via KITTY_WINDOW_ID")
+	case strings.Contains(env["TERM"], "xterm-kitty"):
+		return okCheck("kitty graphics", "Kitty signal detected via TERM")
+	case strings.EqualFold(env["TERM_PROGRAM"], "ghostty"):
+		return okCheck("kitty graphics", "Kitty-compatible signal detected via TERM_PROGRAM=ghostty")
+	default:
+		return warnCheck("kitty graphics", "no Kitty/Ghostty signal detected; image fallbacks active")
+	}
+}
+
+func cacheCheck(cacheDir string) DoctorCheck {
+	if strings.TrimSpace(cacheDir) == "" {
+		defaultDir, err := config.DefaultCacheDir()
+		if err != nil {
+			return warnCheck("cache directory", fmt.Sprintf("path unavailable: %v", err))
+		}
+		cacheDir = defaultDir
+	}
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		return warnCheck("cache directory", fmt.Sprintf("%s not writable: %v", cacheDir, err))
+	}
+
+	probePath := filepath.Join(cacheDir, ".twi-doctor-write-test")
+	file, err := os.OpenFile(probePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		probePath = filepath.Join(cacheDir, fmt.Sprintf(".twi-doctor-write-test-%d", os.Getpid()))
+		file, err = os.OpenFile(probePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	}
+	if err != nil {
+		return warnCheck("cache directory", fmt.Sprintf("%s not writable: %v", cacheDir, err))
+	}
+	if _, err := file.Write([]byte("ok\n")); err != nil {
+		_ = file.Close()
+		_ = os.Remove(probePath)
+		return warnCheck("cache directory", fmt.Sprintf("%s not writable: %v", cacheDir, err))
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(probePath)
+		return warnCheck("cache directory", fmt.Sprintf("%s writable, but probe close failed: %v", cacheDir, err))
+	}
+	if err := os.Remove(probePath); err != nil {
+		return warnCheck("cache directory", fmt.Sprintf("%s writable, but cleanup failed: %v", cacheDir, err))
+	}
+	return okCheck("cache directory", cacheDir+" writable")
+}
+
+func featureModesCheck(features config.FeatureConfig) DoctorCheck {
+	detail := fmt.Sprintf(
+		"image=%s avatar=%s emoji=%s emote=%s animation=%s kitty=%t",
+		features.ImageMode,
+		features.AvatarMode,
+		features.EmojiMode,
+		features.EmoteMode,
+		features.AnimationMode,
+		features.EnableKittyImages,
+	)
+	if unknown := unknownFeatureModes(features); len(unknown) > 0 {
+		return warnCheck("feature modes", detail+"; unknown: "+strings.Join(unknown, ", "))
+	}
+	return okCheck("feature modes", detail)
+}
+
+func unknownFeatureModes(features config.FeatureConfig) []string {
+	var unknown []string
+	if !oneOf(features.ImageMode, "auto", "off", "small", "normal", "large") {
+		unknown = append(unknown, "image="+features.ImageMode)
+	}
+	if !oneOf(features.AvatarMode, "off", "initials", "image") {
+		unknown = append(unknown, "avatar="+features.AvatarMode)
+	}
+	if !oneOf(features.EmojiMode, "unicode", "image") {
+		unknown = append(unknown, "emoji="+features.EmojiMode)
+	}
+	if !oneOf(features.EmoteMode, "text", "image") {
+		unknown = append(unknown, "emote="+features.EmoteMode)
+	}
+	if !oneOf(features.AnimationMode, "off", "reduced", "fast", "expressive") {
+		unknown = append(unknown, "animation="+features.AnimationMode)
+	}
+	return unknown
+}
+
+func missingScopes(got, required []string) []string {
+	have := make(map[string]bool, len(got))
+	for _, scope := range got {
+		have[scope] = true
+	}
+	var missing []string
+	for _, scope := range required {
+		if !have[scope] {
+			missing = append(missing, scope)
+		}
+	}
+	return missing
+}
+
+func redactSensitive(detail string, cfg config.Config) string {
+	detail = oauthPattern.ReplaceAllString(detail, "[redacted]")
+	for _, secret := range sensitiveValues(cfg) {
+		secret = strings.TrimSpace(secret)
+		if secret != "" {
+			detail = strings.ReplaceAll(detail, secret, "[redacted]")
+		}
+	}
+	return detail
+}
+
+func sensitiveValues(cfg config.Config) []string {
+	values := []string{cfg.Twitch.OAuthToken, cfg.Twitch.ClientSecret}
+	token := strings.TrimSpace(cfg.Twitch.OAuthToken)
+	if prefix, body, ok := strings.Cut(token, ":"); ok && strings.EqualFold(prefix, "oauth") {
+		values = append(values, body)
+	}
+	return values
+}
+
+func envMap(environ []string) map[string]string {
+	env := make(map[string]string, len(environ))
+	for _, entry := range environ {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			env[key] = value
+		}
+	}
+	return env
+}
+
+func oneOf(value string, allowed ...string) bool {
+	return slices.Contains(allowed, value)
+}
+
+func okCheck(name, detail string) DoctorCheck {
+	return DoctorCheck{Name: name, Status: DoctorStatusOK, Detail: detail}
+}
+
+func warnCheck(name, detail string) DoctorCheck {
+	return DoctorCheck{Name: name, Status: DoctorStatusWarn, Detail: detail}
 }

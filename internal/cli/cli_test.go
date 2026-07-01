@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
@@ -121,12 +122,82 @@ func TestConfigShowRedactsSecrets(t *testing.T) {
 
 func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+
+	oldBuildDoctorReport := buildDoctorReport
+	defer func() {
+		buildDoctorReport = oldBuildDoctorReport
+	}()
+	buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) app.DoctorReport {
+		return app.DoctorWithOptions(ctx, cfg, app.DoctorOptions{
+			Environ:         []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
+			CacheDir:        t.TempDir(),
+			ConfigLoadError: cfgErr,
+			ReachabilityProbe: func(context.Context) error {
+				return nil
+			},
+		})
+	}
 
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"[warn] config file:", "[ok] oauth token: present", "[warn] token validation:"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("doctor output missing %q: %s", want, stdout.String())
+		}
+	}
+	for _, secret := range []string{"oauth:secret", "client-secret"} {
+		if strings.Contains(stdout.String(), secret) {
+			t.Fatalf("doctor output leaked %q: %s", secret, stdout.String())
+		}
+	}
+}
+
+func TestDoctorReportsConfigLoadErrorAndUsesEnvFallback(t *testing.T) {
+	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret")
+
+	dir := t.TempDir()
+	path := dir + "/bad.toml"
+	if err := os.WriteFile(path, []byte("not a key value line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldBuildDoctorReport := buildDoctorReport
+	defer func() {
+		buildDoctorReport = oldBuildDoctorReport
+	}()
+	buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) app.DoctorReport {
+		if cfgErr == nil {
+			t.Fatal("doctor report builder received nil config error, want parse error")
+		}
+		if cfg.Twitch.Username != "viewer" || cfg.Twitch.OAuthToken != "oauth:secret" {
+			t.Fatalf("fallback credentials = (%q, %q), want env values", cfg.Twitch.Username, cfg.Twitch.OAuthToken)
+		}
+		return app.DoctorWithOptions(ctx, cfg, app.DoctorOptions{
+			Environ:         []string{"TERM=xterm-256color"},
+			CacheDir:        t.TempDir(),
+			ConfigLoadError: cfgErr,
+			ReachabilityProbe: func(context.Context) error {
+				return nil
+			},
+		})
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"doctor", "--config", path}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"[warn] config file:", "load failed", "[ok] oauth token: present"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("doctor output missing %q: %s", want, stdout.String())
+		}
 	}
 	if strings.Contains(stdout.String(), "oauth:secret") {
 		t.Fatalf("doctor output leaked token: %s", stdout.String())
