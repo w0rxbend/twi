@@ -6,7 +6,7 @@ Progress as of the initial swarm pass:
 
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, and module tool directives for `govulncheck`/`staticcheck`.
-- Remaining near-term work: resize/focus controls, deterministic animation scheduler, and real Twitch IRC adapter.
+- Remaining near-term work: render fragments, deterministic animation scheduler, and real Twitch IRC adapter.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
