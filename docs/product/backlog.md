@@ -148,7 +148,7 @@ Owner lane: Asset/image engineer.
 Goal: Prepare avatars, emotes, emoji, and badges without blocking MVP.
 Context: Image rendering is core later scope, but MVP must define fallback contracts early.
 Files likely touched: `internal/assets`, `internal/storage`, `internal/render`.
-Implementation notes: Define asset references, cache interface, image renderer interface, and no-image fallback behavior. Do not download assets in `View`.
+Implementation notes: Completed in T015 with renderer placeholder widths, context-aware storage cache contracts, and no-image fallback snapshots. Real downloads and terminal image drawing remain future work. Do not download assets in `View`.
 Acceptance criteria: Renderer can request asset placeholders and render fallbacks when assets are missing, disabled, or unsupported.
 Verification: Fake cache/renderer tests; fallback golden snapshots; code search for I/O in render/view paths.
 Risks: Designing too much before real assets; keep interfaces minimal.

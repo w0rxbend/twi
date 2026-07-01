@@ -4,7 +4,9 @@
 
 ## Current State
 
-- Text, Unicode, and initials fallbacks are required.
+- Text, Unicode, initials, and compact badge fallbacks are implemented for chat rows.
+- Renderer asset fallback fragments can reserve stable cell widths before images are available.
+- `internal/storage.AssetCache` provides context-aware cache methods; the in-memory implementation is intended for deterministic tests and performs no network access.
 - Kitty-compatible image rendering is the first planned image protocol target.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
@@ -88,7 +90,7 @@ Planned modes:
 - Emoji: `unicode`, `image`
 - Emote: `text`, `image`
 
-The MVP may start with fallbacks only. Image modes should become effective when the asset pipeline and terminal renderer are implemented.
+The MVP currently uses fallbacks only. Image modes should become effective when the asset pipeline and terminal renderer are implemented.
 
 ## Rendering Rules
 

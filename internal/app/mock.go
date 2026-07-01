@@ -32,6 +32,9 @@ type mockShellModel struct {
 	channel             string
 	animationMode       string
 	imageMode           string
+	avatarMode          string
+	emojiMode           string
+	emoteMode           string
 	sourceDetail        string
 	client              ChatClient
 	status              ConnectionState
@@ -184,6 +187,9 @@ func newMockShellModelWithClock(channel string, cfg config.Config, clock animati
 		channel:       channel,
 		animationMode: string(animationConfig.Mode),
 		imageMode:     cfg.Features.ImageMode,
+		avatarMode:    cfg.Features.AvatarMode,
+		emojiMode:     cfg.Features.EmojiMode,
+		emoteMode:     cfg.Features.EmoteMode,
 		sourceDetail:  "mock source: no network",
 		status: ConnectionState{
 			Status:  ConnectionConnected,
@@ -211,6 +217,9 @@ func newLiveShellModelWithClock(channel string, cfg config.Config, client ChatCl
 		channel:       channel,
 		animationMode: string(animationConfig.Mode),
 		imageMode:     cfg.Features.ImageMode,
+		avatarMode:    cfg.Features.AvatarMode,
+		emojiMode:     cfg.Features.EmojiMode,
+		emoteMode:     cfg.Features.EmoteMode,
 		sourceDetail:  "live IRC",
 		client:        client,
 		status: ConnectionState{
@@ -492,8 +501,8 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 
 	rows := make([]string, 0, len(m.messages))
 	for _, msg := range m.messages {
-		for _, row := range render.PlainRows(msg, rowWidth) {
-			rows = append(rows, fitLine(row, rowWidth))
+		for _, row := range render.Rows(msg, m.renderOptions(rowWidth)) {
+			rows = append(rows, fitLine(row.Plain(), rowWidth))
 		}
 	}
 	frames := m.revealQueue.Frames()
@@ -759,7 +768,7 @@ func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	rowWidth = clampMin(rowWidth, 1)
 
 	revealID := m.nextRevealID(message)
-	result := m.revealQueue.Enqueue(revealID, render.Rows(message, render.DefaultOptions(rowWidth)))
+	result := m.revealQueue.Enqueue(revealID, render.Rows(message, m.renderOptions(rowWidth)))
 	m.completeReveals(result.Overflow)
 	if result.Complete != nil {
 		m.messages = append(m.messages, message)
@@ -1018,6 +1027,34 @@ func mockAnimationConfig(mode string) animation.Config {
 		cfg.Mode = animation.ModeFast
 	}
 	return cfg
+}
+
+func (m mockShellModel) renderOptions(width int) render.Options {
+	opts := render.DefaultOptions(width)
+	opts.Assets = renderAssetOptions(m.imageMode, m.avatarMode, m.emojiMode, m.emoteMode)
+	return opts
+}
+
+func renderAssetOptions(imageMode, avatarMode, emojiMode, emoteMode string) render.AssetOptions {
+	opts := render.AssetOptions{}
+	if !modeDisabled(avatarMode) {
+		opts.ShowAvatars = true
+		opts.AvatarWidthCells = render.FallbackAssetOptions().AvatarWidthCells
+	}
+	if !modeDisabled(imageMode) {
+		opts.BadgeWidthCells = render.FallbackAssetOptions().BadgeWidthCells
+	}
+	if strings.EqualFold(emojiMode, "image") && !modeDisabled(imageMode) {
+		opts.EmojiWidthCells = render.FallbackAssetOptions().EmojiWidthCells
+	}
+	if strings.EqualFold(emoteMode, "image") && !modeDisabled(imageMode) {
+		opts.EmoteWidthCells = render.FallbackAssetOptions().EmoteWidthCells
+	}
+	return opts
+}
+
+func modeDisabled(mode string) bool {
+	return strings.EqualFold(strings.TrimSpace(mode), "off")
 }
 
 func (m *mockShellModel) deleteComposerRune() {

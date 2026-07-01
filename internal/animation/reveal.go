@@ -322,7 +322,8 @@ func fragmentUnits(row int, fragment render.Fragment) []RevealUnit {
 
 func isAtomic(fragment render.Fragment) bool {
 	switch fragment.Kind {
-	case render.FragmentTimestamp,
+	case render.FragmentAvatar,
+		render.FragmentTimestamp,
 		render.FragmentBadge,
 		render.FragmentUsername,
 		render.FragmentMention,
@@ -354,9 +355,13 @@ func appendFragment(row *render.Row, fragment render.Fragment) {
 }
 
 func sameFragment(a, b render.Fragment) bool {
+	if a.WidthCells > 0 || b.WidthCells > 0 {
+		return false
+	}
 	return a.Kind == b.Kind &&
 		a.Style == b.Style &&
-		a.Ref == b.Ref
+		a.Ref == b.Ref &&
+		a.WidthCells == b.WidthCells
 }
 
 func cloneRows(rows []render.Row) []render.Row {

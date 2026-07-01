@@ -39,6 +39,7 @@ func TestRunMockRendersInitialShellForNonInteractiveOutput(t *testing.T) {
 		"#example",
 		"connected",
 		"Mock chat is ready in the Bubble Tea shell.",
+		"[TB]",
 		"Message #example",
 		"q quit",
 		"ctrl+c quit",

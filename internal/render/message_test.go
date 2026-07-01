@@ -246,6 +246,105 @@ func TestRowsExposeActionFragment(t *testing.T) {
 	}
 }
 
+func TestRowsReserveStableAssetFallbackWidths(t *testing.T) {
+	msg := twitch.ChatMessage{
+		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),
+		AuthorID:    "user-1",
+		AvatarURL:   "https://static-cdn.example/avatar.png",
+		DisplayName: "Alice_Liddell",
+		AuthorColor: "#9146ff",
+		Badges:      []twitch.Badge{{SetID: "moderator", ID: "1"}},
+		Type:        twitch.MessageTypeChat,
+		Fragments: []twitch.MessageFragment{
+			{Type: twitch.FragmentText, Text: "hello "},
+			{Type: twitch.FragmentEmote, Text: "Kappa", Ref: twitch.AssetRef{Kind: "twitch_emote", ID: "25"}},
+			{Type: twitch.FragmentText, Text: " "},
+			{Type: twitch.FragmentEmoji, Text: "😀"},
+		},
+	}
+	opts := DefaultOptions(80)
+	opts.Assets = FallbackAssetOptions()
+
+	rows := Rows(msg, opts)
+	if got := rows[0].Plain(); !strings.Contains(got, "[AL] 20:00 [mod] ") {
+		t.Fatalf("row missing intentional avatar/badge fallback: %q", got)
+	}
+
+	checks := []struct {
+		kind FragmentKind
+		want int
+		ref  twitch.AssetRef
+	}{
+		{kind: FragmentAvatar, want: 5, ref: twitch.AssetRef{Kind: "avatar", ID: "user-1", URL: "https://static-cdn.example/avatar.png"}},
+		{kind: FragmentBadge, want: 6, ref: twitch.AssetRef{Kind: "badge", ID: "moderator/1"}},
+		{kind: FragmentEmoteFallback, want: 6, ref: twitch.AssetRef{Kind: "twitch_emote", ID: "25"}},
+		{kind: FragmentEmojiFallback, want: 2, ref: twitch.AssetRef{Kind: "emoji", ID: "😀"}},
+	}
+	for _, check := range checks {
+		fragment, ok := firstKind(rows, check.kind)
+		if !ok {
+			t.Fatalf("rows missing %s fragment: %#v", check.kind, rows)
+		}
+		if got := fragment.Width(); got != check.want {
+			t.Fatalf("%s width = %d, want %d: %#v", check.kind, got, check.want, fragment)
+		}
+		if got := textWidth(fragmentDisplayText(fragment)); got != check.want {
+			t.Fatalf("%s fallback display width = %d, want %d: %q", check.kind, got, check.want, fragmentDisplayText(fragment))
+		}
+		if fragment.Ref != check.ref {
+			t.Fatalf("%s ref = %#v, want %#v", check.kind, fragment.Ref, check.ref)
+		}
+	}
+}
+
+func TestRowsNoImageFallbackOutputIsIntentional(t *testing.T) {
+	msg := twitch.ChatMessage{
+		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),
+		DisplayName: "twi_bot",
+		Type:        twitch.MessageTypeChat,
+		Fragments: []twitch.MessageFragment{
+			{Type: twitch.FragmentEmote, Text: "Kappa", Ref: twitch.AssetRef{Kind: "twitch_emote", ID: "25"}},
+			{Type: twitch.FragmentText, Text: " "},
+			{Type: twitch.FragmentEmoji, Text: "😀"},
+		},
+	}
+	opts := DefaultOptions(80)
+	opts.Assets = FallbackAssetOptions()
+
+	rows := Rows(msg, opts)
+	want := []string{"[TB] 20:00 twi_bot: Kappa  😀"}
+	if got := rowsToPlain(rows); !reflect.DeepEqual(got, want) {
+		t.Fatalf("fallback rows mismatch\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestRowsKeepAdjacentFixedWidthFallbacksSeparate(t *testing.T) {
+	msg := twitch.ChatMessage{
+		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),
+		DisplayName: "emoji_fan",
+		Type:        twitch.MessageTypeChat,
+		Text:        "😀😀",
+	}
+	opts := DefaultOptions(80)
+	opts.Assets = FallbackAssetOptions()
+	opts.Assets.ShowAvatars = false
+
+	rows := Rows(msg, opts)
+	if got, want := countKind(rows, FragmentEmojiFallback), 2; got != want {
+		t.Fatalf("emoji fallback count = %d, want %d: %#v", got, want, rows)
+	}
+	if got, want := rows[0].Plain(), "20:00 emoji_fan: 😀😀"; got != want {
+		t.Fatalf("row = %q, want %q", got, want)
+	}
+	for _, row := range rows {
+		for _, fragment := range row.Fragments {
+			if fragment.Kind == FragmentEmojiFallback && fragment.Width() != 2 {
+				t.Fatalf("emoji width = %d, want 2: %#v", fragment.Width(), fragment)
+			}
+		}
+	}
+}
+
 func TestTextRowUsesFallbackAuthor(t *testing.T) {
 	msg := twitch.ChatMessage{
 		Timestamp:   time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local),

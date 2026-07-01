@@ -110,6 +110,30 @@ func TestForegroundOnlyTextPreservesStyleWhileRevealingGraphemes(t *testing.T) {
 	}
 }
 
+func TestFixedWidthFallbackFramesDoNotCoalesce(t *testing.T) {
+	now := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
+	cfg := DefaultConfig()
+	cfg.FastInterval = time.Millisecond
+	rows := []render.Row{{Fragments: []render.Fragment{
+		{Kind: render.FragmentEmojiFallback, Text: "😀", WidthCells: 2, Ref: twitch.AssetRef{Kind: "emoji", ID: "😀"}},
+		{Kind: render.FragmentEmojiFallback, Text: "😀", WidthCells: 2, Ref: twitch.AssetRef{Kind: "emoji", ID: "😀"}},
+	}}}
+	sequence := NewSequence(rows, cfg, now)
+
+	sequence.Advance(now.Add(time.Millisecond))
+	if got, want := plainFrame(sequence.Frame()), []string{"😀"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("first fixed-width frame = %#v, want %#v", got, want)
+	}
+	sequence.Advance(now.Add(2 * time.Millisecond))
+	frame := sequence.Frame()
+	if got, want := plainFrame(frame), []string{"😀😀"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("second fixed-width frame = %#v, want %#v", got, want)
+	}
+	if got, want := len(frame[0].Fragments), 2; got != want {
+		t.Fatalf("frame fragment count = %d, want %d: %#v", got, want, frame[0].Fragments)
+	}
+}
+
 func TestModesProduceDeterministicFrames(t *testing.T) {
 	now := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
 	rows := []render.Row{{Fragments: []render.Fragment{{

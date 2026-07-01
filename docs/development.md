@@ -9,11 +9,12 @@ This document summarizes the development workflow and architecture for `twi`. Th
 - The Go module uses `go 1.26` and `toolchain go1.26.4`.
 - `govulncheck` and `staticcheck` are pinned as Go module tools.
 - Use Go modules only. Do not use GOPATH workflows.
-- A CLI/config foundation exists with a deterministic non-network Bubble Tea mock shell, a one-channel live Twitch IRC read path, active-channel composer sends, replies, and `/me` action sends.
+- A CLI/config foundation exists with a deterministic non-network Bubble Tea mock shell, a one-channel live Twitch IRC read path, active-channel composer sends, replies, `/me` action sends, and no-image asset fallbacks.
 - The shell handles resize, chat/composer focus via `tab`, expanded help via `?`, page-key viewport scrolling, selected-message reply mode with `up`/`down` and `r`, `esc` reply cancellation, composer text entry, Enter-to-send for live clients, reduced narrow-width status/help text, send status feedback, and tick-driven reveal animation for scheduled incoming mock messages.
 - `internal/app` owns the UI-facing chat boundary, deterministic fake chat client, live transport adapter, and Bubble Tea shell; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
 - `internal/twitch` owns the `go-twitch-irc` client wrapper and callback normalization for `PRIVMSG`, `NOTICE`, `USERNOTICE`, `ROOMSTATE`, `CLEARCHAT`, `CLEARMSG`, `USERSTATE`, reconnect, connect, disconnect, and TODO-backed raw fallback events. Raw IRC tags are retained only for diagnostics/debug views.
-- `internal/render` converts normalized messages into width-bounded rows of semantic fragments for timestamps, badges, usernames, replies, notices, actions, deleted messages, mentions, emoji fallbacks, and Twitch emote-token fallbacks.
+- `internal/render` converts normalized messages into width-bounded rows of semantic fragments for avatars, timestamps, badges, usernames, replies, notices, actions, deleted messages, mentions, emoji fallbacks, and Twitch emote-token fallbacks. Asset fallback fragments can reserve stable cell widths without loading image data.
+- `internal/storage` defines the context-aware asset cache boundary and an in-memory test cache. Current app views do not read the cache or invoke network/file-backed asset loading.
 - `internal/animation` turns rendered rows into grapheme-safe reveal units and maintains a deterministic bounded reveal queue for `off`, `reduced`, and `fast` animation modes. `internal/app` owns the Bubble Tea tick commands that enqueue incoming mock messages and advance active reveals.
 - `internal/theme` owns palette data and contrast correction for user-supplied foreground colors before render fragments are styled.
 
@@ -39,7 +40,7 @@ Keep boundaries strict:
 - Twitch/network code should not depend on Bubble Tea components.
 - Rendering should consume normalized messages and assets, not raw IRC strings.
 - Animation should consume render rows/fragments, not raw strings; queue overflow completes the oldest active reveal immediately so callers can render it statically.
-- Image loading and network work must not block Bubble Tea `Update` or `View`.
+- Image loading and network work must not block Bubble Tea `Update` or `View`; current asset fallback rendering is pure row construction, and future cache/image work should flow through commands/messages.
 
 ## Core Interfaces
 
@@ -53,7 +54,7 @@ The plan calls for interfaces around:
 - `ImageRenderer`
 - `AnimationClock`
 
-`internal/app.ChatClient` currently combines the app-facing message stream, connection-state stream, and send contract. Send results can carry accepted, failed, or rate-limit-like feedback so the composer can clear accepted sends and restore unsent text on failure. Use `internal/app.FakeChatClient` for deterministic UI and send-path tests. Use additional test fakes for network, asset, image, and animation behavior.
+`internal/app.ChatClient` currently combines the app-facing message stream, connection-state stream, and send contract. Send results can carry accepted, failed, or rate-limit-like feedback so the composer can clear accepted sends and restore unsent text on failure. `internal/storage.AssetCache` provides context-aware `GetAsset`/`PutAsset` methods, and `internal/render.ImageRenderer` describes fixed-cell image rendering for asynchronous callers. Use `internal/app.FakeChatClient` and `internal/storage.MemoryAssetCache` for deterministic tests. Use additional test fakes for network, asset, image, and animation behavior.
 
 ## Tooling
 

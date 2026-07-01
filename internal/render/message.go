@@ -1,6 +1,7 @@
 package render
 
 import (
+	"context"
 	"sort"
 	"strings"
 	"time"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
+	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/theme"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
@@ -21,6 +23,7 @@ const (
 type FragmentKind string
 
 const (
+	FragmentAvatar        FragmentKind = "avatar"
 	FragmentTimestamp     FragmentKind = "timestamp"
 	FragmentBadge         FragmentKind = "badge"
 	FragmentUsername      FragmentKind = "username"
@@ -46,14 +49,18 @@ type FragmentStyle struct {
 
 // Fragment is a normalized, styled segment of a rendered chat message.
 type Fragment struct {
-	Kind  FragmentKind
-	Text  string
-	Style FragmentStyle
-	Ref   twitch.AssetRef
+	Kind       FragmentKind
+	Text       string
+	Style      FragmentStyle
+	Ref        twitch.AssetRef
+	WidthCells int
 }
 
-// Width returns the terminal cell width of the fragment's fallback text.
+// Width returns the terminal cell width reserved by the fragment.
 func (f Fragment) Width() int {
+	if f.WidthCells > 0 {
+		return f.WidthCells
+	}
 	return textWidth(f.Text)
 }
 
@@ -66,7 +73,7 @@ type Row struct {
 func (r Row) Plain() string {
 	var builder strings.Builder
 	for _, fragment := range r.Fragments {
-		builder.WriteString(fragment.Text)
+		builder.WriteString(fragmentDisplayText(fragment))
 	}
 	return builder.String()
 }
@@ -80,7 +87,7 @@ func (r Row) String() string {
 	return builder.String()
 }
 
-// Width returns the terminal cell width of the row fallback text.
+// Width returns the terminal cell width reserved by the row.
 func (r Row) Width() int {
 	return textWidth(r.Plain())
 }
@@ -89,6 +96,7 @@ func (r Row) Width() int {
 type Options struct {
 	Width   int
 	Palette theme.Palette
+	Assets  AssetOptions
 }
 
 // DefaultOptions returns renderer options using the default theme palette.
@@ -97,6 +105,67 @@ func DefaultOptions(width int) Options {
 		Width:   width,
 		Palette: theme.DefaultPalette(),
 	}
+}
+
+// ImageSpec describes a fixed-cell inline image request. It is intended for
+// asynchronous callers; View paths should render the fallback fragments already
+// produced by this package.
+type ImageSpec struct {
+	Ref         twitch.AssetRef
+	WidthCells  int
+	HeightCells int
+	Fallback    string
+}
+
+// ImageCell is the terminal output returned by an image renderer.
+type ImageCell struct {
+	Text       string
+	WidthCells int
+}
+
+// ImageRenderer is the minimal terminal image rendering boundary. Callers are
+// expected to invoke it from Bubble Tea commands or other asynchronous flows,
+// not from View methods.
+type ImageRenderer interface {
+	RenderImage(ctx context.Context, asset storage.AssetRecord, spec ImageSpec) (ImageCell, error)
+}
+
+// AssetOptions controls no-image fallbacks and fixed placeholder widths.
+type AssetOptions struct {
+	ShowAvatars      bool
+	AvatarWidthCells int
+	BadgeWidthCells  int
+	EmoteWidthCells  int
+	EmojiWidthCells  int
+}
+
+// FallbackAssetOptions returns visually intentional text fallbacks that
+// reserve stable widths for future avatar, badge, emote, and emoji images.
+func FallbackAssetOptions() AssetOptions {
+	return AssetOptions{
+		ShowAvatars:      true,
+		AvatarWidthCells: 5,
+		BadgeWidthCells:  6,
+		EmoteWidthCells:  6,
+		EmojiWidthCells:  2,
+	}
+}
+
+func (o AssetOptions) withFallbackWidths() AssetOptions {
+	defaults := FallbackAssetOptions()
+	if o.AvatarWidthCells <= 0 {
+		o.AvatarWidthCells = defaults.AvatarWidthCells
+	}
+	if o.BadgeWidthCells < 0 {
+		o.BadgeWidthCells = 0
+	}
+	if o.EmoteWidthCells < 0 {
+		o.EmoteWidthCells = 0
+	}
+	if o.EmojiWidthCells < 0 {
+		o.EmojiWidthCells = 0
+	}
+	return o
 }
 
 // Rows renders a normalized Twitch chat message into width-bounded rows.
@@ -110,6 +179,7 @@ func Rows(msg twitch.ChatMessage, opts Options) []Row {
 	if opts.Palette == (theme.Palette{}) {
 		opts.Palette = theme.DefaultPalette()
 	}
+	opts.Assets = opts.Assets.withFallbackWidths()
 
 	prefix := messagePrefix(msg, opts)
 	content := messageContent(msg, opts)
@@ -158,6 +228,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	author := displayAuthor(msg)
 	includeTimestamp := opts.Width >= 16
 	includeBadges := opts.Width >= 28 && len(msg.Badges) > 0
+	includeAvatar := opts.Assets.ShowAvatars && opts.Width >= 24
 	targetWidth := targetPrefixWidth(opts.Width)
 
 	for {
@@ -170,12 +241,15 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 		}
 		if includeBadges {
 			for _, badge := range msg.Badges {
-				fixedWidth += textWidth(badgeLabel(badge)) + 1
+				fixedWidth += badgeFallbackWidth(badge, opts.Assets)
 			}
+		}
+		if includeAvatar {
+			fixedWidth += opts.Assets.AvatarWidthCells
 		}
 
 		maxAuthorWidth := targetWidth - fixedWidth
-		if maxAuthorWidth >= 3 || (!includeBadges && !includeTimestamp) {
+		if maxAuthorWidth >= 3 || (!includeAvatar && !includeBadges && !includeTimestamp) {
 			author = truncateCells(author, maxAuthorWidth)
 			break
 		}
@@ -183,10 +257,17 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 			includeBadges = false
 			continue
 		}
+		if includeAvatar {
+			includeAvatar = false
+			continue
+		}
 		includeTimestamp = false
 	}
 
 	var fragments []Fragment
+	if includeAvatar {
+		fragments = append(fragments, avatarFallbackFragment(msg, opts, author))
+	}
 	if includeTimestamp {
 		fragments = append(fragments, Fragment{
 			Kind: FragmentTimestamp,
@@ -198,14 +279,7 @@ func messagePrefix(msg twitch.ChatMessage, opts Options) []Fragment {
 	}
 	if includeBadges {
 		for _, badge := range msg.Badges {
-			fragments = append(fragments, Fragment{
-				Kind: FragmentBadge,
-				Text: badgeLabel(badge) + " ",
-				Style: FragmentStyle{
-					Foreground: accent,
-					Bold:       true,
-				},
-			})
+			fragments = append(fragments, badgeFallbackFragment(badge, opts))
 		}
 	}
 	if msg.Type == twitch.MessageTypeAction {
@@ -314,8 +388,9 @@ func normalizedFragments(in []twitch.MessageFragment, opts Options) []Fragment {
 			})
 		case twitch.FragmentEmote:
 			out = append(out, Fragment{
-				Kind: FragmentEmoteFallback,
-				Text: text,
+				Kind:       FragmentEmoteFallback,
+				Text:       text,
+				WidthCells: opts.Assets.EmoteWidthCells,
 				Style: FragmentStyle{
 					Foreground: opts.Palette.Success,
 					Bold:       true,
@@ -324,12 +399,13 @@ func normalizedFragments(in []twitch.MessageFragment, opts Options) []Fragment {
 			})
 		case twitch.FragmentEmoji:
 			out = append(out, Fragment{
-				Kind: FragmentEmojiFallback,
-				Text: text,
+				Kind:       FragmentEmojiFallback,
+				Text:       text,
+				WidthCells: opts.Assets.EmojiWidthCells,
 				Style: FragmentStyle{
 					Foreground: opts.Palette.Foreground,
 				},
-				Ref: fragment.Ref,
+				Ref: emojiAssetRef(text, fragment.Ref),
 			})
 		case twitch.FragmentBits:
 			out = append(out, Fragment{
@@ -379,8 +455,9 @@ func emoteFallbackFragments(msg twitch.ChatMessage, opts Options) []Fragment {
 			token = emptyFallback(emote.Name, ":"+emote.ID+":")
 		}
 		fragments = append(fragments, Fragment{
-			Kind: FragmentEmoteFallback,
-			Text: token,
+			Kind:       FragmentEmoteFallback,
+			Text:       token,
+			WidthCells: opts.Assets.EmoteWidthCells,
 			Style: FragmentStyle{
 				Foreground: opts.Palette.Success,
 				Bold:       true,
@@ -442,11 +519,13 @@ func splitTextFragments(text string, opts Options) []Fragment {
 		if isEmojiCluster(cluster) {
 			flushText()
 			fragments = append(fragments, Fragment{
-				Kind: FragmentEmojiFallback,
-				Text: cluster,
+				Kind:       FragmentEmojiFallback,
+				Text:       cluster,
+				WidthCells: opts.Assets.EmojiWidthCells,
 				Style: FragmentStyle{
 					Foreground: opts.Palette.Foreground,
 				},
+				Ref: emojiAssetRef(cluster, twitch.AssetRef{}),
 			})
 			i++
 			continue
@@ -520,6 +599,7 @@ func wrap(prefix, content []Fragment, width int) []Row {
 
 			next := fragment
 			next.Text = cluster
+			next.WidthCells = 0
 			appendFragment(&current, next)
 			used += clusterWidth
 		}
@@ -573,9 +653,13 @@ func coalesceAdjacent(in []Fragment) []Fragment {
 }
 
 func sameFragmentStyle(a, b Fragment) bool {
+	if a.WidthCells > 0 || b.WidthCells > 0 {
+		return false
+	}
 	return a.Kind == b.Kind &&
 		a.Style == b.Style &&
-		a.Ref == b.Ref
+		a.Ref == b.Ref &&
+		a.WidthCells == b.WidthCells
 }
 
 func renderFragment(fragment Fragment) string {
@@ -595,7 +679,7 @@ func renderFragment(fragment Fragment) string {
 	if fragment.Style.Strikethrough {
 		style = style.Strikethrough(true)
 	}
-	return style.Render(fragment.Text)
+	return style.Render(fragmentDisplayText(fragment))
 }
 
 func usernameColor(msg twitch.ChatMessage, palette theme.Palette) string {
@@ -621,6 +705,70 @@ func displayAuthor(msg twitch.ChatMessage) string {
 	return "unknown"
 }
 
+func avatarFallbackFragment(msg twitch.ChatMessage, opts Options, author string) Fragment {
+	ref := twitch.AssetRef{
+		Kind: "avatar",
+		ID:   msg.AuthorID,
+		URL:  msg.AvatarURL,
+	}
+	if ref.ID == "" {
+		ref.ID = msg.AuthorLogin
+	}
+	if ref.ID == "" {
+		ref.ID = author
+	}
+	return Fragment{
+		Kind:       FragmentAvatar,
+		Text:       avatarFallbackText(msg, author),
+		WidthCells: opts.Assets.AvatarWidthCells,
+		Style: FragmentStyle{
+			Foreground: opts.Palette.Background,
+			Background: usernameColor(msg, opts.Palette),
+			Bold:       true,
+		},
+		Ref: ref,
+	}
+}
+
+func avatarFallbackText(msg twitch.ChatMessage, author string) string {
+	source := author
+	if source == "" {
+		source = displayAuthor(msg)
+	}
+	initials := initials(source)
+	if initials == "" {
+		initials = "?"
+	}
+	return "[" + initials + "]"
+}
+
+func initials(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	words := strings.FieldsFunc(value, func(r rune) bool {
+		return r == '_' || r == '-' || r == '.' || unicode.IsSpace(r)
+	})
+	if len(words) == 0 {
+		words = []string{value}
+	}
+	var builder strings.Builder
+	for _, word := range words {
+		if word == "" {
+			continue
+		}
+		for _, cluster := range graphemeStrings(word) {
+			builder.WriteString(strings.ToUpper(cluster))
+			break
+		}
+		if textWidth(builder.String()) >= 2 {
+			break
+		}
+	}
+	return takeCells(builder.String(), 2)
+}
+
 func timestampText(timestamp time.Time) string {
 	if timestamp.IsZero() {
 		return "--:--"
@@ -634,6 +782,95 @@ func badgeLabel(badge twitch.Badge) string {
 		name += "/" + badge.ID
 	}
 	return "[" + name + "]"
+}
+
+func badgeFallbackFragment(badge twitch.Badge, opts Options) Fragment {
+	width := badgeFallbackWidth(badge, opts.Assets)
+	text := badgeLabel(badge) + " "
+	if opts.Assets.BadgeWidthCells > 0 {
+		text = compactBadgeLabel(badge)
+	}
+	return Fragment{
+		Kind:       FragmentBadge,
+		Text:       text,
+		WidthCells: width,
+		Style: FragmentStyle{
+			Foreground: opts.Palette.Accent,
+			Bold:       true,
+		},
+		Ref: twitch.AssetRef{
+			Kind: "badge",
+			ID:   badgeAssetID(badge),
+		},
+	}
+}
+
+func badgeFallbackWidth(badge twitch.Badge, assets AssetOptions) int {
+	if assets.BadgeWidthCells > 0 {
+		return assets.BadgeWidthCells
+	}
+	return textWidth(badgeLabel(badge) + " ")
+}
+
+func compactBadgeLabel(badge twitch.Badge) string {
+	name := badge.SetID
+	switch strings.ToLower(name) {
+	case "broadcaster":
+		name = "cast"
+	case "moderator":
+		name = "mod"
+	case "subscriber":
+		name = "sub"
+	case "vip":
+		name = "vip"
+	case "founder":
+		name = "found"
+	case "":
+		name = "badge"
+	}
+	if badge.ID != "" && badge.ID != "1" && textWidth(name) <= 3 {
+		name += "/" + badge.ID
+	}
+	return "[" + name + "]"
+}
+
+func badgeAssetID(badge twitch.Badge) string {
+	if badge.ID == "" {
+		return badge.SetID
+	}
+	return badge.SetID + "/" + badge.ID
+}
+
+func emojiAssetRef(text string, ref twitch.AssetRef) twitch.AssetRef {
+	if ref.Kind == "" {
+		ref.Kind = "emoji"
+	}
+	if ref.ID == "" {
+		ref.ID = text
+	}
+	return ref
+}
+
+func fragmentDisplayText(fragment Fragment) string {
+	if fragment.WidthCells <= 0 {
+		return fragment.Text
+	}
+	return fitCells(fragment.Text, fragment.WidthCells)
+}
+
+func fitCells(value string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	out := value
+	if textWidth(out) > width {
+		out = truncateCells(out, width)
+	}
+	used := textWidth(out)
+	if used < width {
+		out += strings.Repeat(" ", width-used)
+	}
+	return out
 }
 
 func targetPrefixWidth(width int) int {
