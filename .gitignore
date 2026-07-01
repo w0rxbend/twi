@@ -1,0 +1,43 @@
+# Go build artifacts
+bin/
+build/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go test and coverage output
+coverage/
+coverage.out
+*.coverprofile
+*.prof
+
+# Dependency and workspace caches
+.gocache/
+.gomodcache/
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+# Local agent state
+.agent-loop
+PLAN.md
