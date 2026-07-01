@@ -17,6 +17,7 @@ This repository is in bootstrap. `PLAN.md` is the current source of truth for pr
 ## Current Bootstrap Status
 
 - The repository contains planning docs, a Go module, a `cmd/twi` entrypoint, config loading, secret redaction, a diagnostic skeleton, and a deterministic Bubble Tea mock chat shell.
+- The mock shell supports terminal resize, `tab` focus switching between chat and composer, `?` help expansion, page-key chat scrolling, and a reduced narrow-width layout.
 - The current stable Go version was verified from the official Go downloads page as `go1.26.4` on 2026-07-01.
 - The module uses Go `1.26` semantics, `toolchain go1.26.4`, and module-managed `govulncheck`/`staticcheck` tools.
 - Real Twitch IRC, inline images, and typed-in animation are not implemented yet.
@@ -43,7 +44,7 @@ The first runnable milestone should provide:
 - CLI help. Current.
 - Config loading from flags, environment variables, and a config file. Current bootstrap.
 - Secret redaction utilities. Current bootstrap.
-- A Bubble Tea root model with status bar, chat viewport, composer, and compact help. Current.
+- A Bubble Tea root model with status bar, chat viewport, composer input, focus handling, viewport scrolling, compact/expanded help, and narrow-width layout. Current.
 - A fake chat source for development. Current app boundary and deterministic fake exist.
 - `twi chat --mock` with animated mock messages. Current mock shell is static; animation is still planned.
 - A path toward `twi chat --channel <name>` once Twitch credentials and IRC connectivity are implemented.

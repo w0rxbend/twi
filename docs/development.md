@@ -10,6 +10,7 @@ This document summarizes the development workflow and architecture for `twi`. Th
 - `govulncheck` and `staticcheck` are pinned as Go module tools.
 - Use Go modules only. Do not use GOPATH workflows.
 - A CLI/config foundation exists with a deterministic non-network Bubble Tea mock shell; real Twitch dependencies are still planned.
+- The mock shell handles resize, chat/composer focus via `tab`, expanded help via `?`, page-key viewport scrolling, composer text entry, and reduced narrow-width status/help text.
 - `internal/app` owns the UI-facing chat boundary, deterministic fake chat client, and Bubble Tea mock shell; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
 
 ## Architecture Lanes
@@ -107,6 +108,7 @@ Unit coverage should include:
 - Grapheme-safe message reveal.
 - Animation degradation under high throughput.
 - Key bindings.
+- Resize and focus layout behavior.
 - Send queue and rate-limit behavior.
 
 Integration coverage should include:
