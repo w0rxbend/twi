@@ -124,6 +124,7 @@ Unit coverage should include:
 
 - Config precedence.
 - Secret redaction.
+- Token validation outcomes through `internal/twitch.FakeTokenValidator`.
 - Twitch message normalization.
 - IRC emote position parsing.
 - Emoji grapheme detection.

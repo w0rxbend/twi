@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/twitch"
 )
 
 const (
@@ -39,18 +40,10 @@ type DoctorOptions struct {
 	CacheDir          string
 	ConfigLoadError   error
 	ReachabilityProbe ReachabilityProbe
-	TokenValidator    TokenValidator
+	TokenValidator    twitch.TokenValidator
 }
 
 type ReachabilityProbe func(context.Context) error
-
-type TokenValidator func(context.Context, config.TwitchConfig) (TokenValidation, error)
-
-type TokenValidation struct {
-	Valid  bool
-	Scopes []string
-	Detail string
-}
 
 func Doctor(ctx context.Context, cfg config.Config) DoctorReport {
 	return DoctorWithOptions(ctx, cfg, DoctorOptions{
@@ -148,30 +141,50 @@ func channelsCheck(channels []string) DoctorCheck {
 	}
 }
 
-func tokenValidationCheck(ctx context.Context, cfg config.Config, validator TokenValidator) DoctorCheck {
+func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twitch.TokenValidator) DoctorCheck {
 	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return warnCheck("token validation", "skipped; OAuth token missing")
 	}
 	if validator == nil {
-		return warnCheck("token validation", "not available; required scopes chat:read and chat:edit were not verified")
+		return warnCheck("token validation", "not available; required scopes "+tokenScopesCSV(twitch.RequiredIRCScopes())+" were not verified")
 	}
 
-	validation, err := validator(ctx, cfg.Twitch)
+	credentials := tokenCredentialsFromConfig(cfg.Twitch)
+	validation, err := validator.ValidateToken(ctx, credentials)
 	if err != nil {
 		return warnCheck("token validation", fmt.Sprintf("failed: %v", err))
 	}
-	missing := missingScopes(validation.Scopes, []string{"chat:read", "chat:edit"})
-	if !validation.Valid {
-		detail := strings.TrimSpace(validation.Detail)
-		if detail == "" {
-			detail = "token reported invalid"
+
+	missing := validation.MissingScopes
+	if len(missing) == 0 {
+		missing = twitch.MissingRequiredIRCScopes(validation.Scopes)
+	}
+
+	if mismatch := tokenUsernameMismatch(cfg.Twitch.Username, validation.Identity.Login); mismatch != "" && validation.Status == twitch.TokenValidationValid {
+		return warnCheck("token validation", mismatch)
+	}
+
+	switch validation.Status {
+	case twitch.TokenValidationValid:
+	case twitch.TokenValidationMalformed:
+		return warnCheck("token validation", tokenValidationDetail(validation, "malformed OAuth token"))
+	case twitch.TokenValidationExpired:
+		return warnCheck("token validation", tokenValidationDetail(validation, "OAuth token expired; "+refreshAvailabilityDetail(validation.RefreshAvailable)))
+	case twitch.TokenValidationWrongUser:
+		return warnCheck("token validation", tokenValidationDetail(validation, usernameOwnershipDetail(cfg.Twitch.Username, validation.Identity.Login)))
+	case twitch.TokenValidationMissingScope:
+		if len(missing) > 0 {
+			return warnCheck("token validation", "missing required scopes: "+tokenScopesCSV(missing))
 		}
-		return warnCheck("token validation", detail)
+		return warnCheck("token validation", tokenValidationDetail(validation, "missing required IRC scope"))
+	default:
+		return warnCheck("token validation", tokenValidationDetail(validation, "token validation returned unknown state"))
 	}
+
 	if len(missing) > 0 {
-		return warnCheck("token validation", "missing required scopes: "+strings.Join(missing, ", "))
+		return warnCheck("token validation", "missing required scopes: "+tokenScopesCSV(missing))
 	}
-	return okCheck("token validation", "valid with required scopes chat:read and chat:edit")
+	return okCheck("token validation", "valid with required scopes "+tokenScopesCSV(twitch.RequiredIRCScopes()))
 }
 
 func reachabilityCheck(ctx context.Context, probe ReachabilityProbe) DoctorCheck {
@@ -309,18 +322,52 @@ func unknownFeatureModes(features config.FeatureConfig) []string {
 	return unknown
 }
 
-func missingScopes(got, required []string) []string {
-	have := make(map[string]bool, len(got))
-	for _, scope := range got {
-		have[scope] = true
+func tokenCredentialsFromConfig(cfg config.TwitchConfig) twitch.TokenCredentials {
+	return twitch.TokenCredentials{
+		Username:     cfg.Username,
+		OAuthToken:   cfg.OAuthToken,
+		RefreshToken: cfg.RefreshToken,
+		ClientID:     cfg.ClientID,
+		ClientSecret: cfg.ClientSecret,
 	}
-	var missing []string
-	for _, scope := range required {
-		if !have[scope] {
-			missing = append(missing, scope)
-		}
+}
+
+func tokenValidationDetail(validation twitch.TokenValidationResult, fallback string) string {
+	if detail := strings.TrimSpace(validation.Detail); detail != "" {
+		return detail
 	}
-	return missing
+	return fallback
+}
+
+func refreshAvailabilityDetail(available bool) string {
+	if available {
+		return "refresh credentials are available"
+	}
+	return "refresh credentials are unavailable"
+}
+
+func usernameOwnershipDetail(expected, actual string) string {
+	if mismatch := tokenUsernameMismatch(expected, actual); mismatch != "" {
+		return mismatch
+	}
+	return "OAuth token belongs to a different Twitch user"
+}
+
+func tokenUsernameMismatch(expected, actual string) string {
+	expected = strings.TrimSpace(expected)
+	actual = strings.TrimSpace(actual)
+	if expected == "" || actual == "" || strings.EqualFold(expected, actual) {
+		return ""
+	}
+	return fmt.Sprintf("OAuth token belongs to Twitch user %q, not configured username %q", actual, expected)
+}
+
+func tokenScopesCSV(scopes []twitch.TokenScope) string {
+	values := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		values = append(values, string(scope))
+	}
+	return strings.Join(values, ", ")
 }
 
 func redactSensitive(detail string, cfg config.Config) string {

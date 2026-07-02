@@ -84,20 +84,26 @@ Current `twi doctor` behavior:
 - Reports missing username or OAuth token as warnings because mock mode and
   non-network diagnostics can still run.
 - Reports token validation as `not available` when an OAuth token is present but
-  no token validation client is wired in yet.
+  no live token validation client is wired in yet.
 - Names the required IRC scopes, `chat:read` and `chat:edit`, when scope
   validation is unavailable or fails.
+- Uses the internal token validation boundary, when supplied by tests or future
+  adapters, to distinguish malformed, expired, wrong-user, missing-scope, and
+  valid credentials.
 - Redacts OAuth tokens and client secrets from diagnostic details and validation
   errors.
 
-When richer auth validation is implemented, startup and `twi doctor` should also
-check:
+The current validation boundary can represent:
 
-- A token is present when real Twitch chat is requested.
-- The token is valid.
-- The token belongs to the configured username.
-- The token has required scopes for the enabled transport.
-- The token has not expired.
+- The validated Twitch identity.
+- Token expiry.
+- Granted and missing scopes.
+- Username ownership mismatch.
+- Refresh availability.
+
+When the live Twitch HTTP adapter is implemented, startup and `twi doctor`
+should use that boundary to check real tokens before reporting validation as
+available.
 
 Missing or invalid auth should produce actionable errors without echoing the token value.
 

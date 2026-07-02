@@ -10,6 +10,7 @@ import (
 
 	"github.com/w0rxbend/twi/internal/app"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/twitch"
 )
 
 func TestHelp(t *testing.T) {
@@ -129,10 +130,18 @@ func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 		buildDoctorReport = oldBuildDoctorReport
 	}()
 	buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) app.DoctorReport {
+		validator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+			Result: twitch.TokenValidationResult{
+				Status:        twitch.TokenValidationMissingScope,
+				Scopes:        []twitch.TokenScope{twitch.ScopeChatRead},
+				MissingScopes: []twitch.TokenScope{twitch.ScopeChatEdit},
+			},
+		})
 		return app.DoctorWithOptions(ctx, cfg, app.DoctorOptions{
 			Environ:         []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
 			CacheDir:        t.TempDir(),
 			ConfigLoadError: cfgErr,
+			TokenValidator:  validator,
 			ReachabilityProbe: func(context.Context) error {
 				return nil
 			},
@@ -145,7 +154,7 @@ func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
-	for _, want := range []string{"[warn] config file:", "[ok] oauth token: present", "[warn] token validation:"} {
+	for _, want := range []string{"[warn] config file:", "[ok] oauth token: present", "[warn] token validation:", "chat:edit"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor output missing %q: %s", want, stdout.String())
 		}
