@@ -1,6 +1,6 @@
 # Terminal Images
 
-`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. Inline terminal images are not implemented yet. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks before inline image loading/rendering is added.
+`twi` is planned to support inline images for avatars, Twitch emotes, and standard emoji in capable terminals. Inline terminal images are not implemented yet. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar URL metadata can be batched and cached before inline image loading/rendering is added.
 
 ## Current State
 
@@ -11,7 +11,7 @@
 - Kitty-compatible image rendering is the first planned image protocol target.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
-- Known limitation: no Helix asset lookup, image download/cache fill wiring, or Kitty/Ghostty drawing path is implemented yet.
+- Known limitation: only avatar URL metadata is resolved through Helix Get Users. Emote/badge metadata lookup, image download/cache fill wiring, and Kitty/Ghostty drawing paths are not implemented yet.
 
 ## Support Tiers
 
@@ -35,7 +35,7 @@ Tier 3:
 
 Avatars:
 
-- Resolve Twitch user `profile_image_url` values through Helix Get Users.
+- Resolve Twitch user `profile_image_url` values through Helix Get Users. This metadata step is implemented for visible live-chat authors when `avatar_mode = "image"` and Twitch API credentials are configured.
 - Cache profile metadata by user ID and login.
 - Download and cache image assets.
 - Render fixed-size inline images where supported.

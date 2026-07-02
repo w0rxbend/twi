@@ -2,7 +2,9 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +12,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/w0rxbend/twi/internal/animation"
+	"github.com/w0rxbend/twi/internal/assets"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -775,6 +779,99 @@ func TestLiveShellBurstKeepsRevealQueueBoundedAndControlsResponsive(t *testing.T
 	}
 }
 
+func TestLiveShellBatchesVisibleAvatarLookups(t *testing.T) {
+	client := NewFakeChatClient(1)
+	resolver := &appFakeAvatarResolver{
+		results: []assets.AvatarResult{
+			{UserID: "42", UserLogin: "viewer", AvatarURL: "https://static-cdn.example/viewer.png", Found: true},
+			{UserID: "99", UserLogin: "mod", AvatarURL: "https://static-cdn.example/mod.png", Found: true},
+		},
+	}
+	cfg := config.Default()
+	cfg.Features.AvatarMode = "image"
+	model := newLiveShellModelWithClockAndOptions("example", cfg, client, nil, ClientOptions{AvatarResolver: resolver})
+	model.messages = []twitch.ChatMessage{
+		{ID: "m1", AuthorID: "42", AuthorLogin: "viewer", DisplayName: "Viewer", Text: "first", Type: twitch.MessageTypeChat},
+		{ID: "m2", AuthorID: "42", AuthorLogin: "viewer", DisplayName: "Viewer", Text: "second", Type: twitch.MessageTypeChat},
+		{ID: "m3", AuthorID: "99", AuthorLogin: "mod", DisplayName: "Mod", Text: "third", Type: twitch.MessageTypeChat},
+	}
+
+	updated, cmd := model.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("WindowSize returned nil command, want debounced avatar lookup")
+	}
+	if !model.avatarLookupScheduled {
+		t.Fatal("avatarLookupScheduled = false, want true")
+	}
+
+	updated, _ = model.Update(chatClientMessageMsg{
+		message: twitch.ChatMessage{ID: "m4", AuthorID: "99", AuthorLogin: "mod", DisplayName: "Mod", Text: "fourth", Type: twitch.MessageTypeChat},
+		ok:      true,
+	})
+	model = updated.(mockShellModel)
+
+	updated, cmd = model.Update(avatarLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("avatarLookupTick returned nil command, want resolver command")
+	}
+	resolved := cmd().(avatarLookupResolvedMsg)
+	if resolver.calls != 1 {
+		t.Fatalf("resolver calls = %d, want 1", resolver.calls)
+	}
+	if got, want := len(resolver.last), 2; got != want {
+		t.Fatalf("batched request count = %d, want %d: %#v", got, want, resolver.last)
+	}
+
+	updated, _ = model.Update(resolved)
+	model = updated.(mockShellModel)
+	for _, message := range model.messages {
+		if message.AuthorID != "42" && message.AuthorID != "99" {
+			continue
+		}
+		if message.AvatarURL == "" {
+			t.Fatalf("message missing resolved AvatarURL: %#v", message)
+		}
+	}
+}
+
+func TestLiveShellAvatarResolutionKeepsFallbackRowsStable(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AvatarMode = "image"
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AvatarResolver: &appFakeAvatarResolver{},
+	})
+	message := twitch.ChatMessage{
+		ID:          "m1",
+		AuthorID:    "42",
+		AuthorLogin: "viewer",
+		DisplayName: "Viewer",
+		Text:        "avatar metadata arrives later",
+		Type:        twitch.MessageTypeChat,
+	}
+	beforeRows := renderRowsToPlain(render.Rows(message, model.renderOptions(80)))
+	model.messages = []twitch.ChatMessage{message}
+	model.applyAvatarResults([]assets.AvatarResult{{
+		UserID:    "42",
+		UserLogin: "viewer",
+		AvatarURL: "https://static-cdn.example/viewer.png",
+		Found:     true,
+	}})
+	afterRows := renderRowsToPlain(render.Rows(model.messages[0], model.renderOptions(80)))
+
+	if !reflect.DeepEqual(afterRows, beforeRows) {
+		t.Fatalf("fallback rows changed after avatar resolution\nbefore: %#v\nafter:  %#v", beforeRows, afterRows)
+	}
+	fragment, ok := firstRenderKind(render.Rows(model.messages[0], model.renderOptions(80)), render.FragmentAvatar)
+	if !ok {
+		t.Fatal("avatar fragment missing after resolution")
+	}
+	if fragment.Ref.URL != "https://static-cdn.example/viewer.png" {
+		t.Fatalf("avatar ref URL = %q, want resolved URL", fragment.Ref.URL)
+	}
+}
+
 func TestMockShellScrolledBurstRendersStaticallyWithoutRevealBacklog(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	model := newMockShellModelWithClock("example", config.Default(), clock)
@@ -1048,6 +1145,38 @@ func messagesContainText(messages []twitch.ChatMessage, text string) bool {
 		}
 	}
 	return false
+}
+
+func firstRenderKind(rows []render.Row, kind render.FragmentKind) (render.Fragment, bool) {
+	for _, row := range rows {
+		for _, fragment := range row.Fragments {
+			if fragment.Kind == kind {
+				return fragment, true
+			}
+		}
+	}
+	return render.Fragment{}, false
+}
+
+func renderRowsToPlain(rows []render.Row) []string {
+	plain := make([]string, 0, len(rows))
+	for _, row := range rows {
+		plain = append(plain, row.Plain())
+	}
+	return plain
+}
+
+type appFakeAvatarResolver struct {
+	calls   int
+	last    []assets.AvatarRequest
+	results []assets.AvatarResult
+	err     error
+}
+
+func (f *appFakeAvatarResolver) ResolveAvatars(_ context.Context, requests []assets.AvatarRequest) ([]assets.AvatarResult, error) {
+	f.calls++
+	f.last = append([]assets.AvatarRequest(nil), requests...)
+	return f.results, f.err
 }
 
 func lipglossWidth(value string) int {

@@ -301,6 +301,7 @@ func recordFromDownload(key storage.AssetKey, metadata Metadata, download Downlo
 	record := storage.AssetRecord{
 		Key:         key,
 		Path:        download.Path,
+		SourceURL:   metadata.URL,
 		MediaType:   firstNonEmpty(download.MediaType, metadata.MediaType),
 		WidthCells:  firstPositive(download.WidthCells, metadata.WidthCells, req.WidthCells),
 		HeightCells: firstPositive(download.HeightCells, metadata.HeightCells, req.HeightCells),

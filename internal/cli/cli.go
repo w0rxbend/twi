@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/w0rxbend/twi/internal/app"
+	"github.com/w0rxbend/twi/internal/assets"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -60,7 +62,28 @@ var newLiveChatClient = func(ctx context.Context, cfg config.Config) (app.ChatCl
 	return app.NewLiveChatClient(ctx, transport, 0)
 }
 
-var runLiveChat = app.RunClient
+var newLiveAvatarResolver = func(cfg config.Config) app.AvatarResolver {
+	if !strings.EqualFold(strings.TrimSpace(cfg.Features.AvatarMode), "image") {
+		return nil
+	}
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	cacheDir, err := storage.DefaultAssetCacheDir()
+	if err != nil {
+		return nil
+	}
+	return &assets.AvatarBatchResolver{
+		Lookup: twitch.NewHelixUsersClient(twitch.HelixUsersClientConfig{
+			HTTPClient: &http.Client{Timeout: 2 * time.Second},
+			ClientID:   cfg.Twitch.ClientID,
+			OAuthToken: cfg.Twitch.OAuthToken,
+		}),
+		Cache: storage.NewDiskAssetCache(cacheDir),
+	}
+}
+
+var runLiveChat = app.RunClientWithOptions
 
 var newDoctorTokenValidator = func() twitch.TokenValidator {
 	return twitch.NewOAuthTokenValidator(twitch.OAuthTokenValidatorConfig{
@@ -163,7 +186,7 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "start Twitch IRC chat: %v\n", err)
 		return 1
 	}
-	if err := runLiveChat(stdout, cfg, client); err != nil {
+	if err := runLiveChat(stdout, cfg, client, app.ClientOptions{AvatarResolver: newLiveAvatarResolver(cfg)}); err != nil {
 		fmt.Fprintf(stderr, "live chat: %v\n", err)
 		return 1
 	}

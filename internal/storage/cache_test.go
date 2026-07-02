@@ -62,6 +62,7 @@ func TestDiskAssetCachePersistsAcrossInstances(t *testing.T) {
 	record := AssetRecord{
 		Key:         AssetKey{Kind: "avatar", ID: "user-1"},
 		Path:        source,
+		SourceURL:   "https://static-cdn.example/avatar/user-1.png",
 		MediaType:   "image/png",
 		WidthCells:  4,
 		HeightCells: 2,
@@ -85,7 +86,7 @@ func TestDiskAssetCachePersistsAcrossInstances(t *testing.T) {
 	if got.Path == "" || got.Path == source {
 		t.Fatalf("cached path = %q, want cache-owned data path", got.Path)
 	}
-	if got.MediaType != record.MediaType || got.WidthCells != record.WidthCells || got.HeightCells != record.HeightCells {
+	if got.SourceURL != record.SourceURL || got.MediaType != record.MediaType || got.WidthCells != record.WidthCells || got.HeightCells != record.HeightCells {
 		t.Fatalf("metadata = %#v, want %#v", got, record)
 	}
 	if !got.FetchedAt.Equal(record.FetchedAt) || !got.ExpiresAt.Equal(record.ExpiresAt) {

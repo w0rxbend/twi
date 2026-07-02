@@ -53,6 +53,7 @@ type AssetKey struct {
 type AssetRecord struct {
 	Key         AssetKey
 	Path        string
+	SourceURL   string
 	MediaType   string
 	WidthCells  int
 	HeightCells int
@@ -174,6 +175,7 @@ func (c *DiskAssetCache) GetAsset(ctx context.Context, key AssetKey) (AssetRecor
 
 	record := AssetRecord{
 		Key:         key,
+		SourceURL:   metadata.SourceURL,
 		MediaType:   metadata.MediaType,
 		WidthCells:  metadata.WidthCells,
 		HeightCells: metadata.HeightCells,
@@ -232,6 +234,7 @@ func (c *DiskAssetCache) PutAsset(ctx context.Context, record AssetRecord) error
 		Version:     diskAssetMetadataVersion,
 		Key:         record.Key,
 		HasData:     hasData,
+		SourceURL:   record.SourceURL,
 		MediaType:   record.MediaType,
 		WidthCells:  record.WidthCells,
 		HeightCells: record.HeightCells,
@@ -369,6 +372,7 @@ type diskAssetMetadata struct {
 	Version     int       `json:"version"`
 	Key         AssetKey  `json:"key"`
 	HasData     bool      `json:"has_data"`
+	SourceURL   string    `json:"source_url,omitempty"`
 	MediaType   string    `json:"media_type,omitempty"`
 	WidthCells  int       `json:"width_cells,omitempty"`
 	HeightCells int       `json:"height_cells,omitempty"`

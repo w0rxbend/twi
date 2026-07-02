@@ -79,9 +79,12 @@ func TestLiveChatConfiguredStartsClient(t *testing.T) {
 		gotChannels = append([]string(nil), cfg.DefaultChannels...)
 		return fake, nil
 	}
-	runLiveChat = func(stdout io.Writer, cfg config.Config, client app.ChatClient) error {
+	runLiveChat = func(stdout io.Writer, cfg config.Config, client app.ChatClient, opts app.ClientOptions) error {
 		if client != fake {
 			t.Fatalf("runLiveChat client = %#v, want fake", client)
+		}
+		if opts.AvatarResolver != nil {
+			t.Fatalf("AvatarResolver = %#v, want nil for default initials mode", opts.AvatarResolver)
 		}
 		_, err := stdout.Write([]byte("live shell started\n"))
 		return err

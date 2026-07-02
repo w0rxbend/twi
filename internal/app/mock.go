@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
 	"github.com/w0rxbend/twi/internal/animation"
+	"github.com/w0rxbend/twi/internal/assets"
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/twitch"
@@ -22,42 +23,57 @@ const (
 	defaultMockHeight = 22
 	mockIncomingDelay = 650 * time.Millisecond
 	mockRevealDelay   = 20 * time.Millisecond
+	avatarLookupDelay = 50 * time.Millisecond
 )
+
+// AvatarResolver is the app-facing boundary for batched author avatar
+// metadata. Implementations must not perform network work from View.
+type AvatarResolver interface {
+	ResolveAvatars(context.Context, []assets.AvatarRequest) ([]assets.AvatarResult, error)
+}
+
+type ClientOptions struct {
+	AvatarResolver AvatarResolver
+}
 
 type fdWriter interface {
 	Fd() uintptr
 }
 
 type mockShellModel struct {
-	channel             string
-	animationMode       string
-	imageMode           string
-	avatarMode          string
-	emojiMode           string
-	emoteMode           string
-	sourceDetail        string
-	client              ChatClient
-	status              ConnectionState
-	messages            []twitch.ChatMessage
-	incoming            []twitch.ChatMessage
-	nextIncoming        int
-	nextReveal          int
-	revealQueue         *animation.Queue
-	activeOrder         []string
-	activeMessages      map[string]twitch.ChatMessage
-	width               int
-	height              int
-	focus               mockFocus
-	helpExpanded        bool
-	composerText        string
-	replyTo             *composerReplyContext
-	nextSend            int
-	activeSend          *queuedComposerSend
-	sendQueue           []queuedComposerSend
-	sendState           composerSendState
-	sendFeedback        string
-	scrollOffset        int
-	revealTickScheduled bool
+	channel               string
+	animationMode         string
+	imageMode             string
+	avatarMode            string
+	emojiMode             string
+	emoteMode             string
+	sourceDetail          string
+	client                ChatClient
+	avatarResolver        AvatarResolver
+	status                ConnectionState
+	messages              []twitch.ChatMessage
+	incoming              []twitch.ChatMessage
+	nextIncoming          int
+	nextReveal            int
+	revealQueue           *animation.Queue
+	activeOrder           []string
+	activeMessages        map[string]twitch.ChatMessage
+	width                 int
+	height                int
+	focus                 mockFocus
+	helpExpanded          bool
+	composerText          string
+	replyTo               *composerReplyContext
+	nextSend              int
+	activeSend            *queuedComposerSend
+	sendQueue             []queuedComposerSend
+	sendState             composerSendState
+	sendFeedback          string
+	scrollOffset          int
+	revealTickScheduled   bool
+	avatarLookupScheduled bool
+	avatarLookupInFlight  bool
+	avatarRequested       map[string]bool
 }
 
 var _ tea.Model = mockShellModel{}
@@ -116,6 +132,13 @@ type mockIncomingMessageMsg struct {
 
 type mockAnimationTickMsg struct{}
 
+type avatarLookupTickMsg struct{}
+
+type avatarLookupResolvedMsg struct {
+	results []assets.AvatarResult
+	err     error
+}
+
 type chatClientMessageMsg struct {
 	message twitch.ChatMessage
 	ok      bool
@@ -155,6 +178,12 @@ func RunMock(w io.Writer, cfg config.Config) error {
 // RunClient starts the Bubble Tea chat shell against a real app-facing chat
 // client. The client is closed when the shell exits.
 func RunClient(w io.Writer, cfg config.Config, client ChatClient) error {
+	return RunClientWithOptions(w, cfg, client, ClientOptions{})
+}
+
+// RunClientWithOptions starts the Bubble Tea chat shell with optional
+// asynchronous app services such as avatar metadata resolution.
+func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opts ClientOptions) error {
 	if client == nil {
 		return fmt.Errorf("missing chat client")
 	}
@@ -165,7 +194,7 @@ func RunClient(w io.Writer, cfg config.Config, client ChatClient) error {
 		channel = cfg.DefaultChannels[0]
 	}
 
-	model := newLiveShellModel(channel, cfg, client)
+	model := newLiveShellModelWithOptions(channel, cfg, client, opts)
 	if !isInteractiveTerminal(w) {
 		_, err := fmt.Fprintln(w, model.View())
 		return err
@@ -207,32 +236,38 @@ func newMockShellModelWithClock(channel string, cfg config.Config, clock animati
 	}
 }
 
-func newLiveShellModel(channel string, cfg config.Config, client ChatClient) mockShellModel {
-	return newLiveShellModelWithClock(channel, cfg, client, nil)
+func newLiveShellModelWithClock(channel string, cfg config.Config, client ChatClient, clock animation.Clock) mockShellModel {
+	return newLiveShellModelWithClockAndOptions(channel, cfg, client, clock, ClientOptions{})
 }
 
-func newLiveShellModelWithClock(channel string, cfg config.Config, client ChatClient, clock animation.Clock) mockShellModel {
+func newLiveShellModelWithOptions(channel string, cfg config.Config, client ChatClient, opts ClientOptions) mockShellModel {
+	return newLiveShellModelWithClockAndOptions(channel, cfg, client, nil, opts)
+}
+
+func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, client ChatClient, clock animation.Clock, opts ClientOptions) mockShellModel {
 	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
 	return mockShellModel{
-		channel:       channel,
-		animationMode: string(animationConfig.Mode),
-		imageMode:     cfg.Features.ImageMode,
-		avatarMode:    cfg.Features.AvatarMode,
-		emojiMode:     cfg.Features.EmojiMode,
-		emoteMode:     cfg.Features.EmoteMode,
-		sourceDetail:  "live IRC",
-		client:        client,
+		channel:        channel,
+		animationMode:  string(animationConfig.Mode),
+		imageMode:      cfg.Features.ImageMode,
+		avatarMode:     cfg.Features.AvatarMode,
+		emojiMode:      cfg.Features.EmojiMode,
+		emoteMode:      cfg.Features.EmoteMode,
+		sourceDetail:   "live IRC",
+		client:         client,
+		avatarResolver: opts.AvatarResolver,
 		status: ConnectionState{
 			Status:  ConnectionConnecting,
 			Channel: channel,
 			Detail:  "connecting to Twitch IRC",
 			At:      time.Now(),
 		},
-		revealQueue:    animation.NewQueue(animationConfig, clock),
-		activeMessages: make(map[string]twitch.ChatMessage),
-		width:          defaultMockWidth,
-		height:         defaultMockHeight,
-		focus:          mockFocusChat,
+		revealQueue:     animation.NewQueue(animationConfig, clock),
+		activeMessages:  make(map[string]twitch.ChatMessage),
+		avatarRequested: make(map[string]bool),
+		width:           defaultMockWidth,
+		height:          defaultMockHeight,
+		focus:           mockFocusChat,
 	}
 }
 
@@ -359,6 +394,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.clampScroll()
+		return m.withAvatarLookupCommand(nil)
 	case mockIncomingMessageMsg:
 		var cmds []tea.Cmd
 		if msg.scheduled && msg.index == m.nextIncoming {
@@ -369,7 +405,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, revealCmd)
 		}
 		m.clampScroll()
-		return m, tea.Batch(cmds...)
+		return m.withAvatarLookupCommand(cmds...)
 	case chatClientMessageMsg:
 		if !msg.ok {
 			m.status = ConnectionState{
@@ -386,7 +422,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.nextClientMessageCommand())
 		m.clampScroll()
-		return m, tea.Batch(cmds...)
+		return m.withAvatarLookupCommand(cmds...)
 	case chatClientConnectionStateMsg:
 		if !msg.ok {
 			if m.status.Status != ConnectionClosed {
@@ -415,8 +451,25 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.scheduleRevealTick()
 		}
 		if result.Changed {
+			return m.withAvatarLookupCommand(nil)
+		}
+	case avatarLookupTickMsg:
+		m.avatarLookupScheduled = false
+		requests := m.pendingAvatarRequests()
+		if len(requests) == 0 || m.avatarResolver == nil {
 			return m, nil
 		}
+		m.markAvatarRequests(requests)
+		m.avatarLookupInFlight = true
+		return m, m.resolveAvatarCommand(requests)
+	case avatarLookupResolvedMsg:
+		m.avatarLookupInFlight = false
+		m.applyAvatarResults(msg.results)
+		m.clampScroll()
+		if msg.err != nil {
+			return m, nil
+		}
+		return m.withAvatarLookupCommand(nil)
 	}
 	return m, nil
 }
@@ -856,6 +909,189 @@ func (m *mockShellModel) scheduleRevealTick() tea.Cmd {
 	return tea.Tick(mockRevealDelay, func(time.Time) tea.Msg {
 		return mockAnimationTickMsg{}
 	})
+}
+
+func (m *mockShellModel) withAvatarLookupCommand(cmds ...tea.Cmd) (tea.Model, tea.Cmd) {
+	if cmd := m.scheduleAvatarLookup(); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	return *m, batchNonNil(cmds...)
+}
+
+func batchNonNil(cmds ...tea.Cmd) tea.Cmd {
+	nonNil := make([]tea.Cmd, 0, len(cmds))
+	for _, cmd := range cmds {
+		if cmd != nil {
+			nonNil = append(nonNil, cmd)
+		}
+	}
+	if len(nonNil) == 0 {
+		return nil
+	}
+	return tea.Batch(nonNil...)
+}
+
+func (m *mockShellModel) scheduleAvatarLookup() tea.Cmd {
+	if m.avatarResolver == nil || m.avatarLookupScheduled || m.avatarLookupInFlight || modeDisabled(m.avatarMode) {
+		return nil
+	}
+	if len(m.pendingAvatarRequests()) == 0 {
+		return nil
+	}
+	m.avatarLookupScheduled = true
+	return tea.Tick(avatarLookupDelay, func(time.Time) tea.Msg {
+		return avatarLookupTickMsg{}
+	})
+}
+
+func (m mockShellModel) resolveAvatarCommand(requests []assets.AvatarRequest) tea.Cmd {
+	resolver := m.avatarResolver
+	return func() tea.Msg {
+		results, err := resolver.ResolveAvatars(context.Background(), requests)
+		return avatarLookupResolvedMsg{results: results, err: err}
+	}
+}
+
+func (m *mockShellModel) markAvatarRequests(requests []assets.AvatarRequest) {
+	if m.avatarRequested == nil {
+		m.avatarRequested = make(map[string]bool)
+	}
+	for _, req := range requests {
+		if key := avatarRequestKey(req); key != "" {
+			m.avatarRequested[key] = true
+		}
+	}
+}
+
+func (m mockShellModel) pendingAvatarRequests() []assets.AvatarRequest {
+	if m.avatarResolver == nil || modeDisabled(m.avatarMode) {
+		return nil
+	}
+	seen := make(map[string]bool)
+	requests := []assets.AvatarRequest{}
+	for _, message := range m.visibleAvatarMessages() {
+		if strings.TrimSpace(message.AvatarURL) != "" {
+			continue
+		}
+		req := assets.AvatarRequest{
+			UserID:      message.AuthorID,
+			UserLogin:   message.AuthorLogin,
+			DisplayName: message.DisplayName,
+		}
+		key := avatarRequestKey(req)
+		if key == "" || seen[key] || m.avatarRequested[key] {
+			continue
+		}
+		seen[key] = true
+		requests = append(requests, req)
+	}
+	return requests
+}
+
+func (m mockShellModel) visibleAvatarMessages() []twitch.ChatMessage {
+	layout := m.layout()
+	if layout.chatContentHeight <= 0 {
+		return nil
+	}
+	rowWidth := layout.width
+	if layout.chatFramed {
+		rowWidth = layout.width - 4
+	}
+	rowWidth = clampMin(rowWidth, 1)
+
+	rowCounts := make([]int, 0, len(m.messages))
+	totalRows := 0
+	for _, message := range m.messages {
+		count := len(render.Rows(message, m.renderOptions(rowWidth)))
+		if count <= 0 {
+			count = 1
+		}
+		rowCounts = append(rowCounts, count)
+		totalRows += count
+	}
+	frames := m.revealQueue.Frames()
+	for _, id := range m.activeOrder {
+		totalRows += len(frames[id])
+	}
+
+	start := totalRows - layout.chatContentHeight - m.scrollOffset
+	if start < 0 {
+		start = 0
+	}
+	end := start + layout.chatContentHeight
+	messages := make([]twitch.ChatMessage, 0, layout.chatContentHeight)
+	cursor := 0
+	for i, message := range m.messages {
+		next := cursor + rowCounts[i]
+		if rangesOverlap(cursor, next, start, end) {
+			messages = append(messages, message)
+		}
+		cursor = next
+	}
+	for _, id := range m.activeOrder {
+		rows := frames[id]
+		next := cursor + len(rows)
+		if rangesOverlap(cursor, next, start, end) {
+			if message, ok := m.activeMessages[id]; ok {
+				messages = append(messages, message)
+			}
+		}
+		cursor = next
+	}
+	return messages
+}
+
+func rangesOverlap(startA, endA, startB, endB int) bool {
+	return startA < endB && startB < endA
+}
+
+func (m *mockShellModel) applyAvatarResults(results []assets.AvatarResult) {
+	for _, result := range results {
+		if !result.Found || strings.TrimSpace(result.AvatarURL) == "" {
+			continue
+		}
+		for i := range m.messages {
+			applyAvatarToMessage(&m.messages[i], result)
+		}
+		for id, message := range m.activeMessages {
+			applyAvatarToMessage(&message, result)
+			m.activeMessages[id] = message
+		}
+	}
+}
+
+func applyAvatarToMessage(message *twitch.ChatMessage, result assets.AvatarResult) {
+	if message == nil || strings.TrimSpace(message.AvatarURL) != "" {
+		return
+	}
+	if !avatarResultMatchesMessage(result, *message) {
+		return
+	}
+	message.AvatarURL = result.AvatarURL
+	if strings.TrimSpace(message.AuthorID) == "" {
+		message.AuthorID = result.UserID
+	}
+}
+
+func avatarResultMatchesMessage(result assets.AvatarResult, message twitch.ChatMessage) bool {
+	if result.UserID != "" && message.AuthorID != "" {
+		return result.UserID == message.AuthorID
+	}
+	if result.UserLogin != "" && message.AuthorLogin != "" {
+		return strings.EqualFold(result.UserLogin, message.AuthorLogin)
+	}
+	if result.DisplayName != "" && message.DisplayName != "" {
+		return strings.EqualFold(result.DisplayName, message.DisplayName)
+	}
+	return false
+}
+
+func avatarRequestKey(req assets.AvatarRequest) string {
+	key := assets.AvatarCacheKey(req)
+	if key.ID == "" {
+		return ""
+	}
+	return key.Kind + "\x00" + key.ID
 }
 
 func (m *mockShellModel) queueComposerSend() (tea.Model, tea.Cmd) {

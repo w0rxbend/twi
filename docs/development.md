@@ -11,14 +11,14 @@ This document summarizes the development workflow and architecture for `twi`. It
 - Use Go modules only. Do not use GOPATH workflows.
 - Ready behavior: a deterministic non-network Bubble Tea mock shell, config path/show commands, and text/initials/Unicode/badge/emote-token fallback rendering.
 - Partially shipped behavior: one-channel live Twitch IRC read/send with active-channel composer sends, selected-message replies, `/me` action sends, and `twi doctor` diagnostics for credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch reachability, terminal hints, Kitty/Ghostty signals, cache writability, and feature modes.
-- Planned behavior: wiring token validation into startup, `twi login`, multi-channel live chat, live asset metadata adapters, and inline terminal image rendering.
+- Planned behavior: `twi login`, multi-channel live chat, Twitch emote/badge metadata adapters, asset download wiring, and inline terminal image rendering.
 - Twitch username/token credentials currently come from environment variables or the flat config file; CLI flags currently override channel and config path only.
 - The shell handles resize, chat/composer focus via `tab`, expanded help via `?`, page-key viewport scrolling, selected-message reply mode with `up`/`down` and `r`, `esc` reply cancellation, composer text entry, Enter-to-send for live clients, reduced narrow-width status/help text, send status feedback, and tick-driven reveal animation for scheduled incoming mock messages.
 - `internal/app` owns the UI-facing chat boundary, deterministic fake chat client, live transport adapter, and Bubble Tea shell; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
-- `internal/twitch` owns the `go-twitch-irc` client wrapper, Twitch OAuth token validation adapter, and callback normalization for `PRIVMSG`, `NOTICE`, `USERNOTICE`, `ROOMSTATE`, `CLEARCHAT`, `CLEARMSG`, `USERSTATE`, reconnect, connect, disconnect, and TODO-backed raw fallback events. Raw IRC tags are retained only for diagnostics/debug views.
+- `internal/twitch` owns the `go-twitch-irc` client wrapper, Twitch OAuth token validation adapter, Helix Get Users avatar metadata adapter, and callback normalization for `PRIVMSG`, `NOTICE`, `USERNOTICE`, `ROOMSTATE`, `CLEARCHAT`, `CLEARMSG`, `USERSTATE`, reconnect, connect, disconnect, and TODO-backed raw fallback events. Raw IRC tags are retained only for diagnostics/debug views.
 - `internal/render` converts normalized messages into width-bounded rows of semantic fragments for avatars, timestamps, badges, usernames, replies, notices, actions, deleted messages, mentions, emoji fallbacks, and Twitch emote-token fallbacks. Asset fallback fragments can reserve stable cell widths without loading image data.
-- `internal/storage` defines the context-aware asset cache boundary, an in-memory test cache, a disk-backed asset cache for metadata and bytes under the platform cache directory, TTL/size pruning, and filesystem probes used by diagnostics.
-- `internal/assets` defines the async asset resolver boundary for avatar identity lookup, emote/emoji/badge metadata lookup, downloading, cache lookup/write-through, context cancellation, and app-facing asset events. Current app views do not call the resolver, read the cache, or invoke network/file-backed asset loading.
+- `internal/storage` defines the context-aware asset cache boundary, an in-memory test cache, a disk-backed asset cache for metadata, public source URLs, and bytes under the platform cache directory, TTL/size pruning, and filesystem probes used by diagnostics.
+- `internal/assets` defines the async asset resolver boundary for avatar identity lookup, batched avatar metadata resolution, emote/emoji/badge metadata lookup, downloading, cache lookup/write-through, context cancellation, and app-facing asset events. Live chat can debounce visible author avatar lookups through `AvatarBatchResolver`; render/view paths still do not perform network or file I/O.
 - `internal/animation` turns rendered rows into grapheme-safe reveal units and maintains a deterministic bounded reveal queue for `off`, `reduced`, and `fast` animation modes. `internal/app` owns the Bubble Tea tick commands that enqueue incoming mock messages and advance active reveals.
 - `internal/theme` owns palette data and contrast correction for user-supplied foreground colors before render fragments are styled.
 
@@ -44,7 +44,7 @@ Keep boundaries strict:
 - Twitch/network code should not depend on Bubble Tea components.
 - Rendering should consume normalized messages and assets, not raw IRC strings.
 - Animation should consume render rows/fragments, not raw strings; queue overflow completes the oldest active reveal immediately so callers can render it statically. App views also render new messages statically while the chat viewport is scrolled away from the bottom so off-screen traffic cannot grow a reveal backlog or shift the user's current page.
-- Image loading and network work must not block Bubble Tea `Update` or `View`; current asset fallback rendering is pure row construction, and cache/image work should flow through `internal/assets` resolver calls in commands that return typed asset events.
+- Image loading and network work must not block Bubble Tea `Update` or `View`; asset fallback rendering is pure row construction, and avatar metadata/cache work flows through debounced commands that merge asset refs without changing fallback row widths.
 
 ## Core Interfaces
 
@@ -61,7 +61,7 @@ The plan calls for interfaces around:
 - `ImageRenderer`
 - `AnimationClock`
 
-`internal/app.ChatClient` currently combines the app-facing message stream, connection-state stream, and send contract. Send results can carry accepted, failed, or rate-limit-like feedback so the composer can clear accepted sends and restore unsent text on failure. `internal/storage.AssetCache` provides context-aware `GetAsset`/`PutAsset` methods; `internal/storage.DiskAssetCache` persists URL-free metadata and cache-owned bytes using deterministic hashed paths, and exposes explicit pruning for expired records plus oldest-first size reduction; `internal/assets.Resolver` composes identity lookup, metadata lookup, downloading, and cache write-through into typed `assets.Event` results for asynchronous app commands; and `internal/render.ImageRenderer` describes fixed-cell image rendering for asynchronous callers. Use `internal/app.FakeChatClient`, `internal/storage.MemoryAssetCache`, and fake `internal/assets` lookup/downloader dependencies for deterministic tests.
+`internal/app.ChatClient` currently combines the app-facing message stream, connection-state stream, and send contract. Send results can carry accepted, failed, or rate-limit-like feedback so the composer can clear accepted sends and restore unsent text on failure. `internal/app.AvatarResolver` lets the shell debounce visible author avatar metadata work behind an app-facing interface. `internal/storage.AssetCache` provides context-aware `GetAsset`/`PutAsset` methods; `internal/storage.DiskAssetCache` persists URL-free metadata, public source URLs, and cache-owned bytes using deterministic hashed paths, and exposes explicit pruning for expired records plus oldest-first size reduction; `internal/assets.AvatarBatchResolver` batches Helix-style user lookups and caches `profile_image_url` metadata; `internal/assets.Resolver` composes identity lookup, metadata lookup, downloading, and cache write-through into typed `assets.Event` results for asynchronous app commands; and `internal/render.ImageRenderer` describes fixed-cell image rendering for asynchronous callers. Use `internal/app.FakeChatClient`, `internal/storage.MemoryAssetCache`, and fake `internal/assets` lookup/downloader dependencies for deterministic tests.
 
 ## Tooling
 
@@ -119,7 +119,7 @@ Planned primary dependencies:
 - Bubbles for viewport, textarea, spinner, help, list, table, and related components.
 - Lip Gloss for layout and styling.
 - go-twitch-irc for the MVP Twitch IRC transport.
-- Helix client for future user, avatar, emote, and badge APIs.
+- Helix-compatible adapters for user/avatar metadata, with emote and badge APIs still pending.
 - kittyimg for Kitty-compatible terminal image rendering.
 
 ## Testing Strategy
