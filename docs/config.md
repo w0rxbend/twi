@@ -106,7 +106,7 @@ Animation modes:
 - `fast`
 - `expressive`
 
-The current parser accepts these values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; unknown animation values are treated as `fast` by the shell. `avatar_mode = "image"` enables batched live avatar URL metadata lookup when Twitch API credentials are present, but inline image loading/rendering is not implemented yet. Image, emoji, emote, and Kitty settings currently drive fallback rendering and diagnostics only.
+The current parser accepts these values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; unknown animation values are treated as `fast` by the shell. `avatar_mode = "image"` enables batched live avatar URL metadata lookup when Twitch API credentials are present. The Kitty renderer core exists behind the internal renderer boundary, but inline image output is not wired into chat rows yet; image, emoji, emote, and Kitty settings currently drive fallback rendering, diagnostics, and renderer capability decisions.
 
 ## Example Config
 
