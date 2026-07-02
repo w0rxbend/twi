@@ -500,13 +500,20 @@ Current implementation: T027 adds the selected-message inspect panel. Press
 the reply selection. The panel shows normalized message, author, badge, and
 raw tag diagnostics with credential-shaped values redacted before display.
 Composer text, selected reply context, and scroll offset are preserved while
-the panel opens and closes.
+the panel opens and closes. T028 adds `ctrl+p` command palette modal state for
+common chat actions, help/inspect toggles, focus, reply mode, scrolling,
+channel switching, active-channel local clear, reconnect requests, and quit.
+Palette filtering owns typed input while open, closes deterministically on
+`enter` or `esc`, and preserves drafts, reply context, and selected messages
+unless the executed command intentionally changes that workflow.
 Acceptance criteria: Palette can trigger common actions; inspect panel shows
 safe metadata for selected messages.
 Verification: Redaction tests; key-binding tests; snapshot tests.
 Risks: Debug views can accidentally expose sensitive data if not filtered.
-Follow-ups: T028 owns the command palette. Add copy/export only after a
-security pass.
+Follow-ups: Add copy/export only after a security pass. Full live reconnect
+restart behavior remains future transport work; T028 only requests reconnect
+through an optional app-side capability and reports unavailable for clients
+without that capability.
 
 ### Phase 5: Login, Setup, And Secure Storage
 

@@ -1925,6 +1925,211 @@ func TestMockShellChannelSidebarResponsiveLayouts(t *testing.T) {
 	}
 }
 
+func TestCommandPaletteOpensFiltersExecutesAndCloses(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.DefaultChannels = []string{"alpha", "beta", "gamma"}
+	model := newMockShellModel("alpha", cfg)
+	model.width = 88
+	model.height = 14
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("open palette returned command %#v, want nil", cmd)
+	}
+	if !model.palette.open {
+		t.Fatal("palette open = false, want true")
+	}
+	view := model.View()
+	for _, want := range []string{"Command", "Focus composer", "focus=palette"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("palette view missing %q:\n%s", want, view)
+		}
+	}
+	if got, want := lineCount(view), 14; got != want {
+		t.Fatalf("palette view line count = %d, want %d:\n%s", got, want, view)
+	}
+
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("gamma")})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("palette filter returned command %#v, want nil", cmd)
+	}
+	if got, want := model.palette.query, "gamma"; got != want {
+		t.Fatalf("palette query = %q, want %q", got, want)
+	}
+	commands := model.visibleCommandPaletteCommands()
+	if len(commands) != 1 || commands[0].channel != "gamma" {
+		t.Fatalf("filtered commands = %#v, want only switch to gamma", commands)
+	}
+
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("palette channel switch returned command %#v, want nil without visible assets", cmd)
+	}
+	if model.palette.open {
+		t.Fatal("palette open after execute = true, want false")
+	}
+	if got, want := model.activeChannelName(), "gamma"; got != want {
+		t.Fatalf("active channel = %q, want %q", got, want)
+	}
+}
+
+func TestCommandPaletteFilteringDoesNotMutateComposerReplyOrSelection(t *testing.T) {
+	model := newMockShellModel("example", config.Default())
+	model.activeChannelState().messages = numberedMockMessages("example", 4)
+	model.focus = mockFocusComposer
+	model.activeChannelState().composerText = "draft text"
+	model.activeChannelState().replyTo = replyContextFromMessage(model.activeChannelState().messages[2])
+	beforeReply := *model.activeChannelState().replyTo
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("help")})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("palette filter returned command %#v, want nil", cmd)
+	}
+	if got, want := model.activeChannelState().composerText, "draft text"; got != want {
+		t.Fatalf("composer text after palette filter = %q, want %q", got, want)
+	}
+	if got, want := model.palette.query, "help"; got != want {
+		t.Fatalf("palette query = %q, want %q", got, want)
+	}
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("palette escape returned command %#v, want nil", cmd)
+	}
+	if model.palette.open {
+		t.Fatal("palette open after esc = true, want false")
+	}
+	if got, want := model.focus, mockFocusComposer; got != want {
+		t.Fatalf("focus after palette esc = %v, want %v", got, want)
+	}
+	if got, want := model.activeChannelState().composerText, "draft text"; got != want {
+		t.Fatalf("composer text after palette esc = %q, want %q", got, want)
+	}
+	if model.activeChannelState().replyTo == nil || *model.activeChannelState().replyTo != beforeReply {
+		t.Fatalf("replyTo after palette esc = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("focus chat")})
+	model = updated.(mockShellModel)
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("focus chat command returned command %#v, want nil", cmd)
+	}
+	if got, want := model.focus, mockFocusChat; got != want {
+		t.Fatalf("focus after palette focus command = %v, want %v", got, want)
+	}
+	if got, want := model.activeChannelState().composerText, "draft text"; got != want {
+		t.Fatalf("composer text after focus command = %q, want %q", got, want)
+	}
+	if model.activeChannelState().replyTo == nil || *model.activeChannelState().replyTo != beforeReply {
+		t.Fatalf("replyTo after focus command = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
+	}
+}
+
+func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
+	client := NewFakeChatClient(1)
+	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
+	state := model.activeChannelState()
+	state.messages = numberedMockMessages("example", 3)
+	state.composerText = "draft text"
+	state.replyTo = replyContextFromMessage(state.messages[1])
+	beforeReply := *state.replyTo
+	model.focus = mockFocusComposer
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("clear local")})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("clear local command returned command %#v, want nil", cmd)
+	}
+	if got := len(model.activeChannelState().messages); got != 0 {
+		t.Fatalf("messages after palette clear = %d, want 0", got)
+	}
+	if got, want := model.activeChannelState().composerText, "draft text"; got != want {
+		t.Fatalf("composer text after palette clear = %q, want %q", got, want)
+	}
+	if model.activeChannelState().replyTo == nil || *model.activeChannelState().replyTo != beforeReply {
+		t.Fatalf("replyTo after palette clear = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
+	}
+
+	model.activeChannelState().messages = numberedMockMessages("example", 2)
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("ctrl+l returned command %#v, want nil", cmd)
+	}
+	if got := len(model.activeChannelState().messages); got != 0 {
+		t.Fatalf("messages after ctrl+l = %d, want 0", got)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("reconnect")})
+	model = updated.(mockShellModel)
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("palette reconnect returned nil command, want reconnect command")
+	}
+	if model.palette.open {
+		t.Fatal("palette open after reconnect execute = true, want false")
+	}
+	if got, want := model.activeChannelState().status.Status, ConnectionReconnecting; got != want {
+		t.Fatalf("status after reconnect request = %q, want %q", got, want)
+	}
+	updated, _ = model.Update(cmd().(reconnectCompletedMsg))
+	model = updated.(mockShellModel)
+	if got, want := client.ReconnectCount(), 1; got != want {
+		t.Fatalf("reconnect count = %d, want %d", got, want)
+	}
+	if got, want := model.activeChannelState().status.Status, ConnectionConnected; got != want {
+		t.Fatalf("status after reconnect completion = %q, want %q", got, want)
+	}
+
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("ctrl+r returned nil command, want reconnect command")
+	}
+	updated, _ = model.Update(cmd().(reconnectCompletedMsg))
+	model = updated.(mockShellModel)
+	if got, want := client.ReconnectCount(), 2; got != want {
+		t.Fatalf("reconnect count after ctrl+r = %d, want %d", got, want)
+	}
+	if got, want := model.activeChannelState().composerText, "draft text"; got != want {
+		t.Fatalf("composer text after reconnect = %q, want %q", got, want)
+	}
+	if model.activeChannelState().replyTo == nil || *model.activeChannelState().replyTo != beforeReply {
+		t.Fatalf("replyTo after reconnect = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
+	}
+
+	mockModel := newMockShellModel("example", config.Default())
+	updated, cmd = mockModel.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	mockModel = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("unsupported ctrl+r returned command %#v, want nil", cmd)
+	}
+	if got, want := mockModel.activeChannelState().status.Status, ConnectionConnected; got != want {
+		t.Fatalf("unsupported reconnect status = %q, want preserved %q", got, want)
+	}
+	if !strings.Contains(mockModel.activeChannelState().status.Detail, "unavailable") {
+		t.Fatalf("unsupported reconnect detail = %q, want unavailable guidance", mockModel.activeChannelState().status.Detail)
+	}
+}
+
 func TestMockShellTinyWidthsDoNotExceedWindowWidth(t *testing.T) {
 	for width := 1; width <= 5; width++ {
 		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {

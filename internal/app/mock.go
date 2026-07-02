@@ -70,6 +70,7 @@ type mockShellModel struct {
 	focus                 mockFocus
 	helpExpanded          bool
 	inspectOpen           bool
+	palette               commandPaletteState
 	nextSend              int
 	revealTickScheduled   bool
 	avatarLookupScheduled bool
@@ -129,6 +130,9 @@ type mockShellLayout struct {
 	inspectHeight         int
 	inspectContentHeight  int
 	inspectFramed         bool
+	paletteHeight         int
+	paletteContentHeight  int
+	paletteFramed         bool
 	composerHeight        int
 	composerContentHeight int
 	composerFramed        bool
@@ -176,6 +180,11 @@ type composerSendCompletedMsg struct {
 	id     int
 	result SendResult
 	err    error
+}
+
+type reconnectCompletedMsg struct {
+	channel string
+	err     error
 }
 
 // RunMock starts the deterministic non-network mock chat shell. When stdout is
@@ -407,12 +416,24 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyCtrlC:
 			return m, tea.Quit
+		case tea.KeyCtrlP:
+			m.toggleCommandPalette()
+			return m, nil
+		}
+		if m.palette.open {
+			return m.handleCommandPaletteKey(msg)
+		}
+		switch msg.Type {
 		case tea.KeyTab:
 			m.cycleFocus()
 		case tea.KeyPgUp:
 			m.scrollBy(m.layout().chatContentHeight)
 		case tea.KeyPgDown:
 			m.scrollBy(-m.layout().chatContentHeight)
+		case tea.KeyCtrlL:
+			m.clearLocalChat()
+		case tea.KeyCtrlR:
+			return m, m.requestReconnect()
 		case tea.KeyBackspace:
 			if m.focus == mockFocusComposer {
 				m.deleteComposerRune()
@@ -481,6 +502,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.MouseMsg:
+		if m.palette.open {
+			return m, nil
+		}
 		return m.handleMouse(msg)
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -531,6 +555,8 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.nextConnectionStateCommand()
 	case composerSendCompletedMsg:
 		return m.completeComposerSend(msg)
+	case reconnectCompletedMsg:
+		m.completeReconnect(msg)
 	case mockAnimationTickMsg:
 		m.revealTickScheduled = false
 		active := m.activeChannelState()
@@ -593,6 +619,9 @@ func (m mockShellModel) View() string {
 		}
 		regions = append(regions, chat)
 	}
+	if layout.paletteHeight > 0 {
+		regions = append(regions, m.commandPaletteView(layout))
+	}
 	if layout.inspectHeight > 0 {
 		regions = append(regions, m.inspectView(layout))
 	}
@@ -653,7 +682,7 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 	}
 
 	borderColor := lipgloss.Color("#5f6c7b")
-	if m.focus == mockFocusChat {
+	if m.focus == mockFocusChat && !m.palette.open {
 		borderColor = lipgloss.Color("#8bd5ff")
 	}
 	return lipgloss.NewStyle().
@@ -697,7 +726,7 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 	}
 
 	borderColor := lipgloss.Color("#5f6c7b")
-	if m.focus == mockFocusChat {
+	if m.focus == mockFocusChat && !m.palette.open {
 		borderColor = lipgloss.Color("#cba6f7")
 	}
 	return lipgloss.NewStyle().
@@ -743,7 +772,7 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 func (m mockShellModel) composerView(layout mockShellLayout) string {
 	active := m.activeChannelState()
 	label := fmt.Sprintf(" Message #%s", m.activeChannelName())
-	if m.focus == mockFocusComposer {
+	if m.focus == mockFocusComposer && !m.palette.open {
 		label += " [focus]"
 	}
 	if active.sendState != composerSendIdle && layout.width >= 36 {
@@ -779,7 +808,7 @@ func (m mockShellModel) composerView(layout mockShellLayout) string {
 	}
 
 	borderColor := lipgloss.Color("#2a9d8f")
-	if m.focus == mockFocusComposer {
+	if m.focus == mockFocusComposer && !m.palette.open {
 		borderColor = lipgloss.Color("#f9e2af")
 	}
 	return lipgloss.NewStyle().
@@ -919,7 +948,26 @@ func (m mockShellModel) layout() mockShellLayout {
 		remaining = height - layout.statusHeight - layout.composerHeight
 	}
 
-	if m.inspectOpen && remaining >= 4 {
+	if m.palette.open && remaining >= 4 {
+		layout.paletteHeight = 5
+		if height >= 18 {
+			layout.paletteHeight = 7
+		}
+		if layout.paletteHeight > remaining-1 {
+			layout.paletteHeight = remaining - 1
+		}
+		if layout.paletteHeight < 3 {
+			layout.paletteHeight = 0
+		}
+		layout.paletteFramed = layout.paletteHeight >= 3 && width >= 5
+		layout.paletteContentHeight = layout.paletteHeight
+		if layout.paletteFramed {
+			layout.paletteContentHeight = layout.paletteHeight - 2
+		}
+		remaining -= layout.paletteHeight
+	}
+
+	if !m.palette.open && m.inspectOpen && remaining >= 4 {
 		layout.inspectHeight = 5
 		if height >= 18 {
 			layout.inspectHeight = 7
@@ -954,7 +1002,7 @@ func (m mockShellModel) layout() mockShellLayout {
 		layout.chatContentHeight = 0
 	}
 
-	used := layout.statusHeight + layout.chatHeight + layout.inspectHeight + layout.composerHeight + layout.helpHeight
+	used := layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.composerHeight + layout.helpHeight
 	if used < height {
 		layout.chatHeight += height - used
 		if layout.chatFramed {
@@ -2084,6 +2132,9 @@ func (m mockShellModel) replyContextLine(width int) string {
 }
 
 func (m mockShellModel) focusName() string {
+	if m.palette.open {
+		return "palette"
+	}
 	if m.focus == mockFocusComposer {
 		return "composer"
 	}
@@ -2097,12 +2148,12 @@ func (m mockShellModel) helpLines(width, height int) []string {
 	}
 	if !m.helpExpanded {
 		if width < 20 {
-			return []string{" tab | ?"}
+			return []string{" ^p | tab"}
 		}
 		if width < 38 {
-			return []string{" tab focus | ? help"}
+			return []string{" ctrl+p palette | tab focus"}
 		}
-		line := " tab | [] | ? | pg | r reply | i inspect | esc close | q quit | ctrl+c quit"
+		line := " ctrl+p | tab | [] | ? | pg | r | i | ctrl+l clear | ctrl+r reconn | q quit/ctrl+c quit"
 		if width >= 112 {
 			line += " | " + source
 		}
@@ -2111,13 +2162,13 @@ func (m mockShellModel) helpLines(width, height int) []string {
 
 	lines := []string{
 		" tab focus: chat/composer",
-		" [/]: switch channel | up/down: select message | r: reply | i: inspect | esc: close/cancel",
-		" pgup/pgdn: scroll chat | ?: compact help | q: quit | ctrl+c: quit | " + source,
+		" ctrl+p: commands | [/]: switch channel | up/down: select message | r: reply | i: inspect",
+		" pgup/pgdn: scroll | ctrl+l: clear | ctrl+r: reconnect | ?: compact help | q: quit | " + source,
 	}
 	if width < 38 {
 		lines = []string{
-			" tab: focus",
-			" pgup/pgdn: scroll",
+			" ctrl+p: commands",
+			" tab | pgup/pgdn",
 			" ?: help | ctrl+c: quit",
 		}
 	}
