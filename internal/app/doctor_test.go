@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/twitch"
@@ -95,6 +96,7 @@ func TestDoctorReportsCredentialPresenceAndValidationWithoutSecrets(t *testing.T
 }
 
 func TestDoctorReportsTokenValidationStates(t *testing.T) {
+	expiresAt := time.Date(2026, 7, 2, 12, 30, 0, 0, time.UTC)
 	for _, tt := range []struct {
 		name       string
 		result     twitch.TokenValidationResult
@@ -110,34 +112,40 @@ func TestDoctorReportsTokenValidationStates(t *testing.T) {
 			result: twitch.TokenValidationResult{
 				Status:           twitch.TokenValidationExpired,
 				RefreshAvailable: true,
+				ExpiresAt:        expiresAt,
 			},
 			wantDetail: "refresh credentials are available",
 		},
 		{
 			name: "wrong user",
 			result: twitch.TokenValidationResult{
-				Status:   twitch.TokenValidationWrongUser,
-				Identity: twitch.TokenIdentity{Login: "other_viewer"},
+				Status:    twitch.TokenValidationWrongUser,
+				Identity:  twitch.TokenIdentity{UserID: "42", Login: "other_viewer"},
+				Scopes:    twitch.RequiredIRCScopes(),
+				ExpiresAt: expiresAt,
 			},
 			wantDetail: "other_viewer",
 		},
 		{
 			name: "valid wrong user fallback",
 			result: twitch.TokenValidationResult{
-				Status:   twitch.TokenValidationValid,
-				Identity: twitch.TokenIdentity{Login: "other_viewer"},
-				Scopes:   twitch.RequiredIRCScopes(),
+				Status:    twitch.TokenValidationValid,
+				Identity:  twitch.TokenIdentity{Login: "other_viewer"},
+				Scopes:    twitch.RequiredIRCScopes(),
+				ExpiresAt: expiresAt,
 			},
 			wantDetail: "configured username",
 		},
 		{
 			name: "valid",
 			result: twitch.TokenValidationResult{
-				Status:   twitch.TokenValidationValid,
-				Identity: twitch.TokenIdentity{Login: "viewer"},
-				Scopes:   twitch.RequiredIRCScopes(),
+				Status:           twitch.TokenValidationValid,
+				Identity:         twitch.TokenIdentity{UserID: "42", Login: "viewer", DisplayName: "Viewer"},
+				Scopes:           twitch.RequiredIRCScopes(),
+				ExpiresAt:        expiresAt,
+				RefreshAvailable: true,
 			},
-			wantDetail: "valid with required scopes chat:read, chat:edit",
+			wantDetail: "required scopes present: chat:read, chat:edit",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -163,6 +171,47 @@ func TestDoctorReportsTokenValidationStates(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsTokenValidationContext(t *testing.T) {
+	cfg := config.Default()
+	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+	cfg.Twitch.Username = "viewer"
+	cfg.Twitch.OAuthToken = "oauth:secret-token"
+	cfg.Twitch.RefreshToken = "refresh-secret"
+	cfg.Twitch.ClientID = "client-id"
+	cfg.Twitch.ClientSecret = "client-secret"
+	expiresAt := time.Date(2026, 7, 2, 12, 30, 0, 0, time.UTC)
+
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:           []string{"TERM=xterm-256color"},
+		CacheDir:          filepath.Join(t.TempDir(), "cache"),
+		ReachabilityProbe: func(context.Context) error { return nil },
+		TokenValidator: twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+			Result: twitch.TokenValidationResult{
+				Status:           twitch.TokenValidationMissingScope,
+				Identity:         twitch.TokenIdentity{UserID: "42", Login: "viewer"},
+				Scopes:           []twitch.TokenScope{twitch.ScopeChatRead},
+				MissingScopes:    []twitch.TokenScope{twitch.ScopeChatEdit},
+				ExpiresAt:        expiresAt,
+				RefreshAvailable: true,
+			},
+		}),
+	})
+
+	detail := doctorCheck(t, report, "token validation").Detail
+	for _, want := range []string{
+		"missing required scopes: chat:edit",
+		"identity viewer (id 42)",
+		"granted scopes: chat:read",
+		"expires at 2026-07-02T12:30:00Z",
+		"refresh credentials are available",
+	} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("token validation detail = %q, want it to contain %q", detail, want)
+		}
+	}
+	assertDoctorDoesNotLeak(t, report, "oauth:secret-token", "secret-token", "refresh-secret", "client-secret")
+}
+
 func TestDoctorRedactsValidatorErrors(t *testing.T) {
 	cfg := config.Default()
 	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
@@ -171,7 +220,7 @@ func TestDoctorRedactsValidatorErrors(t *testing.T) {
 	cfg.Twitch.ClientSecret = "client-secret"
 
 	validator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
-		Err: errors.New("Bearer secret-token rejected with client-secret"),
+		Err: errors.New("Bearer bearer-secret rejected with client-secret and authorization_code=auth-code-secret"),
 	})
 
 	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
@@ -191,7 +240,32 @@ func TestDoctorRedactsValidatorErrors(t *testing.T) {
 		t.Fatalf("token validation detail = %q, want redaction marker", validation.Detail)
 	}
 	assertDoctorDoesNotLeak(t, report, "oauth:secret-token", "refresh-secret", "client-secret")
-	assertDoctorDoesNotLeak(t, report, "secret-token")
+	assertDoctorDoesNotLeak(t, report, "secret-token", "bearer-secret", "auth-code-secret")
+}
+
+func TestDoctorContinuesWhenValidationCanceled(t *testing.T) {
+	cfg := config.Default()
+	cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+	cfg.Twitch.OAuthToken = "oauth:secret-token"
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	report := DoctorWithOptions(ctx, cfg, DoctorOptions{
+		Environ:           []string{"TERM=xterm-256color"},
+		CacheDir:          filepath.Join(t.TempDir(), "cache"),
+		ReachabilityProbe: func(context.Context) error { return nil },
+		TokenValidator: twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+			Result: twitch.TokenValidationResult{Status: twitch.TokenValidationValid},
+		}),
+	})
+
+	validation := doctorCheck(t, report, "token validation")
+	if validation.Status != DoctorStatusWarn || !strings.Contains(validation.Detail, "canceled") {
+		t.Fatalf("token validation = (%q, %q), want canceled warning", validation.Status, validation.Detail)
+	}
+	if check := doctorCheck(t, report, "cache directory"); check.Status != DoctorStatusOK {
+		t.Fatalf("cache status = %q, want ok; detail=%q", check.Status, check.Detail)
+	}
 }
 
 func doctorCheck(t *testing.T, report DoctorReport, name string) DoctorCheck {

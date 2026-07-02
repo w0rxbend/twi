@@ -22,6 +22,8 @@ const (
 )
 
 var oauthPattern = regexp.MustCompile(`(?i)oauth:[^\s]+`)
+var bearerPattern = regexp.MustCompile(`(?i)(bearer\s+)[^\s"'&?]+`)
+var credentialPairPattern = regexp.MustCompile(`(?i)((?:client[_-]secret|refresh_token|authorization_code|code)(?:["']?\s*[:=]\s*["']?))[^"'\s&?]+`)
 
 type DoctorStatus string
 
@@ -152,7 +154,10 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 	credentials := tokenCredentialsFromConfig(cfg.Twitch)
 	validation, err := validator.ValidateToken(ctx, credentials)
 	if err != nil {
-		return warnCheck("token validation", fmt.Sprintf("failed: %v", err))
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return warnCheck("token validation", fmt.Sprintf("canceled: %v; token identity, expiry, and scopes were not verified", err))
+		}
+		return warnCheck("token validation", fmt.Sprintf("failed: %v; token identity, expiry, and scopes were not verified", err))
 	}
 
 	missing := validation.MissingScopes
@@ -167,24 +172,61 @@ func tokenValidationCheck(ctx context.Context, cfg config.Config, validator twit
 	switch validation.Status {
 	case twitch.TokenValidationValid:
 	case twitch.TokenValidationMalformed:
-		return warnCheck("token validation", tokenValidationDetail(validation, "malformed OAuth token"))
+		return warnCheck("token validation", joinTokenValidationDetails(
+			tokenValidationDetail(validation, "malformed OAuth token"),
+			refreshAvailabilityDetail(validation.RefreshAvailable),
+		))
 	case twitch.TokenValidationExpired:
-		return warnCheck("token validation", tokenValidationDetail(validation, "OAuth token expired; "+refreshAvailabilityDetail(validation.RefreshAvailable)))
+		return warnCheck("token validation", joinTokenValidationDetails(
+			tokenValidationDetail(validation, "OAuth token expired"),
+			tokenExpiryDetail(validation.ExpiresAt),
+			refreshAvailabilityDetail(validation.RefreshAvailable),
+		))
 	case twitch.TokenValidationWrongUser:
-		return warnCheck("token validation", tokenValidationDetail(validation, usernameOwnershipDetail(cfg.Twitch.Username, validation.Identity.Login)))
+		return warnCheck("token validation", joinTokenValidationDetails(
+			tokenValidationDetail(validation, usernameOwnershipDetail(cfg.Twitch.Username, validation.Identity.Login)),
+			tokenIdentityDetail(validation.Identity),
+			tokenScopeDetail("granted scopes", validation.Scopes),
+			tokenExpiryDetail(validation.ExpiresAt),
+			refreshAvailabilityDetail(validation.RefreshAvailable),
+		))
 	case twitch.TokenValidationMissingScope:
 		if len(missing) > 0 {
-			return warnCheck("token validation", "missing required scopes: "+tokenScopesCSV(missing))
+			return warnCheck("token validation", joinTokenValidationDetails(
+				"missing required scopes: "+tokenScopesCSV(missing),
+				tokenIdentityDetail(validation.Identity),
+				tokenScopeDetail("granted scopes", validation.Scopes),
+				tokenExpiryDetail(validation.ExpiresAt),
+				refreshAvailabilityDetail(validation.RefreshAvailable),
+			))
 		}
-		return warnCheck("token validation", tokenValidationDetail(validation, "missing required IRC scope"))
+		return warnCheck("token validation", joinTokenValidationDetails(
+			tokenValidationDetail(validation, "missing required IRC scope"),
+			tokenIdentityDetail(validation.Identity),
+			tokenScopeDetail("granted scopes", validation.Scopes),
+			tokenExpiryDetail(validation.ExpiresAt),
+			refreshAvailabilityDetail(validation.RefreshAvailable),
+		))
 	default:
 		return warnCheck("token validation", tokenValidationDetail(validation, "token validation returned unknown state"))
 	}
 
 	if len(missing) > 0 {
-		return warnCheck("token validation", "missing required scopes: "+tokenScopesCSV(missing))
+		return warnCheck("token validation", joinTokenValidationDetails(
+			"missing required scopes: "+tokenScopesCSV(missing),
+			tokenIdentityDetail(validation.Identity),
+			tokenScopeDetail("granted scopes", validation.Scopes),
+			tokenExpiryDetail(validation.ExpiresAt),
+			refreshAvailabilityDetail(validation.RefreshAvailable),
+		))
 	}
-	return okCheck("token validation", "valid with required scopes "+tokenScopesCSV(twitch.RequiredIRCScopes()))
+	return okCheck("token validation", joinTokenValidationDetails(
+		tokenIdentityDetail(validation.Identity),
+		"required scopes present: "+tokenScopesCSV(twitch.RequiredIRCScopes()),
+		tokenScopeDetail("granted scopes", validation.Scopes),
+		tokenExpiryDetail(validation.ExpiresAt),
+		refreshAvailabilityDetail(validation.RefreshAvailable),
+	))
 }
 
 func reachabilityCheck(ctx context.Context, probe ReachabilityProbe) DoctorCheck {
@@ -346,6 +388,49 @@ func refreshAvailabilityDetail(available bool) string {
 	return "refresh credentials are unavailable"
 }
 
+func tokenIdentityDetail(identity twitch.TokenIdentity) string {
+	login := strings.TrimSpace(identity.Login)
+	userID := strings.TrimSpace(identity.UserID)
+	displayName := strings.TrimSpace(identity.DisplayName)
+	switch {
+	case login == "" && userID == "" && displayName == "":
+		return "identity unavailable"
+	case login != "" && userID != "":
+		return fmt.Sprintf("identity %s (id %s)", login, userID)
+	case login != "":
+		return "identity " + login
+	case displayName != "":
+		return "identity " + displayName
+	default:
+		return "identity id " + userID
+	}
+}
+
+func tokenScopeDetail(label string, scopes []twitch.TokenScope) string {
+	if len(scopes) == 0 {
+		return label + " unavailable"
+	}
+	return label + ": " + tokenScopesCSV(scopes)
+}
+
+func tokenExpiryDetail(expiresAt time.Time) string {
+	if expiresAt.IsZero() {
+		return "expiry unavailable"
+	}
+	return "expires at " + expiresAt.UTC().Format(time.RFC3339)
+}
+
+func joinTokenValidationDetails(parts ...string) string {
+	kept := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			kept = append(kept, part)
+		}
+	}
+	return strings.Join(kept, "; ")
+}
+
 func usernameOwnershipDetail(expected, actual string) string {
 	if mismatch := tokenUsernameMismatch(expected, actual); mismatch != "" {
 		return mismatch
@@ -372,6 +457,8 @@ func tokenScopesCSV(scopes []twitch.TokenScope) string {
 
 func redactSensitive(detail string, cfg config.Config) string {
 	detail = oauthPattern.ReplaceAllString(detail, "[redacted]")
+	detail = bearerPattern.ReplaceAllString(detail, "${1}[redacted]")
+	detail = credentialPairPattern.ReplaceAllString(detail, "${1}[redacted]")
 	for _, secret := range sensitiveValues(cfg) {
 		secret = strings.TrimSpace(secret)
 		if secret != "" {

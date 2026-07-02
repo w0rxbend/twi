@@ -8,7 +8,7 @@ This document describes the authentication model for `twi`. It covers the curren
 - Mock chat is ready and needs no Twitch credentials.
 - The MVP accepts Twitch credentials from environment variables or a local flat config file. CLI flags currently override the config path and channels, not username or token values.
 - One-channel live IRC read/send is partially shipped for configured credentials, including composer sends, selected-message replies, and `/me` actions.
-- `twi doctor` diagnostics are partially shipped; the Twitch OAuth validation adapter exists behind the internal boundary, and CLI/doctor wiring is planned next.
+- `twi doctor` diagnostics are partially shipped; Twitch OAuth validation is wired into doctor and reports identity, expiry, required IRC scopes, username mismatch, and refresh availability without printing credential values.
 - Later milestones may add interactive OAuth and richer EventSub/API chat support.
 
 ## MVP Credential Model
@@ -83,13 +83,13 @@ Current `twi doctor` behavior:
   `present` or `missing`.
 - Reports missing username or OAuth token as warnings because mock mode and
   non-network diagnostics can still run.
-- Reports token validation as `not available` when an OAuth token is present but
-  no live token validation client is wired into the command yet.
-- Names the required IRC scopes, `chat:read` and `chat:edit`, when scope
-  validation is unavailable or fails.
-- Uses the internal token validation boundary, when supplied by tests or wired
-  adapters, to distinguish malformed, expired, wrong-user, missing-scope, and
-  valid credentials.
+- Reports token validation as `not available` only when no validator is supplied
+  by the caller; the CLI `doctor` command wires the live OAuth validator.
+- Names the required IRC scopes, `chat:read` and `chat:edit`, and reports
+  granted or missing scopes when validation completes.
+- Uses the internal token validation boundary to distinguish malformed,
+  expired, wrong-user, missing-scope, canceled, API-error, and valid credentials
+  without stopping the rest of the report.
 - Redacts OAuth tokens and client secrets from diagnostic details and validation
   errors.
 
@@ -102,8 +102,8 @@ The current validation boundary can represent:
 - Refresh availability.
 
 The live Twitch HTTP adapter validates access tokens through Twitch OAuth's
-`/oauth2/validate` endpoint. Startup and `twi doctor` should use that boundary
-after command wiring is added, before reporting validation as available.
+`/oauth2/validate` endpoint. `twi doctor` uses that boundary now; startup
+credential validation remains a later hardening step.
 
 Missing or invalid auth should produce actionable errors without echoing the token value.
 

@@ -160,7 +160,7 @@ It should not print token prefixes, token suffixes, or raw client secrets.
 
 `twi doctor` prints one `[ok]` or `[warn]` line per diagnostic. Warnings do not
 make the command fail; they identify missing credentials, missing config files,
-unknown terminal capabilities, unavailable Kitty graphics signals, missing token
+unknown terminal capabilities, unavailable Kitty graphics signals, failed token
 validation, or other degraded optional behavior.
 
 The current diagnostics include:
@@ -169,8 +169,9 @@ The current diagnostics include:
 - Twitch username, OAuth token, client ID, and client secret presence.
 - Channel count, with a warning when no channel or multiple live IRC channels
   are configured.
-- Token validation status. Until a validator is wired in, a present token is
-  reported as present but scopes are reported as not verified.
+- Token validation status, including Twitch identity, required and granted
+  scopes, expiry, username mismatch, refresh availability, cancellation, and
+  API-error states.
 - Twitch IRC reachability to `irc.chat.twitch.tv:6697`.
 - Terminal, true-color/256-color, and mouse capability hints from environment
   variables.

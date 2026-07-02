@@ -168,13 +168,13 @@ Follow-ups: Add Helix avatar lookup and Kitty renderer.
 Task: Add first `twi doctor` diagnostics skeleton. Status: implemented in T016.
 Owner lane: QA/release engineer.
 Goal: Give users and agents a single command for setup visibility.
-Context: Full token validation remains later scope, but current diagnostics reduce support ambiguity.
+Context: OAuth token validation is now wired into `twi doctor`; diagnostics reduce support ambiguity without requiring login/setup.
 Files likely touched: `internal/app`, `internal/config`, `internal/cli`.
-Implementation notes: Completed in T016 with config path state, credential presence without values, unverified required IRC scopes, Twitch IRC reachability, terminal env hints, Kitty/Ghostty signals, cache writability, feature modes, and redacted output.
+Implementation notes: Completed in T016 with config path state, credential presence without values, token identity/expiry/scope validation, Twitch IRC reachability, terminal env hints, Kitty/Ghostty signals, cache writability, feature modes, and redacted output.
 Acceptance criteria: `twi doctor` runs without Twitch credentials and never prints secrets.
 Verification: Unit tests for diagnostic redaction; manual `go run ./cmd/twi doctor`.
 Risks: Terminal feature detection may be incomplete initially.
-Follow-ups: Add Helix-backed token identity, expiry, and scope validation.
+Follow-ups: Add startup token validation and interactive auth recovery.
 
 ## Expanded Implementation Plan
 
@@ -230,14 +230,15 @@ Task: Improve credential and token diagnostics before interactive login.
 Owner lane: Auth/platform engineer.
 Goal: Validate token identity, expiry, and scopes through Twitch OAuth/Helix
 without exposing secrets.
-Context: `twi doctor` reports credential presence and unverified scope hints,
-and IRC auth refresh is in-memory only.
+Context: `twi doctor` reports credential presence and validates token identity,
+expiry, scopes, username ownership, and refresh availability; IRC auth refresh
+is in-memory only.
 Files likely touched: `internal/twitch`, `internal/app/doctor.go`,
 `internal/config`, `docs/auth.md`, `docs/config.md`.
-Implementation notes: Add a small Twitch identity/validation client behind an
-interface. Check `chat:read` and `chat:edit`; report missing scope, expired
-token, username mismatch, and refresh availability. Keep all error messages
-credential-safe.
+Implementation notes: Added a small Twitch identity/validation client behind an
+interface and wired it into `twi doctor`. Check `chat:read` and `chat:edit`;
+report missing scope, expired token, username mismatch, and refresh
+availability. Keep all error messages credential-safe.
 Acceptance criteria: `twi doctor` distinguishes missing, malformed, expired,
 wrong-user, and missing-scope credentials; tests prove redaction.
 Verification: HTTP fake tests; targeted tests for `internal/twitch`,

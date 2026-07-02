@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/w0rxbend/twi/internal/app"
 	"github.com/w0rxbend/twi/internal/config"
@@ -60,8 +62,25 @@ var newLiveChatClient = func(ctx context.Context, cfg config.Config) (app.ChatCl
 
 var runLiveChat = app.RunClient
 
+var newDoctorTokenValidator = func() twitch.TokenValidator {
+	return twitch.NewOAuthTokenValidator(twitch.OAuthTokenValidatorConfig{
+		HTTPClient: &http.Client{Timeout: 2 * time.Second},
+	})
+}
+
+var doctorReachabilityProbe = app.ProbeTwitchIRCReachability
+
+var doctorCacheDir = func() string {
+	return ""
+}
+
 var buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr error) app.DoctorReport {
-	return app.DoctorWithOptions(ctx, cfg, app.DoctorOptions{ConfigLoadError: cfgErr})
+	return app.DoctorWithOptions(ctx, cfg, app.DoctorOptions{
+		CacheDir:          doctorCacheDir(),
+		ConfigLoadError:   cfgErr,
+		ReachabilityProbe: doctorReachabilityProbe,
+		TokenValidator:    newDoctorTokenValidator(),
+	})
 }
 
 // Run executes the command line entrypoint. It returns a process exit code.

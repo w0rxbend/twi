@@ -128,9 +128,7 @@ Docker:
 docker run --rm twi:local doctor
 ```
 
-`doctor` reports config, credential presence, terminal hints, image fallback state, cache writability, and Twitch IRC reachability. It does not print raw OAuth tokens or client secrets.
-
-Diagnostics are partially shipped: `doctor` reports credential presence and required-scope hints, but Helix-backed token identity, expiry, ownership, and scope validation are planned.
+`doctor` reports config, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, terminal hints, image fallback state, cache writability, and Twitch IRC reachability. It does not print raw OAuth tokens or client secrets.
 
 ## 7. Use The Dotfile Shape
 
