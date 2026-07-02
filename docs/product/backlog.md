@@ -8,15 +8,16 @@ Progress as of the initial swarm pass:
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
 - Current status labels: mock chat is ready; multi-channel live IRC read/send,
-  keyboard-first channel sidebar, and diagnostics are partial; `twi login`,
-  richer multi-channel UI beyond the sidebar, and
-  inline terminal images are planned.
+  multi-channel UX, diagnostics, and inline image plumbing are partial; `twi
+  login`, setup wizard, secure credential storage, default live image resolver
+  wiring, and manual Kitty/Ghostty image validation are planned.
 - Credential rule: Twitch username/token values currently come from
   environment variables or the flat config file; CLI overrides cover channel
   and config path.
-- Remaining near-term work: current documentation alignment, richer live-chat
-  credential validation, high-throughput hardening, and real asset/image
-  rendering.
+- Remaining near-term work: CI coverage, emoji provider metadata, image
+  decode/cell preparation, default live asset wiring, login/setup, secure
+  credential storage, reconnect hardening, filters, debug logging, release
+  packaging, and manual terminal validation.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -183,8 +184,9 @@ Status: Updated after the initial MVP slices. The current app already has a
 Bubble Tea chat shell, deterministic mock mode, multi-channel Twitch IRC
 read/send routing, replies, `/me` actions, typed reveal animation, config
 precedence/redaction, diagnostics, normalized Twitch events, and text-only
-asset fallbacks. The remaining plan below focuses on turning planned
-extension points into runnable vertical slices.
+asset fallbacks plus partial image metadata/cache/event plumbing. The
+remaining plan below focuses on turning planned extension points into runnable
+vertical slices.
 
 ### Phase 1: MVP Hardening And Reality Checks
 
@@ -465,7 +467,8 @@ channel count plus unread total in the status line.
 Verification: Layout snapshot tests at narrow/normal/wide widths; key-binding
 tests; manual resize check.
 Risks: Terminal width pressure can make the UI noisy.
-Follow-ups: Add command palette switcher for narrow screens.
+Follow-ups: Add richer channel switcher polish only after manual terminal UX
+evidence shows a gap.
 
 Task: Add optional mouse support. Status: implemented for wheel scroll, channel click, composer focus, and message selection.
 Owner lane: UX/TUI engineer.

@@ -1,8 +1,10 @@
 # Risk Register
 
 Status: Risk register aligned with the current MVP. Mock chat is ready;
-multi-channel live IRC read/send and diagnostics are partial; login,
-richer multi-channel UI, and inline terminal images remain planned.
+multi-channel live IRC read/send, diagnostics, multi-channel UX, and inline
+image plumbing are partial; login/setup, secure credential storage, default
+live image resolver wiring, and manual Kitty/Ghostty image validation remain
+planned.
 
 Credential assumption: Twitch username/token values currently come from
 environment variables or the flat config file. CLI overrides cover channel and
@@ -14,7 +16,7 @@ Likelihood and impact use `Low`, `Medium`, or `High`.
 | --- | --- | --- | --- | --- | --- | --- |
 | RR-001 | Twitch auth scopes or token ownership are wrong, causing read/send failures. | High | High | Require `chat:read` and `chat:edit` for IRC MVP; validate token when Helix is available; show actionable errors without printing secrets. | Twitch integration engineer | Invalid-token and missing-scope tests; manual login/config failure check; redaction tests. |
 | RR-002 | Twitch rate limits or phone verification block sending. | Medium | High | Add local send queue, visible cooldown/status, clear failure messages, and preserve composer text on failure. | Twitch integration engineer | Fake sender rate-limit tests; manual failed-send scenario; no lost composer text. |
-| RR-003 | Terminal image protocol behavior varies across Kitty, Ghostty, and non-Kitty terminals. | High | Medium | Capability-detect image support; keep image renderer behind interface; ship text/initial fallbacks first. | Asset/image engineer | `twi doctor` image signal later; manual Kitty/Ghostty/non-Kitty matrix; golden fallback snapshots. |
+| RR-003 | Terminal image protocol behavior varies across Kitty, Ghostty, and non-Kitty terminals. | High | Medium | Capability-detect image support; keep image renderer behind interface; ship text/initial fallbacks first. | Asset/image engineer | `twi doctor` image signals; manual Kitty/Ghostty/non-Kitty matrix still pending; golden fallback snapshots. |
 | RR-004 | Image cache or asset downloads slow chat rendering. | Medium | High | Never block Bubble Tea `Update` or `View`; async asset pipeline; bounded cache; placeholders reserve width. | Asset/image engineer | Tests with delayed asset fake; search for blocking I/O in `View`; stress run with cache misses. |
 | RR-005 | Busy channels create an unbounded animation backlog or sluggish UI. | High | High | Bound reveal queue; coalesce/skip reveals under load; support reduced/off modes; render off-screen rows statically. | Motion engineer | Fake clock throughput tests; stress harness; queue length assertions. |
 | RR-006 | Unicode, emoji, ANSI styles, or emote placeholders are corrupted by reveal/wrapping. | High | High | Build reveal units from normalized render fragments, not raw strings; use width-aware and grapheme-safe logic. | Rendering engineer and motion engineer | Golden partial-frame tests; grapheme tests; wide-character layout tests. |

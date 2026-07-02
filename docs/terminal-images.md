@@ -34,34 +34,36 @@ Tier 3:
 
 ## Image Feature Status
 
+Overall status: partial. The renderer, cache boundary, fixed-width prepared
+cell substitution, capability decisions, and visible-row asset event path are
+implemented. Default live resolver/downloader/renderer wiring and manual
+Kitty/Ghostty validation are still planned.
+
 Avatars:
 
-- Resolve Twitch user `profile_image_url` values through Helix Get Users for visible live-chat authors when `avatar_mode = "image"` and Twitch API credentials are configured.
-- Cache profile metadata by user ID and login.
-- Download and cache image assets through the asset resolver/cache boundary.
-- Render fixed-size inline images where supported and prepared cells are available.
-- Fall back to initials or user chips without changing message layout.
+- Current: resolve Twitch user `profile_image_url` metadata through Helix Get Users for visible live-chat authors when `avatar_mode = "image"` and Twitch API credentials are configured.
+- Current: cache profile metadata by user ID and login and keep initials/user-chip fallbacks stable.
+- Partial: app asset events can substitute prepared fixed-width cells when an asset resolver and renderer are installed.
+- Planned: default live startup wiring, image decode/cell preparation, and manual Kitty/Ghostty validation.
 
 Twitch emotes:
 
-- Parse emote positions from Twitch IRC tags.
-- Resolve emote metadata and CDN template URLs.
-- Cache metadata and image assets.
-- Render image emotes where supported and prepared cells are available.
-- Fall back to compact text tokens.
+- Current: parse emote positions from Twitch IRC tags and preserve compact fallback tokens.
+- Current: resolve Twitch emote metadata and CDN template URLs into cached public image refs.
+- Partial: prepared cells can replace fallback tokens where supported and available.
+- Planned: default live startup wiring, image decode/cell preparation, and manual Kitty/Ghostty validation.
 
 Standard emoji:
 
-- Detect emoji grapheme clusters.
-- Resolve provider-neutral emoji image asset keys.
-- Render emoji images where supported and prepared cells are available.
-- Fall back to native Unicode emoji.
+- Current: preserve emoji grapheme clusters as native Unicode fallback text.
+- Current: map emoji grapheme clusters to provider-neutral, URL-free asset keys.
+- Planned: provider metadata, image decode/cell preparation, default live startup wiring, and manual Kitty/Ghostty validation.
 
 Badges:
 
-- Cache global and channel badge metadata.
-- Render as compact labels or prepared image cells.
-- Keep text fallbacks available.
+- Current: resolve/cache Twitch badge metadata into public image refs and compact labels.
+- Partial: prepared cells can replace compact labels where supported and available.
+- Planned: default live startup wiring, image decode/cell preparation, and manual Kitty/Ghostty validation.
 
 ## Capability Decisions
 

@@ -41,17 +41,26 @@ docker compose run --rm mock
 
 | Key | Action |
 | --- | --- |
+| `ctrl+p` | Open or close the command palette. |
 | `tab` | Move focus between chat and composer. |
+| `[` / `]` | Switch the active channel from chat focus. |
 | `?` | Expand or collapse help. |
 | `pgup` / `pgdown` | Scroll chat history. |
 | `up` / `down` | Select a message. |
 | `r` | Reply to the selected message. |
-| `esc` | Cancel reply mode. |
+| `i` | Open or close the selected-message inspect panel. |
+| `ctrl+l` | Clear the active channel's local chat history. |
+| `ctrl+r` | Request a reconnect when the active chat source supports it. |
+| `esc` | Close inspect mode or cancel reply mode. |
 | `enter` | Send the composer text when connected live. |
+
+Mouse support is enabled by default and can be disabled with
+`enable_mouse = false` or `TWI_ENABLE_MOUSE=false`. Keyboard workflows remain
+the primary path.
 
 ## 4. Configure Live Twitch Chat
 
-Live mode is partially shipped: it supports one or more Twitch channels over IRC with read, send, selected-message replies, and `/me` actions. Broader two-channel Twitch manual evidence and login/setup are still planned.
+Live mode is partially shipped: it supports one or more Twitch channels over IRC with read, send, selected-message replies, `/me` actions, keyboard-first channel switching/sidebar state, command palette actions, optional mouse controls, and selected-message inspect diagnostics. Broader two-channel Twitch manual evidence, login/setup, and secure credential storage remain pending.
 
 You need:
 
@@ -167,4 +176,4 @@ go build -o bin/twi ./cmd/twi
 
 Twitch IRC connection status is connection-level: Multi-channel live mode joins each configured channel, but Twitch IRC connect, reconnect, and disconnect callbacks are not independent per-channel events.
 
-Images look like text: Correct for now. Inline terminal image loading is planned; current rendering uses stable text, initials, Unicode, badge, and emote-token fallbacks.
+Images look like text: Expected in the default path. Inline terminal image plumbing is partial, but default live resolver wiring and manual Kitty/Ghostty validation are still planned; current rendering keeps stable text, initials, Unicode, badge, and emote-token fallbacks.

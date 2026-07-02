@@ -13,7 +13,7 @@
 
 `twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-The project is currently an MVP-shaped Go app: mock chat is ready without the network, live Twitch IRC read/send is partially shipped for configured channels, diagnostics are partially shipped, a keyboard-first channel sidebar is present, and login, richer multi-channel UX, and inline terminal images are still planned.
+The project is currently an MVP-shaped Go app: mock chat is ready without the network; live Twitch IRC read/send, diagnostics, multi-channel UX, and inline image plumbing are partially shipped; and login/setup, secure credential storage, default live image resolver wiring, and manual Kitty/Ghostty image validation are still planned.
 
 ```text
         +---------------------------------------------+
@@ -204,4 +204,4 @@ GOTOOLCHAIN=local GOCACHE=/tmp/twi-gocache GOMODCACHE=/tmp/twi-gomodcache go tes
 
 ## Project Direction
 
-Near-term work is focused on keeping the MVP sharp: better credential validation, richer diagnostics, real asset/image rendering, and eventual multi-channel behavior. The source of truth lives in the product docs under `docs/`.
+Near-term work is focused on keeping the MVP sharp: CI coverage, default live asset/image wiring, login/setup with secure storage, reconnect hardening, filters, redacted debug logging, release packaging, and manual terminal validation. The source of truth lives in the product docs under `docs/`.

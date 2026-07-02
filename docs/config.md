@@ -14,7 +14,9 @@ This document describes the configuration model for `twi`. The implemented parse
   selected feature modes, Twitch IRC reachability, terminal hints, Kitty graphics
   signals, and cache directory writability without printing token or client
   secret values.
-- `twi login`, richer multi-channel UI, and inline terminal images are planned.
+- Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
+- Inline terminal image support is partially shipped: renderer cells, stable fallback rows, cache boundaries, capability diagnostics, and visible-row asset event scheduling exist; default live resolver/downloader/renderer wiring and manual Kitty/Ghostty validation remain planned.
+- `twi login`, setup wizard, and secure credential storage are planned.
 - Nested TOML tables are not implemented yet; keep config files flat.
 
 ## Precedence
@@ -143,7 +145,12 @@ twi config path
 twi doctor
 ```
 
-`twi login`, richer multi-channel UI behavior, and inline terminal images are still planned. Twitch IRC chat is current when username, OAuth token, and at least one channel are configured. Future flags for auth and mode settings should follow the precedence rules above.
+`twi login`, setup wizard, secure credential storage, default live image
+resolver wiring, and manual Kitty/Ghostty validation are still planned. Twitch
+IRC chat is current when username, OAuth token, and at least one channel are
+configured. Multi-channel sidebar, command palette, selected-message inspect,
+and optional mouse controls are current app behavior. Future flags for auth and
+mode settings should follow the precedence rules above.
 
 ## Redacted Config Output
 

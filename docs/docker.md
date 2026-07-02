@@ -31,8 +31,11 @@ docker compose run --rm mock
 ## Run Live Chat
 
 Live chat is partially shipped for configured Twitch IRC channels. It can read, send,
-reply, and send `/me` actions when username/token credentials are configured,
-but login/setup and richer multi-channel UI are still planned.
+reply, and send `/me` actions when username/token credentials are configured.
+The keyboard-first channel sidebar, command palette, selected-message inspect
+panel, and optional mouse controls are current app behavior. Login/setup,
+secure credential storage, default live image resolver wiring, and manual
+Kitty/Ghostty image validation are still planned.
 
 Username/token credentials currently come from environment variables or the
 flat config file. Docker examples pass them through environment variables; CLI
