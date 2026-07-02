@@ -21,8 +21,10 @@ func TestHelp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0", code)
 	}
-	if !strings.Contains(stdout.String(), "twi chat") {
-		t.Fatalf("help output missing chat command: %q", stdout.String())
+	for _, want := range []string{"twi chat", "TWI_ENABLE_MOUSE"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("help output missing %q: %q", want, stdout.String())
+		}
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
