@@ -254,7 +254,7 @@ func TestMockShellFocusHelpAndComposerInput(t *testing.T) {
 		}
 		model = updated.(mockShellModel)
 	}
-	if got, want := model.composerText, "hi q"; got != want {
+	if got, want := model.activeChannelState().composerText, "hi q"; got != want {
 		t.Fatalf("composer text = %q, want %q", got, want)
 	}
 	if !strings.Contains(model.View(), "hi q") {
@@ -334,20 +334,20 @@ func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testi
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
 	model.focus = mockFocusComposer
-	model.composerText = " hello chat "
+	model.activeChannelState().composerText = " hello chat "
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
 	if cmd == nil {
 		t.Fatal("Enter returned nil command, want send command")
 	}
-	if got := model.composerText; got != "" {
+	if got := model.activeChannelState().composerText; got != "" {
 		t.Fatalf("composerText after queue = %q, want cleared", got)
 	}
-	if model.activeSend == nil || model.activeSend.Channel != "example" || model.activeSend.Text != "hello chat" {
-		t.Fatalf("activeSend = %#v, want queued trimmed send for #example", model.activeSend)
+	if model.activeChannelState().activeSend == nil || model.activeChannelState().activeSend.Channel != "example" || model.activeChannelState().activeSend.Text != "hello chat" {
+		t.Fatalf("activeSend = %#v, want queued trimmed send for #example", model.activeChannelState().activeSend)
 	}
-	if got, want := model.sendState, composerSendSending; got != want {
+	if got, want := model.activeChannelState().sendState, composerSendSending; got != want {
 		t.Fatalf("sendState after queue = %q, want %q", got, want)
 	}
 
@@ -361,10 +361,10 @@ func TestLiveShellEnterQueuesComposerSendAndSuccessKeepsComposerCleared(t *testi
 	if cmd != nil {
 		t.Fatalf("successful single send returned extra command %#v", cmd)
 	}
-	if got := model.composerText; got != "" {
+	if got := model.activeChannelState().composerText; got != "" {
 		t.Fatalf("composerText after success = %q, want cleared", got)
 	}
-	if got, want := model.sendState, composerSendSucceeded; got != want {
+	if got, want := model.activeChannelState().sendState, composerSendSucceeded; got != want {
 		t.Fatalf("sendState after success = %q, want %q", got, want)
 	}
 	sent := client.SentRequests()
@@ -380,15 +380,15 @@ func TestLiveShellEnterIgnoresEmptyComposer(t *testing.T) {
 	client := NewFakeChatClient(1)
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
 	model.focus = mockFocusComposer
-	model.composerText = "   "
+	model.activeChannelState().composerText = "   "
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
 	if cmd != nil {
 		t.Fatalf("empty composer returned command %#v, want nil", cmd)
 	}
-	if model.activeSend != nil || len(model.sendQueue) != 0 {
-		t.Fatalf("empty composer queued send: active=%#v queue=%#v", model.activeSend, model.sendQueue)
+	if model.activeChannelState().activeSend != nil || len(model.activeChannelState().sendQueue) != 0 {
+		t.Fatalf("empty composer queued send: active=%#v queue=%#v", model.activeChannelState().activeSend, model.activeChannelState().sendQueue)
 	}
 	if got := client.SentRequests(); len(got) != 0 {
 		t.Fatalf("SentRequests length = %d, want 0", len(got))
@@ -402,7 +402,7 @@ func TestLiveShellFailedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
 	model.focus = mockFocusComposer
-	model.composerText = "please send"
+	model.activeChannelState().composerText = "please send"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
@@ -410,10 +410,10 @@ func TestLiveShellFailedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	updated, _ = model.Update(completed)
 	model = updated.(mockShellModel)
 
-	if got, want := model.composerText, "please send"; got != want {
+	if got, want := model.activeChannelState().composerText, "please send"; got != want {
 		t.Fatalf("composerText after failed send = %q, want %q", got, want)
 	}
-	if got, want := model.sendState, composerSendFailed; got != want {
+	if got, want := model.activeChannelState().sendState, composerSendFailed; got != want {
 		t.Fatalf("sendState after failure = %q, want %q", got, want)
 	}
 	for _, want := range []string{"failed", "network unavailable"} {
@@ -430,7 +430,7 @@ func TestLiveShellSendFailureUsesSendScopeGuidance(t *testing.T) {
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
 	model.focus = mockFocusComposer
-	model.composerText = "please send"
+	model.activeChannelState().composerText = "please send"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
@@ -438,16 +438,16 @@ func TestLiveShellSendFailureUsesSendScopeGuidance(t *testing.T) {
 	updated, _ = model.Update(completed)
 	model = updated.(mockShellModel)
 
-	if strings.Contains(model.sendFeedback, "oauth:secret-token") {
-		t.Fatalf("sendFeedback leaked token: %q", model.sendFeedback)
+	if strings.Contains(model.activeChannelState().sendFeedback, "oauth:secret-token") {
+		t.Fatalf("sendFeedback leaked token: %q", model.activeChannelState().sendFeedback)
 	}
 	for _, want := range []string{"chat:edit", "send failed"} {
-		if !strings.Contains(model.sendFeedback, want) {
-			t.Fatalf("sendFeedback = %q, want %q", model.sendFeedback, want)
+		if !strings.Contains(model.activeChannelState().sendFeedback, want) {
+			t.Fatalf("sendFeedback = %q, want %q", model.activeChannelState().sendFeedback, want)
 		}
 	}
-	if strings.Contains(model.sendFeedback, "chat:read") {
-		t.Fatalf("sendFeedback points at read scope instead of edit scope: %q", model.sendFeedback)
+	if strings.Contains(model.activeChannelState().sendFeedback, "chat:read") {
+		t.Fatalf("sendFeedback points at read scope instead of edit scope: %q", model.activeChannelState().sendFeedback)
 	}
 }
 
@@ -458,7 +458,7 @@ func TestLiveShellFailedSendRestoresQueuedFollowupText(t *testing.T) {
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
 	model.focus = mockFocusComposer
-	model.composerText = "first message"
+	model.activeChannelState().composerText = "first message"
 
 	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
@@ -466,16 +466,16 @@ func TestLiveShellFailedSendRestoresQueuedFollowupText(t *testing.T) {
 		t.Fatal("first Enter returned nil command, want send command")
 	}
 
-	model.composerText = "second message"
+	model.activeChannelState().composerText = "second message"
 	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
 	if secondCmd != nil {
 		t.Fatalf("queued follow-up returned command %#v while first send active, want nil", secondCmd)
 	}
-	if got := model.composerText; got != "" {
+	if got := model.activeChannelState().composerText; got != "" {
 		t.Fatalf("composerText after queued follow-up = %q, want cleared", got)
 	}
-	if got := len(model.sendQueue); got != 1 {
+	if got := len(model.activeChannelState().sendQueue); got != 1 {
 		t.Fatalf("sendQueue length = %d, want 1 queued follow-up", got)
 	}
 
@@ -485,12 +485,12 @@ func TestLiveShellFailedSendRestoresQueuedFollowupText(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("failed send returned next queued command %#v, want queue stopped", cmd)
 	}
-	if got := len(model.sendQueue); got != 0 {
+	if got := len(model.activeChannelState().sendQueue); got != 0 {
 		t.Fatalf("sendQueue length after failure = %d, want drained into composer", got)
 	}
 	for _, want := range []string{"first message", "second message"} {
-		if !strings.Contains(model.composerText, want) {
-			t.Fatalf("composerText after failed queued send = %q, want it to contain %q", model.composerText, want)
+		if !strings.Contains(model.activeChannelState().composerText, want) {
+			t.Fatalf("composerText after failed queued send = %q, want it to contain %q", model.activeChannelState().composerText, want)
 		}
 	}
 	if got := len(client.SentRequests()); got != 1 {
@@ -514,7 +514,7 @@ func TestLiveShellRateLimitedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
 	model.focus = mockFocusComposer
-	model.composerText = "slow down?"
+	model.activeChannelState().composerText = "slow down?"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
@@ -522,16 +522,175 @@ func TestLiveShellRateLimitedSendShowsReasonAndRestoresComposer(t *testing.T) {
 	updated, _ = model.Update(completed)
 	model = updated.(mockShellModel)
 
-	if got, want := model.composerText, "slow down?"; got != want {
+	if got, want := model.activeChannelState().composerText, "slow down?"; got != want {
 		t.Fatalf("composerText after rate limit = %q, want %q", got, want)
 	}
-	if got, want := model.sendState, composerSendRateLimited; got != want {
+	if got, want := model.activeChannelState().sendState, composerSendRateLimited; got != want {
 		t.Fatalf("sendState after rate limit = %q, want %q", got, want)
 	}
 	for _, want := range []string{"rate limited", "sending messages too quickly"} {
 		if !strings.Contains(model.View(), want) {
 			t.Fatalf("view missing %q after rate limit:\n%s", want, model.View())
 		}
+	}
+}
+
+func TestLiveShellKeepsComposerSendStatePerChannel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	client := NewFakeChatClient(3)
+	for _, queued := range []struct {
+		result SendResult
+		err    error
+	}{
+		{result: SendResult{AcceptedAt: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC), Detail: "beta action accepted"}},
+		{result: SendResult{RateLimited: true, RetryAfter: 10 * time.Second, Detail: "alpha cooldown"}},
+		{err: fmt.Errorf("network unavailable")},
+	} {
+		if err := client.QueueSendResult(queued.result, queued.err); err != nil {
+			t.Fatalf("QueueSendResult returned error: %v", err)
+		}
+	}
+	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+	alpha := model.channels.ensure("alpha")
+	beta := model.channels.ensure("beta")
+	alpha.messages = []twitch.ChatMessage{
+		{ID: "alpha-parent", Channel: "alpha", Timestamp: time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC), DisplayName: "alpha_viewer", Text: "alpha question", Type: twitch.MessageTypeChat},
+	}
+	beta.messages = []twitch.ChatMessage{
+		{ID: "beta-parent", Channel: "beta", Timestamp: time.Date(2026, 7, 2, 12, 0, 1, 0, time.UTC), DisplayName: "beta_viewer", Text: "beta question", Type: twitch.MessageTypeChat},
+	}
+
+	alpha.composerText = "alpha draft"
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("alpha reply selection returned command %#v, want nil", cmd)
+	}
+	if alpha.replyTo == nil || alpha.replyTo.MessageID != "alpha-parent" {
+		t.Fatalf("alpha replyTo = %#v, want alpha-parent", alpha.replyTo)
+	}
+
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("switch to beta returned command %#v, want nil", cmd)
+	}
+	if got, want := model.activeChannelName(), "beta"; got != want {
+		t.Fatalf("active channel = %q, want %q", got, want)
+	}
+	if got, want := alpha.composerText, "alpha draft"; got != want {
+		t.Fatalf("alpha draft after switching = %q, want %q", got, want)
+	}
+	if got := beta.composerText; got != "" {
+		t.Fatalf("beta draft after switching = %q, want empty", got)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model = updated.(mockShellModel)
+	if beta.replyTo == nil || beta.replyTo.MessageID != "beta-parent" {
+		t.Fatalf("beta replyTo = %#v, want beta-parent", beta.replyTo)
+	}
+	model.focus = mockFocusComposer
+	beta.composerText = " /me beta waves "
+	updated, betaActionCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if betaActionCmd == nil {
+		t.Fatal("beta /me Enter returned nil command, want send command")
+	}
+	if beta.replyTo != nil || beta.composerText != "" {
+		t.Fatalf("beta composer after queue = text %q reply %#v, want cleared", beta.composerText, beta.replyTo)
+	}
+
+	model.focus = mockFocusChat
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	model = updated.(mockShellModel)
+	if got, want := model.activeChannelName(), "alpha"; got != want {
+		t.Fatalf("active channel = %q, want %q", got, want)
+	}
+	if alpha.replyTo == nil || alpha.replyTo.MessageID != "alpha-parent" || alpha.composerText != "alpha draft" {
+		t.Fatalf("alpha state after beta queue = text %q reply %#v, want preserved", alpha.composerText, alpha.replyTo)
+	}
+	updated, _ = model.Update(betaActionCmd().(composerSendCompletedMsg))
+	model = updated.(mockShellModel)
+	if got, want := alpha.composerText, "alpha draft"; got != want {
+		t.Fatalf("alpha draft after off-channel beta completion = %q, want %q", got, want)
+	}
+	if got, want := beta.sendState, composerSendSucceeded; got != want {
+		t.Fatalf("beta sendState after action success = %q, want %q", got, want)
+	}
+
+	model.focus = mockFocusComposer
+	alpha.composerText = "alpha reply body"
+	updated, alphaRateLimitCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if alphaRateLimitCmd == nil {
+		t.Fatal("alpha reply Enter returned nil command, want send command")
+	}
+	updated, _ = model.Update(alphaRateLimitCmd().(composerSendCompletedMsg))
+	model = updated.(mockShellModel)
+	if got, want := alpha.composerText, "alpha reply body"; got != want {
+		t.Fatalf("alpha draft after rate limit = %q, want %q", got, want)
+	}
+	if alpha.replyTo == nil || alpha.replyTo.MessageID != "alpha-parent" {
+		t.Fatalf("alpha replyTo after rate limit = %#v, want alpha-parent", alpha.replyTo)
+	}
+	if got, want := alpha.sendState, composerSendRateLimited; got != want {
+		t.Fatalf("alpha sendState after rate limit = %q, want %q", got, want)
+	}
+	if !strings.Contains(alpha.sendFeedback, "alpha cooldown") {
+		t.Fatalf("alpha sendFeedback = %q, want rate-limit detail", alpha.sendFeedback)
+	}
+
+	model.focus = mockFocusChat
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	model = updated.(mockShellModel)
+	if got, want := model.activeChannelName(), "beta"; got != want {
+		t.Fatalf("active channel = %q, want %q", got, want)
+	}
+	if strings.Contains(model.View(), "alpha cooldown") {
+		t.Fatalf("beta view leaked alpha rate-limit feedback:\n%s", model.View())
+	}
+	model.focus = mockFocusComposer
+	beta.composerText = "beta failed send"
+	updated, betaFailureCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if betaFailureCmd == nil {
+		t.Fatal("beta failed-send Enter returned nil command, want send command")
+	}
+
+	model.focus = mockFocusChat
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	model = updated.(mockShellModel)
+	alpha.composerText = "alpha fresh draft"
+	updated, _ = model.Update(betaFailureCmd().(composerSendCompletedMsg))
+	model = updated.(mockShellModel)
+	if got, want := beta.composerText, "beta failed send"; got != want {
+		t.Fatalf("beta draft after off-channel failure = %q, want %q", got, want)
+	}
+	if got, want := alpha.composerText, "alpha fresh draft"; got != want {
+		t.Fatalf("alpha draft after off-channel beta failure = %q, want %q", got, want)
+	}
+	if got, want := beta.sendState, composerSendFailed; got != want {
+		t.Fatalf("beta sendState after failure = %q, want %q", got, want)
+	}
+	if !strings.Contains(beta.sendFeedback, "network unavailable") {
+		t.Fatalf("beta sendFeedback = %q, want failure detail", beta.sendFeedback)
+	}
+
+	sent := client.SentRequests()
+	if got, want := len(sent), 3; got != want {
+		t.Fatalf("SentRequests length = %d, want %d: %#v", got, want, sent)
+	}
+	if sent[0].Channel != "beta" || !sent[0].Action || sent[0].Text != "beta waves" {
+		t.Fatalf("first send = %#v, want beta /me action", sent[0])
+	}
+	if sent[1].Channel != "alpha" || sent[1].ReplyToMessageID != "alpha-parent" || sent[1].Text != "alpha reply body" {
+		t.Fatalf("second send = %#v, want alpha reply", sent[1])
+	}
+	if sent[2].Channel != "beta" || sent[2].Text != "beta failed send" {
+		t.Fatalf("third send = %#v, want beta failed send", sent[2])
 	}
 }
 
@@ -556,15 +715,15 @@ func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.
 			Type:        twitch.MessageTypeChat,
 		},
 	}
-	model.composerText = "draft reply"
+	model.activeChannelState().composerText = "draft reply"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyUp})
 	model = updated.(mockShellModel)
 	if cmd != nil {
 		t.Fatalf("select reply returned command %#v, want nil", cmd)
 	}
-	if model.replyTo == nil || model.replyTo.MessageID != "parent-1" {
-		t.Fatalf("replyTo = %#v, want parent-1 context", model.replyTo)
+	if model.activeChannelState().replyTo == nil || model.activeChannelState().replyTo.MessageID != "parent-1" {
+		t.Fatalf("replyTo = %#v, want parent-1 context", model.activeChannelState().replyTo)
 	}
 	for _, want := range []string{"Replying to viewer", "question for chat"} {
 		if !strings.Contains(model.View(), want) {
@@ -577,10 +736,10 @@ func TestLiveShellSelectsReplyContextAndEscCancelsWithoutLosingDraft(t *testing.
 	if cmd != nil {
 		t.Fatalf("esc returned command %#v, want nil", cmd)
 	}
-	if model.replyTo != nil {
-		t.Fatalf("replyTo after esc = %#v, want nil", model.replyTo)
+	if model.activeChannelState().replyTo != nil {
+		t.Fatalf("replyTo after esc = %#v, want nil", model.activeChannelState().replyTo)
 	}
-	if got, want := model.composerText, "draft reply"; got != want {
+	if got, want := model.activeChannelState().composerText, "draft reply"; got != want {
 		t.Fatalf("composerText after esc = %q, want %q", got, want)
 	}
 	if strings.Contains(model.View(), "Replying to viewer") {
@@ -618,11 +777,11 @@ func TestLiveShellRStartsReplyModeAndReplySendUsesParentID(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("r returned command %#v, want nil", cmd)
 	}
-	if model.replyTo == nil || model.replyTo.MessageID != "parent-2" || model.focus != mockFocusComposer {
-		t.Fatalf("reply mode = replyTo %#v focus %v, want latest parent and composer focus", model.replyTo, model.focus)
+	if model.activeChannelState().replyTo == nil || model.activeChannelState().replyTo.MessageID != "parent-2" || model.focus != mockFocusComposer {
+		t.Fatalf("reply mode = replyTo %#v focus %v, want latest parent and composer focus", model.activeChannelState().replyTo, model.focus)
 	}
 
-	model.composerText = " thanks "
+	model.activeChannelState().composerText = " thanks "
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
 	if cmd == nil {
@@ -645,8 +804,8 @@ func TestLiveShellRStartsReplyModeAndReplySendUsesParentID(t *testing.T) {
 	if sent[0].Action {
 		t.Fatalf("Action = true, want false for normal reply")
 	}
-	if model.replyTo != nil {
-		t.Fatalf("replyTo after successful reply send = %#v, want nil", model.replyTo)
+	if model.activeChannelState().replyTo != nil {
+		t.Fatalf("replyTo after successful reply send = %#v, want nil", model.activeChannelState().replyTo)
 	}
 }
 
@@ -657,7 +816,7 @@ func TestLiveShellMeInputQueuesActionSend(t *testing.T) {
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
 	model.focus = mockFocusComposer
-	model.composerText = " /me waves at chat "
+	model.activeChannelState().composerText = " /me waves at chat "
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
@@ -687,8 +846,8 @@ func TestLiveShellFailedReplyRestoresReplyContext(t *testing.T) {
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
 	model.focus = mockFocusComposer
-	model.replyTo = &composerReplyContext{MessageID: "parent-1", Author: "viewer", Text: "original"}
-	model.composerText = "reply body"
+	model.activeChannelState().replyTo = &composerReplyContext{MessageID: "parent-1", Author: "viewer", Text: "original"}
+	model.activeChannelState().composerText = "reply body"
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
@@ -696,11 +855,11 @@ func TestLiveShellFailedReplyRestoresReplyContext(t *testing.T) {
 	updated, _ = model.Update(completed)
 	model = updated.(mockShellModel)
 
-	if got, want := model.composerText, "reply body"; got != want {
+	if got, want := model.activeChannelState().composerText, "reply body"; got != want {
 		t.Fatalf("composerText after failed reply = %q, want %q", got, want)
 	}
-	if model.replyTo == nil || model.replyTo.MessageID != "parent-1" {
-		t.Fatalf("replyTo after failed reply = %#v, want parent-1", model.replyTo)
+	if model.activeChannelState().replyTo == nil || model.activeChannelState().replyTo.MessageID != "parent-1" {
+		t.Fatalf("replyTo after failed reply = %#v, want parent-1", model.activeChannelState().replyTo)
 	}
 }
 
@@ -711,8 +870,8 @@ func TestLiveShellFailedMixedQueueDoesNotMisapplyReplyContext(t *testing.T) {
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, nil)
 	model.focus = mockFocusComposer
-	model.replyTo = &composerReplyContext{MessageID: "parent-1", Author: "viewer", Text: "original"}
-	model.composerText = "reply body"
+	model.activeChannelState().replyTo = &composerReplyContext{MessageID: "parent-1", Author: "viewer", Text: "original"}
+	model.activeChannelState().composerText = "reply body"
 
 	updated, firstCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
@@ -720,7 +879,7 @@ func TestLiveShellFailedMixedQueueDoesNotMisapplyReplyContext(t *testing.T) {
 		t.Fatal("first reply Enter returned nil command, want send command")
 	}
 
-	model.composerText = "plain followup"
+	model.activeChannelState().composerText = "plain followup"
 	updated, secondCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model = updated.(mockShellModel)
 	if secondCmd != nil {
@@ -732,12 +891,12 @@ func TestLiveShellFailedMixedQueueDoesNotMisapplyReplyContext(t *testing.T) {
 	model = updated.(mockShellModel)
 
 	for _, want := range []string{"reply body", "plain followup"} {
-		if !strings.Contains(model.composerText, want) {
-			t.Fatalf("composerText after failed mixed queue = %q, want it to contain %q", model.composerText, want)
+		if !strings.Contains(model.activeChannelState().composerText, want) {
+			t.Fatalf("composerText after failed mixed queue = %q, want it to contain %q", model.activeChannelState().composerText, want)
 		}
 	}
-	if model.replyTo != nil {
-		t.Fatalf("replyTo after failed mixed queue = %#v, want nil to avoid wrong parent", model.replyTo)
+	if model.activeChannelState().replyTo != nil {
+		t.Fatalf("replyTo after failed mixed queue = %#v, want nil to avoid wrong parent", model.activeChannelState().replyTo)
 	}
 }
 
@@ -833,7 +992,7 @@ func TestMockShellInputAndScrollRemainResponsiveDuringAnimation(t *testing.T) {
 	if cmd != nil {
 		t.Fatalf("composer input during animation returned command %#v, want nil", cmd)
 	}
-	if got, want := model.composerText, "ok"; got != want {
+	if got, want := model.activeChannelState().composerText, "ok"; got != want {
 		t.Fatalf("composer text during animation = %q, want %q", got, want)
 	}
 	if got := model.activeChannelState().revealQueue.Len(); got != 1 {
@@ -902,7 +1061,7 @@ func TestLiveShellBurstKeepsRevealQueueBoundedAndControlsResponsive(t *testing.T
 	if cmd != nil {
 		t.Fatalf("composer input during burst returned command %#v, want nil", cmd)
 	}
-	if got, want := model.composerText, "still responsive"; got != want {
+	if got, want := model.activeChannelState().composerText, "still responsive"; got != want {
 		t.Fatalf("composer text during burst = %q, want %q", got, want)
 	}
 	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -913,11 +1072,11 @@ func TestLiveShellBurstKeepsRevealQueueBoundedAndControlsResponsive(t *testing.T
 	completed := cmd().(composerSendCompletedMsg)
 	updated, _ = model.Update(completed)
 	model = updated.(mockShellModel)
-	if got, want := model.sendState, composerSendSucceeded; got != want {
+	if got, want := model.activeChannelState().sendState, composerSendSucceeded; got != want {
 		t.Fatalf("sendState after burst send = %q, want %q", got, want)
 	}
-	if !strings.Contains(model.sendFeedback, "accepted during burst") {
-		t.Fatalf("sendFeedback after burst = %q, want accepted detail", model.sendFeedback)
+	if !strings.Contains(model.activeChannelState().sendFeedback, "accepted during burst") {
+		t.Fatalf("sendFeedback after burst = %q, want accepted detail", model.activeChannelState().sendFeedback)
 	}
 }
 
@@ -1088,10 +1247,10 @@ func TestLiveShellAssetEventsPreserveViewportReplyAndComposer(t *testing.T) {
 	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgUp})
 	model = updated.(mockShellModel)
 	model.focus = mockFocusComposer
-	model.composerText = "draft reply"
-	model.replyTo = &composerReplyContext{MessageID: "mock-35", Author: "viewer", Text: "message-35"}
+	model.activeChannelState().composerText = "draft reply"
+	model.activeChannelState().replyTo = &composerReplyContext{MessageID: "mock-35", Author: "viewer", Text: "message-35"}
 	beforeOffset := model.activeChannelState().scrollOffset
-	beforeReply := *model.replyTo
+	beforeReply := *model.activeChannelState().replyTo
 	beforeView := model.View()
 
 	updated, _ = model.Update(assetPreparedBatchMsg{results: []assetPreparedMsg{
@@ -1106,11 +1265,11 @@ func TestLiveShellAssetEventsPreserveViewportReplyAndComposer(t *testing.T) {
 	if got, want := model.focus, mockFocusComposer; got != want {
 		t.Fatalf("focus after asset update = %v, want %v", got, want)
 	}
-	if got, want := model.composerText, "draft reply"; got != want {
+	if got, want := model.activeChannelState().composerText, "draft reply"; got != want {
 		t.Fatalf("composerText after asset update = %q, want %q", got, want)
 	}
-	if model.replyTo == nil || *model.replyTo != beforeReply {
-		t.Fatalf("replyTo after asset update = %#v, want %#v", model.replyTo, beforeReply)
+	if model.activeChannelState().replyTo == nil || *model.activeChannelState().replyTo != beforeReply {
+		t.Fatalf("replyTo after asset update = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
 	}
 	if after := model.View(); after != beforeView {
 		t.Fatalf("off-screen asset update changed scrolled viewport:\nbefore:\n%s\nafter:\n%s", beforeView, after)
@@ -1365,7 +1524,7 @@ func TestMockShellResizeDuringAnimationStaysWithinBounds(t *testing.T) {
 
 func TestMockShellNarrowLayoutStaysWithinBounds(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
-	model.composerText = "hello 😀 表"
+	model.activeChannelState().composerText = "hello 😀 表"
 	model.activeChannelState().messages = append(model.activeChannelState().messages, twitch.ChatMessage{
 		ID:          "wide",
 		Channel:     "example",
@@ -1403,7 +1562,7 @@ func TestMockShellTinyWidthsDoNotExceedWindowWidth(t *testing.T) {
 	for width := 1; width <= 5; width++ {
 		t.Run(fmt.Sprintf("width-%d", width), func(t *testing.T) {
 			model := newMockShellModel("example", config.Default())
-			model.composerText = "😀表"
+			model.activeChannelState().composerText = "😀表"
 
 			updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: 8})
 			view := updated.View()

@@ -65,13 +65,7 @@ type mockShellModel struct {
 	height                int
 	focus                 mockFocus
 	helpExpanded          bool
-	composerText          string
-	replyTo               *composerReplyContext
 	nextSend              int
-	activeSend            *queuedComposerSend
-	sendQueue             []queuedComposerSend
-	sendState             composerSendState
-	sendFeedback          string
 	revealTickScheduled   bool
 	avatarLookupScheduled bool
 	avatarLookupInFlight  bool
@@ -403,7 +397,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.deleteComposerRune()
 			}
 		case tea.KeyEsc:
-			m.replyTo = nil
+			m.activeChannelState().replyTo = nil
 		case tea.KeyUp:
 			if m.focus == mockFocusChat {
 				m.selectReplyMessage(-1)
@@ -414,7 +408,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case tea.KeyCtrlU:
 			if m.focus == mockFocusComposer {
-				m.composerText = ""
+				m.activeChannelState().composerText = ""
 			}
 		case tea.KeyEnter:
 			if m.focus == mockFocusComposer {
@@ -422,7 +416,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case tea.KeySpace:
 			if m.focus == mockFocusComposer {
-				m.composerText += " "
+				m.activeChannelState().composerText += " "
 			}
 		case tea.KeyRunes:
 			if len(msg.Runes) == 1 && msg.Runes[0] == '?' {
@@ -452,7 +446,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.focus == mockFocusComposer {
-				m.composerText += string(msg.Runes)
+				m.activeChannelState().composerText += string(msg.Runes)
 			}
 		}
 	case tea.WindowSizeMsg:
@@ -578,8 +572,8 @@ func (m mockShellModel) statusLine(width int) string {
 	if totalUnread := m.channels.totalUnread(); totalUnread > 0 && width >= 48 {
 		left += fmt.Sprintf(" | unread=%d", totalUnread)
 	}
-	if width >= 50 && m.sendFeedback != "" {
-		left += " | send: " + m.sendFeedback
+	if width >= 50 && active.sendFeedback != "" {
+		left += " | send: " + active.sendFeedback
 	} else if width >= 34 && active.status.Detail != "" {
 		left += " - " + active.status.Detail
 	}
@@ -651,30 +645,31 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 }
 
 func (m mockShellModel) composerView(layout mockShellLayout) string {
+	active := m.activeChannelState()
 	label := fmt.Sprintf(" Message #%s", m.activeChannelName())
 	if m.focus == mockFocusComposer {
 		label += " [focus]"
 	}
-	if m.sendState != composerSendIdle && layout.width >= 36 {
-		label += " - " + string(m.sendState)
+	if active.sendState != composerSendIdle && layout.width >= 36 {
+		label += " - " + string(active.sendState)
 	}
 	if layout.width < 28 {
 		label = " >"
 	}
-	input := m.composerText
+	input := active.composerText
 	if input == "" {
 		input = "Type a message..."
 	}
 	input = " " + fitLine(input, clampMin(layout.width-4, 1))
 	if !layout.composerFramed {
-		if m.replyTo != nil {
+		if active.replyTo != nil {
 			input = m.replyContextLine(layout.width) + "\n" + input
 		}
 		return fitBlock(input, layout.width, layout.composerHeight)
 	}
 
 	lines := []string{}
-	if m.replyTo != nil && layout.composerContentHeight >= 3 {
+	if active.replyTo != nil && layout.composerContentHeight >= 3 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("#cdd6f4")).Italic(true).Render(m.replyContextLine(layout.width-4)))
 	}
 	lines = append(lines,
@@ -800,7 +795,7 @@ func (m mockShellModel) layout() mockShellLayout {
 
 	layout.composerHeight = 4
 	layout.composerContentHeight = 2
-	if m.replyTo != nil {
+	if m.activeChannelState().replyTo != nil {
 		layout.composerHeight++
 		layout.composerContentHeight++
 	}
@@ -1457,49 +1452,50 @@ func (m *mockShellModel) refreshActiveRevealRows() {
 }
 
 func (m *mockShellModel) queueComposerSend() (tea.Model, tea.Cmd) {
-	draft := strings.TrimSpace(m.composerText)
+	state := m.activeChannelState()
+	draft := strings.TrimSpace(state.composerText)
 	text, action := composerSendText(draft)
 	if text == "" {
 		return *m, nil
 	}
 	if m.client == nil {
-		m.sendState = composerSendFailed
-		m.sendFeedback = "send unavailable for this chat source"
+		state.sendState = composerSendFailed
+		state.sendFeedback = "send unavailable for this chat source"
 		return *m, nil
 	}
 
 	m.nextSend++
-	channel := m.activeChannelName()
-	m.sendQueue = append(m.sendQueue, queuedComposerSend{
+	channel := state.name
+	state.sendQueue = append(state.sendQueue, queuedComposerSend{
 		ID:               m.nextSend,
 		Channel:          channel,
 		Text:             text,
 		Draft:            draft,
-		ReplyToMessageID: replyMessageID(m.replyTo),
+		ReplyToMessageID: replyMessageID(state.replyTo),
 		Action:           action,
-		Reply:            cloneComposerReply(m.replyTo),
+		Reply:            cloneComposerReply(state.replyTo),
 	})
-	m.composerText = ""
-	m.replyTo = nil
-	m.sendState = composerSendQueued
-	m.sendFeedback = fmt.Sprintf("queued for #%s", channel)
-	return *m, m.startNextComposerSend()
+	state.composerText = ""
+	state.replyTo = nil
+	state.sendState = composerSendQueued
+	state.sendFeedback = fmt.Sprintf("queued for #%s", channel)
+	return *m, m.startNextComposerSend(state)
 }
 
-func (m *mockShellModel) startNextComposerSend() tea.Cmd {
-	if m.activeSend != nil || len(m.sendQueue) == 0 {
+func (m *mockShellModel) startNextComposerSend(state *channelState) tea.Cmd {
+	if state == nil || state.activeSend != nil || len(state.sendQueue) == 0 {
 		return nil
 	}
-	next := m.sendQueue[0]
-	m.sendQueue = m.sendQueue[1:]
-	m.activeSend = &next
-	m.sendState = composerSendSending
-	m.sendFeedback = fmt.Sprintf("sending to #%s", next.Channel)
+	next := state.sendQueue[0]
+	state.sendQueue = state.sendQueue[1:]
+	state.activeSend = &next
+	state.sendState = composerSendSending
+	state.sendFeedback = fmt.Sprintf("sending to #%s", next.Channel)
 	if next.ReplyToMessageID != "" {
-		m.sendFeedback = "sending reply to " + replyAuthor(next.Reply)
+		state.sendFeedback = "sending reply to " + replyAuthor(next.Reply)
 	}
 	if next.Action {
-		m.sendFeedback = "sending action to #" + next.Channel
+		state.sendFeedback = "sending action to #" + next.Channel
 	}
 	client := m.client
 	req := SendRequest{
@@ -1515,55 +1511,74 @@ func (m *mockShellModel) startNextComposerSend() tea.Cmd {
 }
 
 func (m mockShellModel) completeComposerSend(msg composerSendCompletedMsg) (tea.Model, tea.Cmd) {
-	if m.activeSend == nil || m.activeSend.ID != msg.id {
+	state := m.channelStateForActiveSend(msg.id)
+	if state == nil || state.activeSend == nil {
 		return m, nil
 	}
 
-	sent := *m.activeSend
-	m.activeSend = nil
+	sent := *state.activeSend
+	state.activeSend = nil
 	if msg.err != nil {
-		m.sendState = composerSendFailed
-		m.sendFeedback = "failed: " + credentialSafeSendDetail(msg.err)
-		texts, reply := m.drainUnsentComposerSends(sent)
-		m.restoreComposerText(texts...)
-		m.replyTo = reply
+		state.sendState = composerSendFailed
+		state.sendFeedback = "failed: " + credentialSafeSendDetail(msg.err)
+		texts, reply := state.drainUnsentComposerSends(sent)
+		state.restoreComposerText(texts...)
+		state.replyTo = reply
 		return m, nil
 	}
 	if msg.result.RateLimited {
-		m.sendState = composerSendRateLimited
-		m.sendFeedback = "rate limited: " + sendResultDetail(msg.result)
-		texts, reply := m.drainUnsentComposerSends(sent)
-		m.restoreComposerText(texts...)
-		m.replyTo = reply
+		state.sendState = composerSendRateLimited
+		state.sendFeedback = "rate limited: " + sendResultDetail(msg.result)
+		texts, reply := state.drainUnsentComposerSends(sent)
+		state.restoreComposerText(texts...)
+		state.replyTo = reply
 		return m, nil
 	}
 
-	m.sendState = composerSendSucceeded
-	m.sendFeedback = sendResultDetail(msg.result)
-	return m, m.startNextComposerSend()
+	state.sendState = composerSendSucceeded
+	state.sendFeedback = sendResultDetail(msg.result)
+	return m, m.startNextComposerSend(state)
 }
 
-func (m *mockShellModel) drainUnsentComposerSends(active queuedComposerSend) ([]string, *composerReplyContext) {
-	texts := make([]string, 0, len(m.sendQueue)+1)
+func (m mockShellModel) channelStateForActiveSend(id int) *channelState {
+	if m.channels == nil {
+		return nil
+	}
+	for _, state := range m.channels.states {
+		if state != nil && state.activeSend != nil && state.activeSend.ID == id {
+			return state
+		}
+	}
+	return nil
+}
+
+func (s *channelState) drainUnsentComposerSends(active queuedComposerSend) ([]string, *composerReplyContext) {
+	if s == nil {
+		return nil, nil
+	}
+	texts := make([]string, 0, len(s.sendQueue)+1)
 	texts = append(texts, active.restoreText())
-	for _, queued := range m.sendQueue {
+	for _, queued := range s.sendQueue {
 		texts = append(texts, queued.restoreText())
 	}
-	reply := commonReplyContext(active, m.sendQueue)
-	m.sendQueue = nil
+	reply := commonReplyContext(active, s.sendQueue)
+	s.sendQueue = nil
 	return texts, reply
 }
 
-func (m *mockShellModel) restoreComposerText(texts ...string) {
+func (s *channelState) restoreComposerText(texts ...string) {
+	if s == nil {
+		return
+	}
 	text := strings.TrimSpace(strings.Join(texts, " "))
 	if text == "" {
 		return
 	}
-	if strings.TrimSpace(m.composerText) == "" {
-		m.composerText = text
+	if strings.TrimSpace(s.composerText) == "" {
+		s.composerText = text
 		return
 	}
-	m.composerText = text + " " + m.composerText
+	s.composerText = text + " " + s.composerText
 }
 
 func sendResultDetail(result SendResult) string {
@@ -1672,11 +1687,12 @@ func (m mockShellModel) renderOptions(width int) render.Options {
 }
 
 func (m *mockShellModel) deleteComposerRune() {
-	if m.composerText == "" {
+	state := m.activeChannelState()
+	if state.composerText == "" {
 		return
 	}
-	runes := []rune(m.composerText)
-	m.composerText = string(runes[:len(runes)-1])
+	runes := []rune(state.composerText)
+	state.composerText = string(runes[:len(runes)-1])
 }
 
 func (m *mockShellModel) selectReplyMessage(delta int) {
@@ -1686,7 +1702,8 @@ func (m *mockShellModel) selectReplyMessage(delta int) {
 	}
 
 	index := -1
-	currentID := replyMessageID(m.replyTo)
+	state := m.activeChannelState()
+	currentID := replyMessageID(state.replyTo)
 	for i, message := range messages {
 		if message.ID == currentID {
 			index = i
@@ -1709,14 +1726,15 @@ func (m *mockShellModel) selectReplyMessage(delta int) {
 		}
 	}
 
-	m.replyTo = replyContextFromMessage(messages[index])
+	state.replyTo = replyContextFromMessage(messages[index])
 }
 
 func (m *mockShellModel) startReplyMode() {
-	if m.replyTo == nil {
+	state := m.activeChannelState()
+	if state.replyTo == nil {
 		m.selectReplyMessage(-1)
 	}
-	if m.replyTo != nil {
+	if state.replyTo != nil {
 		m.focus = mockFocusComposer
 	}
 }
@@ -1764,12 +1782,13 @@ func compactReplyText(text string) string {
 }
 
 func (m mockShellModel) replyContextLine(width int) string {
-	if m.replyTo == nil {
+	reply := m.activeChannelState().replyTo
+	if reply == nil {
 		return ""
 	}
-	line := " Replying to " + replyAuthor(m.replyTo)
-	if m.replyTo.Text != "" {
-		line += ": " + m.replyTo.Text
+	line := " Replying to " + replyAuthor(reply)
+	if reply.Text != "" {
+		line += ": " + reply.Text
 	}
 	return fitLine(line, clampMin(width, 1))
 }

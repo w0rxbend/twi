@@ -24,6 +24,12 @@ type channelState struct {
 	activeOrder    []string
 	activeMessages map[string]twitch.ChatMessage
 	unread         int
+	composerText   string
+	replyTo        *composerReplyContext
+	activeSend     *queuedComposerSend
+	sendQueue      []queuedComposerSend
+	sendState      composerSendState
+	sendFeedback   string
 }
 
 func newChannelStateSet(channels []string, animationConfig animation.Config, clock animation.Clock) *channelStateSet {
