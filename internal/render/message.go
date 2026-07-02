@@ -395,7 +395,7 @@ func normalizedFragments(in []twitch.MessageFragment, opts Options) []Fragment {
 					Foreground: opts.Palette.Success,
 					Bold:       true,
 				},
-				Ref: fragment.Ref,
+				Ref: emoteFragmentRef(fragment),
 			})
 		case twitch.FragmentEmoji:
 			out = append(out, Fragment{
@@ -422,6 +422,14 @@ func normalizedFragments(in []twitch.MessageFragment, opts Options) []Fragment {
 		}
 	}
 	return coalesceAdjacent(out)
+}
+
+func emoteFragmentRef(fragment twitch.MessageFragment) twitch.AssetRef {
+	ref := fragment.Ref
+	if ref.Kind == "" {
+		ref.Kind = "twitch_emote"
+	}
+	return ref
 }
 
 func emoteFallbackFragments(msg twitch.ChatMessage, opts Options) []Fragment {
@@ -462,10 +470,7 @@ func emoteFallbackFragments(msg twitch.ChatMessage, opts Options) []Fragment {
 				Foreground: opts.Palette.Success,
 				Bold:       true,
 			},
-			Ref: twitch.AssetRef{
-				Kind: "twitch_emote",
-				ID:   emote.ID,
-			},
+			Ref: emoteAssetRef(emote),
 		})
 		cursor = end + 1
 	}
@@ -798,10 +803,7 @@ func badgeFallbackFragment(badge twitch.Badge, opts Options) Fragment {
 			Foreground: opts.Palette.Accent,
 			Bold:       true,
 		},
-		Ref: twitch.AssetRef{
-			Kind: "badge",
-			ID:   badgeAssetID(badge),
-		},
+		Ref: badgeAssetRef(badge),
 	}
 }
 
@@ -839,6 +841,28 @@ func badgeAssetID(badge twitch.Badge) string {
 		return badge.SetID
 	}
 	return badge.SetID + "/" + badge.ID
+}
+
+func badgeAssetRef(badge twitch.Badge) twitch.AssetRef {
+	ref := badge.Ref
+	if ref.Kind == "" {
+		ref.Kind = "badge"
+	}
+	if ref.ID == "" {
+		ref.ID = badgeAssetID(badge)
+	}
+	return ref
+}
+
+func emoteAssetRef(emote twitch.Emote) twitch.AssetRef {
+	ref := emote.Ref
+	if ref.Kind == "" {
+		ref.Kind = "twitch_emote"
+	}
+	if ref.ID == "" {
+		ref.ID = emote.ID
+	}
+	return ref
 }
 
 func emojiAssetRef(text string, ref twitch.AssetRef) twitch.AssetRef {

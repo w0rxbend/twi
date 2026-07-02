@@ -52,6 +52,7 @@ type Badge struct {
 	SetID string
 	ID    string
 	Info  string
+	Ref   AssetRef
 }
 
 type Emote struct {
@@ -59,6 +60,7 @@ type Emote struct {
 	Name  string
 	Start int
 	End   int
+	Ref   AssetRef
 }
 
 type Reply struct {
