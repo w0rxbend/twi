@@ -3,6 +3,8 @@ package storage
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -44,5 +46,35 @@ func TestMemoryAssetCacheHonorsContextCancellation(t *testing.T) {
 	}
 	if err := cache.PutAsset(ctx, AssetRecord{Key: key}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("PutAsset error = %v, want context.Canceled", err)
+	}
+}
+
+func TestCheckReadableFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("ok\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile fixture returned error: %v", err)
+	}
+
+	if err := CheckReadableFile(path); err != nil {
+		t.Fatalf("CheckReadableFile returned error: %v", err)
+	}
+	if err := CheckReadableFile(dir); !errors.Is(err, ErrPathIsDirectory) {
+		t.Fatalf("CheckReadableFile directory error = %v, want ErrPathIsDirectory", err)
+	}
+}
+
+func TestProbeWritableDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "cache")
+
+	if err := ProbeWritableDir(dir); err != nil {
+		t.Fatalf("ProbeWritableDir returned error: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir returned error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("probe left entries behind: %#v", entries)
 	}
 }

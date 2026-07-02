@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -105,18 +105,11 @@ func configPathCheck(path string, loadErr error) DoctorCheck {
 	if loadErr != nil {
 		return warnCheck("config file", fmt.Sprintf("%s (load failed: %v; using env/defaults)", path, loadErr))
 	}
-	info, err := os.Stat(path)
+	err := storage.CheckReadableFile(path)
 	switch {
-	case err == nil && !info.IsDir():
-		file, err := os.Open(path)
-		if err != nil {
-			return warnCheck("config file", fmt.Sprintf("%s (not readable: %v)", path, err))
-		}
-		if err := file.Close(); err != nil {
-			return warnCheck("config file", fmt.Sprintf("%s (close failed: %v)", path, err))
-		}
+	case err == nil:
 		return okCheck("config file", fmt.Sprintf("%s (readable)", path))
-	case err == nil && info.IsDir():
+	case errors.Is(err, storage.ErrPathIsDirectory):
 		return warnCheck("config file", fmt.Sprintf("%s is a directory", path))
 	case errors.Is(err, os.ErrNotExist):
 		return warnCheck("config file", fmt.Sprintf("%s (not found; using env/defaults)", path))
@@ -300,30 +293,8 @@ func cacheCheck(cacheDir string) DoctorCheck {
 		}
 		cacheDir = defaultDir
 	}
-	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+	if err := storage.ProbeWritableDir(cacheDir); err != nil {
 		return warnCheck("cache directory", fmt.Sprintf("%s not writable: %v", cacheDir, err))
-	}
-
-	probePath := filepath.Join(cacheDir, ".twi-doctor-write-test")
-	file, err := os.OpenFile(probePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		probePath = filepath.Join(cacheDir, fmt.Sprintf(".twi-doctor-write-test-%d", os.Getpid()))
-		file, err = os.OpenFile(probePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	}
-	if err != nil {
-		return warnCheck("cache directory", fmt.Sprintf("%s not writable: %v", cacheDir, err))
-	}
-	if _, err := file.Write([]byte("ok\n")); err != nil {
-		_ = file.Close()
-		_ = os.Remove(probePath)
-		return warnCheck("cache directory", fmt.Sprintf("%s not writable: %v", cacheDir, err))
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(probePath)
-		return warnCheck("cache directory", fmt.Sprintf("%s writable, but probe close failed: %v", cacheDir, err))
-	}
-	if err := os.Remove(probePath); err != nil {
-		return warnCheck("cache directory", fmt.Sprintf("%s writable, but cleanup failed: %v", cacheDir, err))
 	}
 	return okCheck("cache directory", cacheDir+" writable")
 }
