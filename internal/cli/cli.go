@@ -54,7 +54,7 @@ var newLiveChatClient = func(ctx context.Context, cfg config.Config) (app.ChatCl
 		RefreshToken: cfg.Twitch.RefreshToken,
 		ClientID:     cfg.Twitch.ClientID,
 		ClientSecret: cfg.Twitch.ClientSecret,
-		Channels:     cfg.DefaultChannels[:1],
+		Channels:     cfg.DefaultChannels,
 	})
 	if err != nil {
 		return nil, err
@@ -170,10 +170,6 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 
 	if len(cfg.DefaultChannels) == 0 {
 		fmt.Fprintln(stderr, "no channel configured; pass --channel or set TWI_DEFAULT_CHANNELS")
-		return 2
-	}
-	if len(cfg.DefaultChannels) > 1 {
-		fmt.Fprintln(stderr, "live Twitch chat currently supports one channel; pass one --channel")
 		return 2
 	}
 	if err := validateLiveChatConfig(cfg); err != nil {

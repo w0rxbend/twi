@@ -10,24 +10,24 @@ Source: `PLAN.md`. Current stable Go was verified externally as `go1.26.4` on
 | Area | Status | Notes |
 | --- | --- | --- |
 | Mock chat | Ready | Runs without Twitch credentials or network access. |
-| One-channel live IRC read/send | Partial | Reads, sends, replies, and sends `/me` actions for one configured channel with env/config credentials. Broader manual Twitch evidence remains future work. |
+| Multi-channel live IRC read/send | Partial | Reads, sends, replies, and sends `/me` actions for configured channels with env/config credentials. Broader manual Twitch evidence remains future work. |
 | Diagnostics | Partial | `twi doctor` reports config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability/pruning, and feature modes. |
 | Login/setup | Planned | `twi login` is not implemented. |
-| Multi-channel live chat | Planned | Current live mode intentionally supports one channel. |
+| Multi-channel UX | Partial | Per-channel state and live routing are implemented; sidebar and richer navigation remain planned. |
 | Inline terminal images | Planned | Current renderer uses text, initials, Unicode, badge, and emote-token fallbacks only. |
 
 ## MVP Scope
 
 MVP means the smallest product that proves the chat client can run as a real TUI:
 
-- One-channel Twitch chat read and send over IRC.
+- Twitch chat read and send over IRC for configured channels.
 - Credentials from environment variables or config file, with CLI overrides for channel and config path.
 - Bubble Tea shell with status bar, chat viewport, composer, compact help, resize handling, and text fallbacks.
 - Typed-in reveal for incoming mock and live messages.
 - Test fakes for chat transport, send results, config, and animation timing.
 - No required terminal image support for MVP; image features must have stable text fallbacks.
 
-Later scope includes multi-channel UX, image-backed avatars/emotes/emoji, startup token validation, interactive login, setup wizard, command palette, activity charts, and additional transport/image protocols.
+Later scope includes richer multi-channel UX, image-backed avatars/emotes/emoji, startup token validation, interactive login, setup wizard, command palette, activity charts, and additional transport/image protocols.
 
 ## Support Tiers
 
@@ -41,7 +41,7 @@ Later scope includes multi-channel UX, image-backed avatars/emotes/emoji, startu
 
 | ID | Area | Requirement | MVP | Later | Testability |
 | --- | --- | --- | --- | --- | --- |
-| R-001 | Chat read | Connect to Twitch IRC over TLS, authenticate, join one channel, request tags/commands, and render live `PRIVMSG`, notices, room state, moderation, reconnect, and connection events through normalized messages. | One channel, core message/notice/status events, fake client tests. | EventSub-compatible transport, richer event coverage. | Fake `ChatClient` integration tests; manual low-traffic channel check; reconnect state tests. |
+| R-001 | Chat read | Connect to Twitch IRC over TLS, authenticate, join configured channels, request tags/commands, and render live `PRIVMSG`, notices, room state, moderation, reconnect, and connection events through normalized messages. | Configured-channel IRC join, core message/notice/status events, fake client tests. Twitch IRC connect/reconnect/disconnect callbacks are connection-level, not independent per-channel events. | EventSub-compatible transport, richer event coverage. | Fake `ChatClient` integration tests; manual low-traffic channel check; reconnect state tests. |
 | R-002 | Chat send | Send composer text to the active channel using IRC `Say`; keep send status visible and preserve user text on failure. | Normal sends, selected-message replies, `/me` actions, and failed-send feedback. | Optimistic echo reconciliation and richer rate-limit guidance. | Fake sender success/failure tests; manual send to test channel. |
 | R-003 | Avatars | Reserve an avatar column and show a stable fallback when image support or profile data is unavailable. | Initials/color chip fallback plus batched/cached Helix `profile_image_url` metadata for visible live-chat authors when avatar image mode and API credentials are configured. | Download/cache/crop avatar images and render through Kitty protocol. | Golden rows with fallback; fake HTTP/cache/app tests; manual Kitty/Ghostty image check later. |
 | R-004 | Twitch emote images | Preserve Twitch emote tokens from IRC tags and render readable fallback tokens. | Parse or preserve emote metadata enough to avoid corrupt text fallback. | Resolve Helix/CDN templates, cache images, render static image placeholders. | Unit tests for emote position parsing and fallback rows; image renderer fake later. |
@@ -49,7 +49,7 @@ Later scope includes multi-channel UX, image-backed avatars/emotes/emoji, startu
 | R-006 | Typed-in animation | New visible messages reveal quickly without blocking input, scrolling, sending, network receive, or reconnect handling. | Tick-driven reveal over normalized/render fragments for mock and live text fallback rows; modes `off`, `reduced`, `fast`. | Expressive mode, image placeholder transitions, newest-row pulse, high-volume tuning. | Fake clock frame tests; high-throughput degradation tests; manual viewport check. |
 | R-007 | Auth | Accept Twitch username and OAuth token securely and require `chat:read`/`chat:edit` for IRC MVP. | Env/config credentials; actionable missing/invalid credential errors; doctor token validation; no secret printing. | Interactive login, auth flags, refresh/secure storage, startup token validation with scope checks. | Config/auth validation tests; redaction tests; manual invalid-token check. |
 | R-008 | Config | Resolve effective config from CLI overrides > environment > config file > defaults. | Env/config support for username, token, channels, image mode, avatar mode, emoji mode, emote mode, and animation mode; CLI overrides for config path and channels. | `twi login`, setup wizard, auth/mode flags, config migration, OS keychain. | Precedence tests; `config show` redaction tests; path tests by platform. |
-| R-009 | Multi-channel | Preserve channel-specific history, composer state, connection state, and unread counts. | Not required beyond internal model shape not blocking future multi-channel. | Join multiple channels, sidebar, keyboard/mouse switching, isolated reconnects. | Model tests with two fake channels later; manual switch test. |
+| R-009 | Multi-channel | Preserve channel-specific history, composer state, connection state, and unread counts. | Join multiple configured channels; route messages, unread counts, drafts, replies, active sends, and scroll state by channel. Connection-level IRC states are copied onto configured channel states. | Sidebar, keyboard/mouse switching polish, isolated reconnect semantics if a future transport exposes them. | Model tests with two fake channels; manual two-channel Twitch check. |
 | R-010 | Mouse | Enable optional mouse interactions without making core workflows mouse-dependent. | Keyboard-first UI; mouse feature flag can exist but behavior may be minimal. | Scroll viewport, click channel, click composer/message, bubblezone hit regions. | Bubble Tea event tests; manual terminal mouse check. |
 | R-011 | Diagnostics | Surface connection, send, auth, terminal capability, and degraded-mode status without destroying chat context. | Status bar/errors in TUI plus `twi doctor` checks for config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch reachability, terminal color/mouse/Kitty signals, cache writability/pruning, feature modes, and secret redaction. | Startup validation and richer in-app auth diagnostics. | Unit tests for diagnostic output redaction; manual `doctor` checks. |
 | R-012 | Fallbacks | Every optional feature degrades visibly and intentionally: images to initials/tokens/Unicode, animation to reduced/off, API asset failure to cached or text output. | Text fallback rendering, reduced/off animation, no blocking asset paths. | Tiered terminal capability detection, cache-aware degraded states, per-feature mode controls. | Golden fallback snapshots; fake failure tests; manual non-Kitty terminal check. |

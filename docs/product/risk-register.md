@@ -1,8 +1,8 @@
 # Risk Register
 
 Status: Risk register aligned with the current MVP. Mock chat is ready;
-one-channel live IRC read/send and diagnostics are partial; login,
-multi-channel live chat, and inline terminal images remain planned.
+multi-channel live IRC read/send and diagnostics are partial; login,
+richer multi-channel UI, and inline terminal images remain planned.
 
 Credential assumption: Twitch username/token values currently come from
 environment variables or the flat config file. CLI overrides cover channel and
@@ -22,7 +22,7 @@ Likelihood and impact use `Low`, `Medium`, or `High`.
 | RR-008 | UI accidentally couples directly to Twitch library types, making EventSub or tests difficult. | Medium | Medium | Define internal normalized messages and `ChatClient` before real IRC adapter; enforce package boundaries. | Core TUI engineer and Twitch integration engineer | Interface tests/fakes; code review: no Twitch library imports in `internal/app`. |
 | RR-009 | Network callbacks or file/cache operations block the Bubble Tea loop. | Medium | High | Bridge callbacks through typed messages and commands; keep all network/cache work async; avoid I/O in `View`. | Core TUI engineer | Integration test with slow fake; code search for blocking calls in app update/view. |
 | RR-010 | Config precedence or platform paths are inconsistent. | Medium | Medium | Implement flags > env > file > defaults; use platform config/cache dirs; test path and precedence rules. | Core TUI engineer | Config precedence unit tests; `config path` and `config show` checks. |
-| RR-011 | Multi-channel support adds state bugs after one-channel MVP assumptions harden. | Medium | Medium | Shape channel state as a map/list from the start even if MVP joins one channel; isolate per-channel history/composer/connection state. | Core TUI engineer | Two-channel model tests before real multi-channel UI; later manual switch test. |
+| RR-011 | Multi-channel support adds state bugs after early single-channel assumptions harden. | Medium | Medium | Keep channel state as a map/list; isolate per-channel history/composer/connection state; document connection-level IRC callbacks. | Core TUI engineer | Two-channel model tests; fake multi-channel routing tests; later manual switch test. |
 | RR-012 | Go toolchain drift causes inconsistent builds across agents. | Medium | Medium | Record verified stable version; pin `go` and `toolchain`; keep `GOTOOLCHAIN=auto` compatible; use module tool directives. | QA/release engineer | `go version`; `go env GOTOOLCHAIN`; clean `go mod tidy`; CI/tooling gate. |
 | RR-013 | Twitch Helix/API outages or quota issues break avatars, badges, emotes, or token validation. | Medium | Medium | Treat asset/API data as optional; cache metadata; keep chat read/send usable without assets. | Twitch integration engineer and asset/image engineer | Fake API failure tests; fallback golden snapshots; manual degraded-mode status. |
 | RR-014 | Visual design becomes a debug console or unreadable in small terminals. | Medium | Medium | Define layout snapshots; correct low-contrast username colors; hide sidebar/status details in narrow mode. | Core TUI engineer and rendering engineer | Golden layouts at narrow/normal/wide widths; manual resize check. |

@@ -51,7 +51,7 @@ docker compose run --rm mock
 
 ## 4. Configure Live Twitch Chat
 
-Live mode is partially shipped: it currently supports one Twitch channel over IRC with read, send, selected-message replies, and `/me` actions. Token identity/scope validation, multi-channel routing, and login/setup are still planned.
+Live mode is partially shipped: it supports one or more Twitch channels over IRC with read, send, selected-message replies, and `/me` actions. Broader two-channel Twitch manual evidence and login/setup are still planned.
 
 You need:
 
@@ -60,7 +60,7 @@ You need:
 - `chat:read` scope to read chat.
 - `chat:edit` scope to send chat.
 
-Username/token credentials currently come from environment variables or the flat config file. CLI flags currently override the channel and config path, not username or token values.
+Username/token credentials currently come from environment variables or the flat config file. CLI flags currently override channels and config path, not username or token values.
 
 Environment variable setup:
 
@@ -74,6 +74,7 @@ Then run:
 
 ```sh
 go run ./cmd/twi chat --channel "$TWI_DEFAULT_CHANNELS"
+go run ./cmd/twi chat --channel onechannel --channel anotherchannel
 ```
 
 Docker:
@@ -164,6 +165,6 @@ go build -o bin/twi ./cmd/twi
 
 `missing Twitch credentials`: Set `TWITCH_USERNAME` and `TWITCH_ACCESS_TOKEN`, or run `twi chat --mock`.
 
-`live Twitch chat currently supports one channel`: Pass one `--channel` value. Multi-channel live mode is planned.
+Twitch IRC connection status is connection-level: Multi-channel live mode joins each configured channel, but Twitch IRC connect, reconnect, and disconnect callbacks are not independent per-channel events.
 
 Images look like text: Correct for now. Inline terminal image loading is planned; current rendering uses stable text, initials, Unicode, badge, and emote-token fallbacks.

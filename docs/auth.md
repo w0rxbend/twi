@@ -7,7 +7,7 @@ This document describes the authentication model for `twi`. It covers the curren
 - `twi login` is planned, not implemented.
 - Mock chat is ready and needs no Twitch credentials.
 - The MVP accepts Twitch credentials from environment variables or a local flat config file. CLI flags currently override the config path and channels, not username or token values.
-- One-channel live IRC read/send is partially shipped for configured credentials, including composer sends, selected-message replies, and `/me` actions.
+- Multi-channel live IRC read/send is partially shipped for configured credentials, including composer sends, selected-message replies, and `/me` actions.
 - `twi doctor` diagnostics are partially shipped; Twitch OAuth validation is wired into doctor and reports identity, expiry, required IRC scopes, username mismatch, and refresh availability without printing credential values.
 - Later milestones may add interactive OAuth and richer EventSub/API chat support.
 

@@ -99,6 +99,21 @@ func TestDoctorReportsCredentialPresenceAndValidationWithoutSecrets(t *testing.T
 	assertDoctorDoesNotLeak(t, report, "oauth:secret-token", "refresh-secret", "client-secret")
 }
 
+func TestDoctorReportsMultipleChannelsAsConfigured(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:  []string{"TERM=xterm-256color"},
+		CacheDir: filepath.Join(t.TempDir(), "cache"),
+	})
+
+	check := doctorCheck(t, report, "channels")
+	if check.Status != DoctorStatusOK || !strings.Contains(check.Detail, "2 configured") {
+		t.Fatalf("channels check = (%q, %q), want ok 2 configured", check.Status, check.Detail)
+	}
+}
+
 func TestDoctorReportsTokenValidationStates(t *testing.T) {
 	expiresAt := time.Date(2026, 7, 2, 12, 30, 0, 0, time.UTC)
 	for _, tt := range []struct {

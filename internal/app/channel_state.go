@@ -142,6 +142,22 @@ func (s *channelStateSet) applyMessage(message twitch.ChatMessage) (*channelStat
 func (s *channelStateSet) applyConnectionState(state ConnectionState) *channelState {
 	channel := state.Channel
 	if channel == "" {
+		var first *channelState
+		for _, key := range s.order {
+			ch := s.states[key]
+			if ch == nil {
+				continue
+			}
+			next := state
+			next.Channel = ch.name
+			ch.status = next
+			if first == nil {
+				first = ch
+			}
+		}
+		if first != nil {
+			return first
+		}
 		channel = s.activeName()
 	}
 	ch := s.ensure(channel)

@@ -136,7 +136,7 @@ func channelsCheck(channels []string) DoctorCheck {
 	case 1:
 		return okCheck("channels", "one configured")
 	default:
-		return warnCheck("channels", fmt.Sprintf("%d configured; live IRC currently supports one", len(channels)))
+		return okCheck("channels", fmt.Sprintf("%d configured", len(channels)))
 	}
 }
 

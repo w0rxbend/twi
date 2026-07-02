@@ -13,7 +13,7 @@
 
 `twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-The project is currently an MVP-shaped Go app: mock chat is ready without the network, one-channel live Twitch IRC read/send is partially shipped for one configured channel, diagnostics are partially shipped, and login, multi-channel UX, and inline terminal images are still planned.
+The project is currently an MVP-shaped Go app: mock chat is ready without the network, live Twitch IRC read/send is partially shipped for configured channels, diagnostics are partially shipped, and login, richer multi-channel UX, and inline terminal images are still planned.
 
 ```text
         +---------------------------------------------+
@@ -56,13 +56,14 @@ docker run --rm twi:local doctor
 
 ## Live Twitch Chat
 
-Live mode needs a Twitch login, an IRC OAuth token, and one channel. The token needs `chat:read`; sending from the composer also needs `chat:edit`. Username/token credentials currently come from environment variables or the flat config file. CLI flags currently override the channel and config path, not username or token values.
+Live mode needs a Twitch login, an IRC OAuth token, and at least one channel. Repeat `--channel` to join multiple Twitch IRC channels. The token needs `chat:read`; sending from the composer also needs `chat:edit`. Username/token credentials currently come from environment variables or the flat config file. CLI flags currently override channels and config path, not username or token values.
 
 ```sh
 export TWI_TWITCH_USERNAME="your_twitch_login"
 export TWI_TWITCH_OAUTH_TOKEN="<your-twitch-oauth-token>"
 
 go run ./cmd/twi chat --channel somechannel
+go run ./cmd/twi chat --channel onechannel --channel anotherchannel
 ```
 
 The shorter dotenv-style aliases also work:
@@ -93,13 +94,13 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Area | Status | Current behavior |
 | --- | --- | --- |
 | Mock chat | Ready | `twi chat --mock [--channel demo]` runs without Twitch credentials or network access. |
-| One-channel live IRC read/send | Partial | `twi chat --channel <channel>` can read, send, reply, and send `/me` actions for one channel when env/config credentials are present; broader live manual evidence remains future work. |
+| Multi-channel live IRC read/send | Partial | `twi chat --channel <channel> [--channel other]` can read, send, reply, and send `/me` actions for configured channels when env/config credentials are present; broader live manual evidence remains future work. |
 | Config commands | Ready | `twi config show` prints effective flat config with secrets redacted; `twi config path` shows the default config path. |
 | Diagnostics | Partial | `twi doctor` checks config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability/pruning, and feature modes. |
 | Avatar metadata | Partial | When live chat runs with `avatar_mode = "image"` plus Twitch API credentials, visible author avatar URLs are batched through Helix Get Users and cached; app asset events can prepare fixed-width avatar cells when an asset resolver/renderer is installed. |
 | Emote/badge metadata | Partial | Internal Helix adapters and cache-backed resolvers can turn known Twitch emote and badge IDs into public image-capable refs while keeping Unicode and exact emote-token fallbacks stable; app asset events can refresh visible rows without scroll or composer jumps. |
 | Login/setup | Planned | `twi login` is advertised but exits as planned/not implemented. |
-| Multi-channel live chat | Planned | Current live mode intentionally accepts only one channel. |
+| Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, and sends are per-channel; visible sidebar/navigation polish remains planned. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. |
 | Inline terminal images | Partial | The renderer and app event path can substitute prepared fixed-width cells for visible avatar, badge, emote, and emoji rows; default live resolver wiring and manual Kitty/Ghostty validation remain planned. |
 
 ## Controls

@@ -107,6 +107,49 @@ func TestLiveChatConfiguredStartsClient(t *testing.T) {
 	}
 }
 
+func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
+	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+
+	oldNewLiveChatClient := newLiveChatClient
+	oldRunLiveChat := runLiveChat
+	defer func() {
+		newLiveChatClient = oldNewLiveChatClient
+		runLiveChat = oldRunLiveChat
+	}()
+
+	var gotFactoryChannels []string
+	var gotRunChannels []string
+	fake := app.NewFakeChatClient(1)
+	newLiveChatClient = func(_ context.Context, cfg config.Config) (app.ChatClient, error) {
+		gotFactoryChannels = append([]string(nil), cfg.DefaultChannels...)
+		return fake, nil
+	}
+	runLiveChat = func(_ io.Writer, cfg config.Config, client app.ChatClient, _ app.ClientOptions) error {
+		if client != fake {
+			t.Fatalf("runLiveChat client = %#v, want fake", client)
+		}
+		gotRunChannels = append([]string(nil), cfg.DefaultChannels...)
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "alpha", "--channel", "#Beta"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "currently supports one channel") {
+		t.Fatalf("stderr rejected multi-channel live mode: %q", stderr.String())
+	}
+	if got, want := strings.Join(gotFactoryChannels, ","), "alpha,Beta"; got != want {
+		t.Fatalf("factory channels = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(gotRunChannels, ","), "alpha,Beta"; got != want {
+		t.Fatalf("run channels = %q, want %q", got, want)
+	}
+}
+
 func TestConfigShowRedactsSecrets(t *testing.T) {
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")

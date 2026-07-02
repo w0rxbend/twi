@@ -7,14 +7,14 @@ This document describes the configuration model for `twi`. The implemented parse
 - Config loading exists for flat `key = value` files, environment variables, and selected CLI overrides.
 - `twi config show` and `twi config path` exist in the CLI.
 - Mock chat is ready and does not require credentials or network access.
-- One-channel live IRC read/send is partially shipped: `twi chat --channel <channel>` can read, send, reply, and send `/me` actions when username/token credentials are configured.
+- Multi-channel live IRC read/send is partially shipped: `twi chat --channel <channel> [--channel other]` can read, send, reply, and send `/me` actions when username/token credentials are configured.
 - Twitch credentials are currently read from environment variables or the flat config file. CLI flags currently override `--config` and `--channel`, not username or OAuth token values.
 - Config output redacts OAuth tokens and client secrets.
 - `twi doctor` diagnostics are partially shipped and report the effective config file path, credential presence,
   selected feature modes, Twitch IRC reachability, terminal hints, Kitty graphics
   signals, and cache directory writability without printing token or client
   secret values.
-- `twi login`, multi-channel live chat, and inline terminal images are planned.
+- `twi login`, richer multi-channel UI, and inline terminal images are planned.
 - Nested TOML tables are not implemented yet; keep config files flat.
 
 ## Precedence
@@ -141,7 +141,7 @@ twi config path
 twi doctor
 ```
 
-`twi login`, multi-channel UI behavior, and inline terminal images are still planned. One-channel Twitch IRC chat is current when username, OAuth token, and channel are configured. Future flags for auth and mode settings should follow the precedence rules above.
+`twi login`, richer multi-channel UI behavior, and inline terminal images are still planned. Twitch IRC chat is current when username, OAuth token, and at least one channel are configured. Future flags for auth and mode settings should follow the precedence rules above.
 
 ## Redacted Config Output
 
@@ -167,8 +167,7 @@ The current diagnostics include:
 
 - Config file path existence/readability.
 - Twitch username, OAuth token, client ID, and client secret presence.
-- Channel count, with a warning when no channel or multiple live IRC channels
-  are configured.
+- Channel count, with a warning when no channel is configured.
 - Token validation status, including Twitch identity, required and granted
   scopes, expiry, username mismatch, refresh availability, cancellation, and
   API-error states.
@@ -183,6 +182,11 @@ The current diagnostics include:
 
 Secrets are never included in doctor details. OAuth tokens and client secrets
 are redacted from validation and probe errors before output is formatted.
+
+Twitch IRC exposes connect, reconnect, and disconnect callbacks for the
+connection, not for each joined channel. `twi` copies those connection-level
+states onto the configured channel states; channel-specific notices and chat
+messages still route by their normalized channel names.
 
 ## Current vs Future Behavior
 

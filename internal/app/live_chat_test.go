@@ -390,6 +390,84 @@ func TestLiveShellKeepsPerChannelHistoryStatusUnreadAndSwitching(t *testing.T) {
 	}
 }
 
+func TestLiveShellRoutesInactiveMessagesWithoutStealingFocusOrScroll(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	client := NewFakeChatClient(1)
+	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+	alpha := model.channels.ensure("alpha")
+	beta := model.channels.ensure("beta")
+	alpha.messages = numberedMockMessages("alpha", 40)
+	alpha.scrollOffset = 3
+	model.focus = mockFocusComposer
+	alpha.composerText = "active draft"
+
+	updated, cmd := model.Update(chatClientMessageMsg{
+		message: mockIncomingMessage("#beta", "beta-live-1", "beta stays inactive"),
+		ok:      true,
+	})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("client message did not schedule next client read")
+	}
+	if got, want := model.activeChannelName(), "alpha"; got != want {
+		t.Fatalf("active channel = %q, want %q", got, want)
+	}
+	if got, want := model.focus, mockFocusComposer; got != want {
+		t.Fatalf("focus = %v, want composer", got)
+	}
+	if got, want := alpha.scrollOffset, 3; got != want {
+		t.Fatalf("alpha scrollOffset = %d, want %d", got, want)
+	}
+	if got, want := alpha.composerText, "active draft"; got != want {
+		t.Fatalf("alpha composerText = %q, want %q", got, want)
+	}
+	if got, want := beta.unread, 1; got != want {
+		t.Fatalf("beta unread = %d, want %d", got, want)
+	}
+	if got, want := len(beta.messages), 1; got != want {
+		t.Fatalf("beta messages = %d, want %d", got, want)
+	}
+	if got, want := beta.messages[0].Channel, "beta"; got != want {
+		t.Fatalf("beta message channel = %q, want normalized %q", got, want)
+	}
+	view := model.View()
+	if !strings.Contains(view, "unread=1") {
+		t.Fatalf("active view missing unread indicator:\n%s", view)
+	}
+	if strings.Contains(view, "beta stays inactive") {
+		t.Fatalf("inactive beta message stole active view:\n%s", view)
+	}
+}
+
+func TestLiveShellAppliesGlobalConnectionEventsToConfiguredChannels(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	client := NewFakeChatClient(1)
+	model := newLiveShellModelWithClock("alpha", cfg, client, nil)
+
+	updated, _ := model.Update(chatClientConnectionStateMsg{
+		state: ConnectionState{
+			Status: ConnectionConnected,
+			Detail: "joined Twitch IRC",
+			At:     time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
+		},
+		ok: true,
+	})
+	model = updated.(mockShellModel)
+
+	for _, channel := range []string{"alpha", "beta"} {
+		state := model.channels.states[channelKey(channel)]
+		if state == nil {
+			t.Fatalf("missing channel state %q", channel)
+		}
+		if state.status.Status != ConnectionConnected || state.status.Channel != channel {
+			t.Fatalf("%s status = %#v, want connected channel-scoped copy", channel, state.status)
+		}
+	}
+}
+
 type fakeTwitchTransport struct {
 	events chan twitch.Event
 

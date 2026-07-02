@@ -6,10 +6,10 @@ status is tracked in `.agent-loop/tasks.json`.
 Progress as of the initial swarm pass:
 
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
-- Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, the one-channel Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, and `/me` action sends.
-- Current status labels: mock chat is ready; one-channel live IRC read/send and
-  diagnostics are partial; `twi login`, multi-channel live chat, and inline
-  terminal images are planned.
+- Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
+- Current status labels: mock chat is ready; multi-channel live IRC read/send
+  and diagnostics are partial; `twi login`, richer multi-channel UI, and
+  inline terminal images are planned.
 - Credential rule: Twitch username/token values currently come from
   environment variables or the flat config file; CLI overrides cover channel
   and config path.
@@ -179,8 +179,8 @@ Follow-ups: Add startup token validation and interactive auth recovery.
 ## Expanded Implementation Plan
 
 Status: Updated after the initial MVP slices. The current app already has a
-Bubble Tea chat shell, deterministic mock mode, one-channel Twitch IRC
-read/send, replies, `/me` actions, typed reveal animation, config
+Bubble Tea chat shell, deterministic mock mode, multi-channel Twitch IRC
+read/send routing, replies, `/me` actions, typed reveal animation, config
 precedence/redaction, diagnostics, normalized Twitch events, and text-only
 asset fallbacks. The remaining plan below focuses on turning planned
 extension points into runnable vertical slices.
@@ -416,8 +416,8 @@ Task: Introduce channel state model before joining multiple channels.
 Owner lane: Core TUI engineer.
 Goal: Preserve per-channel history, composer draft, reply target, connection
 state, selected message, unread count, and send queue.
-Context: CLI allows repeated `--channel`, but live chat currently rejects more
-than one channel.
+Context: CLI allows repeated `--channel`, and live chat now accepts multiple
+configured channels.
 Files likely touched: `internal/app`, `internal/cli`, `internal/twitch`,
 `docs/product/requirements.md`, `README.md`.
 Implementation notes: First refactor the model around a single active channel
@@ -425,7 +425,7 @@ using the new per-channel structure, then enable multiple channels.
 Acceptance criteria: Existing one-channel behavior is unchanged and tests cover
 two isolated fake channels.
 Verification: `go test ./internal/app ./internal/cli ./internal/twitch`;
-manual mock one-channel smoke.
+manual mock one-channel and multi-channel smokes.
 Risks: A broad model refactor can regress send/reply state; keep the first
 slice behavior-preserving.
 Follow-ups: Add sidebar UI.
@@ -433,8 +433,8 @@ Follow-ups: Add sidebar UI.
 Task: Enable live multi-channel join and switching.
 Owner lane: Twitch integration engineer.
 Goal: Join multiple Twitch channels and switch active chat from the TUI.
-Context: The IRC library can join multiple channels, but the app currently
-surfaces one active channel.
+Context: The IRC library can join multiple channels, and the app now routes
+messages, unread counts, scroll, drafts, replies, and sends per channel.
 Files likely touched: `internal/twitch`, `internal/app`, `internal/cli`,
 `docs/quickstart.md`, `docs/auth.md`.
 Implementation notes: Route incoming messages by normalized channel, keep
@@ -443,8 +443,8 @@ available.
 Acceptance criteria: Messages from two fake and live channels remain separate;
 unread counts update when inactive.
 Verification: Fake multi-channel tests; manual two-channel Twitch check.
-Risks: Twitch connection events may not be per-channel; document any transport
-limits.
+Risks: Twitch connection events are connection-level, not per-channel; the app
+copies them onto configured channel states.
 Follow-ups: Add reconnect isolation if transport supports it.
 
 Task: Add channel sidebar and keyboard navigation.
