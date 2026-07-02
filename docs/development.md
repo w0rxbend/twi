@@ -122,9 +122,13 @@ Focused review searches used by the loop:
 
 ```sh
 rg "go-twitch-irc|helix" internal/app
-rg "os\\.Open|http\\.Get|ReadFile|WriteFile" internal/app internal/render
+if rg -n "os\\.Open|http\\.Get|ReadFile|WriteFile" internal/app --glob '!**/*_test.go'; then exit 1; else exit 0; fi
 if rg -n "[ \t]+$" PLAN.md .agent-loop/tasks.json .agent-loop/memory.md README.md docs; then exit 1; else exit 0; fi
 ```
+
+The I/O grep is app-scoped because `internal/render` owns bounded image
+preparation and Kitty rendering, which intentionally read cached image files
+through async asset commands rather than Bubble Tea view construction.
 
 In restricted environments where the default module cache is read-only, use writable caches under `/tmp` and `GOTOOLCHAIN=local` for local verification. `staticcheck` also needs a writable cache, for example `STATICCHECK_CACHE=/tmp/twi-staticcheck-cache`. Normal developer environments should keep `GOTOOLCHAIN=auto`.
 
