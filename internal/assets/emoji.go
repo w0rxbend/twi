@@ -1,6 +1,10 @@
 package assets
 
 import (
+	"strconv"
+	"strings"
+	"unicode/utf8"
+
 	"github.com/w0rxbend/twi/internal/emoji"
 	"github.com/w0rxbend/twi/internal/storage"
 )
@@ -24,7 +28,44 @@ func EmojiAssetID(cluster string) (string, bool) {
 	return emoji.AssetID(cluster)
 }
 
+// NormalizeEmojiAssetID accepts either a native emoji grapheme cluster or an
+// existing provider-neutral asset ID and returns the canonical lowercase asset
+// ID used by caches and image providers.
+func NormalizeEmojiAssetID(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", false
+	}
+	if id, ok := EmojiAssetID(value); ok {
+		return id, true
+	}
+	runes, ok := emojiAssetIDRunes(value)
+	if !ok {
+		return "", false
+	}
+	return EmojiAssetID(string(runes))
+}
+
 // IsEmojiCluster reports whether cluster is a standard emoji grapheme cluster.
 func IsEmojiCluster(cluster string) bool {
 	return emoji.IsCluster(cluster)
+}
+
+func emojiAssetIDRunes(id string) ([]rune, bool) {
+	parts := strings.Split(strings.ToLower(strings.TrimSpace(id)), "-")
+	if len(parts) == 0 {
+		return nil, false
+	}
+	runes := make([]rune, 0, len(parts))
+	for _, part := range parts {
+		if part == "" || len(part) > 6 {
+			return nil, false
+		}
+		value, err := strconv.ParseInt(part, 16, 32)
+		if err != nil || value < 0 || value > utf8.MaxRune {
+			return nil, false
+		}
+		runes = append(runes, rune(value))
+	}
+	return runes, true
 }

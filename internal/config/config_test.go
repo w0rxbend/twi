@@ -65,21 +65,63 @@ func TestLoadMouseFeatureFromEnvAndConfigShow(t *testing.T) {
 	}
 }
 
+func TestLoadEmojiProviderConfigAndRedactsUnsafeTemplate(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := strings.Join([]string{
+		`emoji_provider = "custom"`,
+		`emoji_url_template = "https://emoji.example/assets/{id}.png"`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load([]string{
+		"TWI_EMOJI_PROVIDER=twemoji",
+		"TWI_EMOJI_URL_TEMPLATE=https://cdn.example/{id}.png?access_token=secret",
+	}, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Features.EmojiProvider != "twemoji" {
+		t.Fatalf("EmojiProvider = %q, want env override twemoji", cfg.Features.EmojiProvider)
+	}
+	if cfg.Features.EmojiURLTemplate != "https://cdn.example/{id}.png?access_token=secret" {
+		t.Fatalf("EmojiURLTemplate = %q, want env override", cfg.Features.EmojiURLTemplate)
+	}
+	output := cfg.RedactedString()
+	if !strings.Contains(output, `emoji_provider = "twemoji"`) {
+		t.Fatalf("redacted config missing emoji provider:\n%s", output)
+	}
+	if strings.Contains(output, "access_token=secret") {
+		t.Fatalf("redacted config leaked unsafe emoji URL template:\n%s", output)
+	}
+	if !strings.Contains(output, `emoji_url_template = "[redacted]"`) {
+		t.Fatalf("redacted config did not redact unsafe emoji URL template:\n%s", output)
+	}
+
+	cfg.Features.EmojiURLTemplate = "https://user:secret@emoji.example/{id}.png"
+	if output := cfg.RedactedString(); strings.Contains(output, "user:secret") || !strings.Contains(output, `emoji_url_template = "[redacted]"`) {
+		t.Fatalf("redacted config did not redact URL userinfo:\n%s", output)
+	}
+}
+
 func TestRedactedStringDoesNotLeakSecrets(t *testing.T) {
 	cfg := Default()
 	cfg.Twitch.OAuthToken = "oauth:secret"
 	cfg.Twitch.RefreshToken = "refresh-secret"
 	cfg.Twitch.ClientSecret = "client-secret"
+	cfg.Features.EmojiURLTemplate = "https://cdn.example/{id}.png?client_secret=secret"
 
 	output := cfg.RedactedString()
 
-	for _, secret := range []string{"oauth:secret", "refresh-secret", "client-secret"} {
+	for _, secret := range []string{"oauth:secret", "refresh-secret", "client-secret", "client_secret=secret"} {
 		if strings.Contains(output, secret) {
 			t.Fatalf("redacted output leaked %q: %s", secret, output)
 		}
 	}
-	if strings.Count(output, redacted) != 3 {
-		t.Fatalf("redacted output = %q, want three redactions", output)
+	if strings.Count(output, redacted) != 4 {
+		t.Fatalf("redacted output = %q, want four redactions", output)
 	}
 }
 

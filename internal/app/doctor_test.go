@@ -435,6 +435,25 @@ func TestDoctorReportsImageCapabilityStates(t *testing.T) {
 	}
 }
 
+func TestDoctorWarnsOnUnknownEmojiProviderEvenWithTemplate(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.EmojiProvider = "surprise"
+	cfg.Features.EmojiURLTemplate = "https://emoji.example/{id}.png"
+
+	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+		Environ:  []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
+		CacheDir: filepath.Join(t.TempDir(), "cache"),
+	})
+
+	check := doctorCheck(t, report, "feature modes")
+	if check.Status != DoctorStatusWarn {
+		t.Fatalf("feature modes status = %q, want warn; detail=%q", check.Status, check.Detail)
+	}
+	if !strings.Contains(check.Detail, "emoji_provider=surprise") {
+		t.Fatalf("feature modes detail = %q, want unknown emoji provider", check.Detail)
+	}
+}
+
 func doctorCheck(t *testing.T, report DoctorReport, name string) DoctorCheck {
 	t.Helper()
 	for _, check := range report.Checks {

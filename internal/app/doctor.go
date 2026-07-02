@@ -373,10 +373,11 @@ func assetCacheDir(cacheDir string) (string, error) {
 
 func featureModesCheck(features config.FeatureConfig) DoctorCheck {
 	detail := fmt.Sprintf(
-		"image=%s avatar=%s emoji=%s emote=%s animation=%s kitty=%t mouse=%t",
+		"image=%s avatar=%s emoji=%s emoji_provider=%s emote=%s animation=%s kitty=%t mouse=%t",
 		features.ImageMode,
 		features.AvatarMode,
 		features.EmojiMode,
+		features.EmojiProvider,
 		features.EmoteMode,
 		features.AnimationMode,
 		features.EnableKittyImages,
@@ -398,6 +399,9 @@ func unknownFeatureModes(features config.FeatureConfig) []string {
 	}
 	if !oneOf(features.EmojiMode, "unicode", "image") {
 		unknown = append(unknown, "emoji="+features.EmojiMode)
+	}
+	if strings.TrimSpace(features.EmojiProvider) != "" && !oneOf(features.EmojiProvider, "twemoji", "custom") {
+		unknown = append(unknown, "emoji_provider="+features.EmojiProvider)
 	}
 	if !oneOf(features.EmoteMode, "text", "image") {
 		unknown = append(unknown, "emote="+features.EmoteMode)

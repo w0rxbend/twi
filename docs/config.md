@@ -15,7 +15,7 @@ This document describes the configuration model for `twi`. The implemented parse
   signals, and cache directory writability without printing token or client
   secret values.
 - Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
-- Inline terminal image support is partially shipped: renderer cells, stable fallback rows, cache boundaries, capability diagnostics, and visible-row asset event scheduling exist; default live resolver/downloader/renderer wiring and manual Kitty/Ghostty validation remain planned.
+- Inline terminal image support is partially shipped: renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, and visible-row asset event scheduling exist; default live resolver/downloader/renderer wiring and manual Kitty/Ghostty validation remain planned.
 - `twi login`, setup wizard, and secure credential storage are planned.
 - Nested TOML tables are not implemented yet; keep config files flat.
 
@@ -73,6 +73,8 @@ Supported variables:
 | `TWI_IMAGE_MODE` | No | Overall image mode. |
 | `TWI_AVATAR_MODE` | No | Avatar rendering mode. |
 | `TWI_EMOJI_MODE` | No | Standard emoji rendering mode. |
+| `TWI_EMOJI_PROVIDER` | No | Standard emoji image metadata provider. Defaults to `twemoji`. |
+| `TWI_EMOJI_URL_TEMPLATE` | No | Custom public emoji image URL template required when `TWI_EMOJI_PROVIDER=custom`. Use `{id}` for the normalized emoji asset key. Credential markers are rejected by the provider and redacted from `config show`. |
 | `TWI_EMOTE_MODE` | No | Twitch emote rendering mode. |
 | `TWI_ANIMATION_MODE` | No | Animation behavior. |
 
@@ -97,6 +99,11 @@ Emoji modes:
 - `unicode`
 - `image`
 
+Emoji providers:
+
+- `twemoji`
+- `custom` with `emoji_url_template`
+
 Emote modes:
 
 - `text`
@@ -109,7 +116,7 @@ Animation modes:
 - `fast`
 - `expressive`
 
-The current parser accepts these values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; unknown animation values are treated as `fast` by the shell. `avatar_mode = "image"` enables batched live avatar URL metadata lookup when Twitch API credentials are present. The Kitty renderer core exists behind the internal renderer boundary, and chat rows can substitute prepared image cells while preserving fallback text. Image, emoji, emote, and Kitty settings currently drive fallback rendering, diagnostics, renderer capability decisions, and visible-row asset event scheduling.
+The current parser accepts these values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; unknown animation values are treated as `fast` by the shell. `avatar_mode = "image"` enables batched live avatar URL metadata lookup when Twitch API credentials are present. `emoji_provider = "twemoji"` uses the built-in pinned public Twemoji PNG template; `emoji_provider = "custom"` requires `emoji_url_template` with `{id}`. The Kitty renderer core exists behind the internal renderer boundary, and chat rows can substitute prepared image cells while preserving fallback text. Image, emoji, emote, and Kitty settings currently drive fallback rendering, diagnostics, renderer capability decisions, and visible-row asset event scheduling.
 
 ## Example Config
 
@@ -127,6 +134,8 @@ enable_mouse = true
 image_mode = "auto"
 avatar_mode = "initials"
 emoji_mode = "unicode"
+emoji_provider = "twemoji"
+emoji_url_template = ""
 emote_mode = "text"
 animation_mode = "fast"
 ```

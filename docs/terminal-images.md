@@ -1,6 +1,6 @@
 # Terminal Images
 
-`twi` supports fallback-safe inline image plumbing for avatars, Twitch emotes, and standard emoji in capable terminals. The Kitty-compatible renderer core exists behind the internal image renderer boundary, and chat rows can reserve image placeholders and substitute prepared image cells without changing fallback text. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar, badge, emote, and emoji metadata can be resolved and cached, and visible-row asset events can prepare fixed-width image cells without blocking input.
+`twi` supports fallback-safe inline image plumbing for avatars, Twitch emotes, and standard emoji in capable terminals. The Kitty-compatible renderer core exists behind the internal image renderer boundary, and chat rows can reserve image placeholders and substitute prepared image cells without changing fallback text. The current MVP implements ready text, Unicode, initials, compact badge, and emote-token fallbacks; live avatar, badge, emote, and standard emoji metadata can be resolved and cached, and visible-row asset events can prepare fixed-width image cells without blocking input.
 
 ## Current State
 
@@ -57,7 +57,8 @@ Standard emoji:
 
 - Current: preserve emoji grapheme clusters as native Unicode fallback text.
 - Current: map emoji grapheme clusters to provider-neutral, URL-free asset keys.
-- Planned: provider metadata, image decode/cell preparation, default live startup wiring, and manual Kitty/Ghostty validation.
+- Current: resolve standard emoji asset keys to public provider metadata with URL-free cache keys.
+- Planned: image decode/cell preparation, default live startup wiring, and manual Kitty/Ghostty validation.
 
 Badges:
 
@@ -97,6 +98,8 @@ TWI_ENABLE_KITTY_IMAGES=true
 TWI_IMAGE_MODE=auto
 TWI_AVATAR_MODE=initials
 TWI_EMOJI_MODE=unicode
+TWI_EMOJI_PROVIDER=twemoji
+TWI_EMOJI_URL_TEMPLATE=
 TWI_EMOTE_MODE=text
 ```
 
@@ -105,6 +108,7 @@ Recognized mode strings:
 - Image: `auto`, `off`, `small`, `normal`, `large`
 - Avatar: `off`, `initials`, `image`
 - Emoji: `unicode`, `image`
+- Emoji provider: `twemoji`, or `custom` with a public URL template containing `{id}`
 - Emote: `text`, `image`
 
 The current chat UI uses fallbacks until asset events provide prepared cells.

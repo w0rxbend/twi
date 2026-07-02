@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -36,6 +37,8 @@ type FeatureConfig struct {
 	ImageMode         string
 	AvatarMode        string
 	EmojiMode         string
+	EmojiProvider     string
+	EmojiURLTemplate  string
 	EmoteMode         string
 	AnimationMode     string
 }
@@ -100,6 +103,7 @@ func Default() Config {
 			ImageMode:         "auto",
 			AvatarMode:        "initials",
 			EmojiMode:         "unicode",
+			EmojiProvider:     "twemoji",
 			EmoteMode:         "text",
 			AnimationMode:     "fast",
 		},
@@ -136,6 +140,8 @@ func (c Config) RedactedString() string {
 		"image_mode = " + quote(c.Features.ImageMode),
 		"avatar_mode = " + quote(c.Features.AvatarMode),
 		"emoji_mode = " + quote(c.Features.EmojiMode),
+		"emoji_provider = " + quote(c.Features.EmojiProvider),
+		"emoji_url_template = " + quote(redactUnsafe(c.Features.EmojiURLTemplate)),
 		"emote_mode = " + quote(c.Features.EmoteMode),
 		"animation_mode = " + quote(c.Features.AnimationMode),
 	}
@@ -147,6 +153,16 @@ func redact(value string) string {
 		return ""
 	}
 	return redacted
+}
+
+func redactUnsafe(value string) string {
+	if value == "" {
+		return ""
+	}
+	if containsSecretMarker(value) || containsURLUserInfo(value) {
+		return redacted
+	}
+	return value
 }
 
 func applyFile(cfg *Config, path string) error {
@@ -230,6 +246,10 @@ func applyEnv(cfg *Config, environ []string) {
 			cfg.Features.AvatarMode = env[key]
 		case "TWI_EMOJI_MODE":
 			cfg.Features.EmojiMode = env[key]
+		case "TWI_EMOJI_PROVIDER":
+			cfg.Features.EmojiProvider = env[key]
+		case "TWI_EMOJI_URL_TEMPLATE":
+			cfg.Features.EmojiURLTemplate = env[key]
 		case "TWI_EMOTE_MODE":
 			cfg.Features.EmoteMode = env[key]
 		case "TWI_ANIMATION_MODE":
@@ -262,6 +282,10 @@ func applyKey(cfg *Config, key, value string) {
 		cfg.Features.AvatarMode = value
 	case "emoji_mode":
 		cfg.Features.EmojiMode = value
+	case "emoji_provider":
+		cfg.Features.EmojiProvider = value
+	case "emoji_url_template":
+		cfg.Features.EmojiURLTemplate = value
 	case "emote_mode":
 		cfg.Features.EmoteMode = value
 	case "animation_mode":
@@ -318,4 +342,34 @@ func parseBool(value string, fallback bool) bool {
 
 func quote(value string) string {
 	return strconv.Quote(value)
+}
+
+func containsSecretMarker(value string) bool {
+	lower := strings.ToLower(value)
+	markers := []string{
+		"oauth:",
+		"oauth_token=",
+		"access_token=",
+		"refresh_token=",
+		"client_secret=",
+		"client-secret=",
+		"authorization=",
+		"authorization: bearer",
+		"bearer ",
+		"bearer%20",
+	}
+	for _, marker := range markers {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsURLUserInfo(value string) bool {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return false
+	}
+	return parsed.User != nil
 }

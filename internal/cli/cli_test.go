@@ -21,7 +21,7 @@ func TestHelp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0", code)
 	}
-	for _, want := range []string{"twi chat", "TWI_ENABLE_MOUSE"} {
+	for _, want := range []string{"twi chat", "TWI_ENABLE_MOUSE", "TWI_EMOJI_PROVIDER", "TWI_EMOJI_URL_TEMPLATE"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q: %q", want, stdout.String())
 		}

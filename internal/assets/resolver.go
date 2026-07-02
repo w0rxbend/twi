@@ -3,6 +3,7 @@ package assets
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/w0rxbend/twi/internal/storage"
@@ -163,7 +164,7 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) Event {
 		if err != nil {
 			return r.errorEvent(event, err)
 		}
-		if ok && cacheRecordFresh(record, now) {
+		if ok && cacheRecordFresh(record, now) && strings.TrimSpace(record.Path) != "" {
 			event.Kind = EventCacheHit
 			event.Record = record
 			event.FromCache = true
@@ -277,7 +278,7 @@ func cacheKey(ref twitch.AssetRef, channelID string) storage.AssetKey {
 	ref = normalizeRef(ref)
 	id := ref.ID
 	if ref.Kind == KindEmoji {
-		if emojiID, ok := EmojiAssetID(id); ok {
+		if emojiID, ok := NormalizeEmojiAssetID(id); ok {
 			id = emojiID
 		}
 	}

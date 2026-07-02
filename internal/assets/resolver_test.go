@@ -93,6 +93,44 @@ func TestResolverRefreshesExpiredCacheRecord(t *testing.T) {
 	}
 }
 
+func TestResolverDoesNotTreatMetadataOnlyRecordAsPreparedAsset(t *testing.T) {
+	cache := storage.NewMemoryAssetCache()
+	ref := twitch.AssetRef{Kind: KindEmoji, ID: "😀"}
+	if err := cache.PutAsset(context.Background(), storage.AssetRecord{
+		Key:       CacheKey(ref),
+		SourceURL: "https://cdn.example/emoji/1f600.png",
+		MediaType: "image/png",
+	}); err != nil {
+		t.Fatalf("PutAsset returned error: %v", err)
+	}
+
+	metadata := &fakeMetadataLookup{
+		result: Metadata{
+			Ref:       twitch.AssetRef{Kind: KindEmoji, ID: "1f600"},
+			URL:       "https://cdn.example/emoji/1f600.png",
+			MediaType: "image/png",
+		},
+	}
+	downloader := &fakeDownloader{result: DownloadResult{Path: "emoji/1f600.png"}}
+	resolver := &Resolver{
+		Metadata:   metadata,
+		Downloader: downloader,
+		Cache:      cache,
+	}
+
+	event := resolver.Resolve(context.Background(), Request{ID: "req-metadata-only", Ref: ref})
+
+	if event.Kind != EventDownloaded {
+		t.Fatalf("event.Kind = %s, want %s", event.Kind, EventDownloaded)
+	}
+	if metadata.calls != 1 || downloader.calls != 1 {
+		t.Fatalf("metadata/downloader calls = %d/%d, want 1/1", metadata.calls, downloader.calls)
+	}
+	if event.Record.Path != "emoji/1f600.png" {
+		t.Fatalf("event.Record.Path = %q, want downloaded asset path", event.Record.Path)
+	}
+}
+
 func TestResolverDownloadsAndCachesCacheMiss(t *testing.T) {
 	cache := storage.NewMemoryAssetCache()
 	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)

@@ -1534,6 +1534,78 @@ func TestLiveShellAssetEventsRefreshVisibleRows(t *testing.T) {
 	}
 }
 
+func TestLiveShellDisabledOrUnsupportedEmojiImagesDoNotScheduleAssetWork(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		features config.FeatureConfig
+	}{
+		{
+			name: "image off",
+			features: func() config.FeatureConfig {
+				features := config.Default().Features
+				features.ImageMode = "off"
+				features.EmojiMode = "image"
+				return features
+			}(),
+		},
+		{
+			name: "auto unsupported",
+			features: func() config.FeatureConfig {
+				features := config.Default().Features
+				features.ImageMode = "auto"
+				features.EmojiMode = "image"
+				return features
+			}(),
+		},
+		{
+			name: "unicode mode",
+			features: func() config.FeatureConfig {
+				features := config.Default().Features
+				features.ImageMode = "normal"
+				features.EmojiMode = "unicode"
+				return features
+			}(),
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Features = tt.features
+			resolver := &appFakeAssetResolver{}
+			renderer := &appFakeImageRenderer{}
+			model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+				AssetResolver: resolver,
+				ImageRenderer: renderer,
+			})
+			model.activeChannelState().messages = []twitch.ChatMessage{{
+				ID:          "emoji-only",
+				Channel:     "example",
+				Timestamp:   time.Date(2026, 7, 2, 20, 0, 0, 0, time.Local),
+				DisplayName: "emoji_fan",
+				Type:        twitch.MessageTypeChat,
+				Text:        "native 😀",
+			}}
+
+			before := model.View()
+			updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 10})
+			model = updated.(mockShellModel)
+			if requests := model.pendingAssetRequests(); len(requests) != 0 {
+				t.Fatalf("pending asset requests = %#v, want none", requests)
+			}
+			_, cmd := model.Update(assetLookupTickMsg{})
+			if cmd != nil {
+				t.Fatalf("assetLookupTick command = %#v, want nil", cmd)
+			}
+			if resolver.calls != 0 || renderer.calls != 0 {
+				t.Fatalf("resolver/renderer calls = %d/%d, want 0/0", resolver.calls, renderer.calls)
+			}
+			after := model.View()
+			if !strings.Contains(before, "😀") || !strings.Contains(after, "😀") {
+				t.Fatalf("native emoji fallback missing before/after:\nbefore:\n%s\nafter:\n%s", before, after)
+			}
+		})
+	}
+}
+
 func TestLiveShellAssetEventsPreserveViewportReplyAndComposer(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
