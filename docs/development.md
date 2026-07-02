@@ -10,12 +10,12 @@ This document summarizes the development workflow and architecture for `twi`. It
 - `govulncheck` and `staticcheck` are pinned as Go module tools.
 - Use Go modules only. Do not use GOPATH workflows.
 - Ready behavior: a deterministic non-network Bubble Tea mock shell, config path/show commands, and text/initials/Unicode/badge/emote-token fallback rendering.
-- Partially shipped behavior: one-channel live Twitch IRC read/send with active-channel composer sends, selected-message replies, `/me` action sends, and `twi doctor` diagnostics for credential presence, required-scope hints, Twitch reachability, terminal hints, Kitty/Ghostty signals, cache writability, and feature modes.
-- Planned behavior: `twi login`, multi-channel live chat, Helix-backed token identity/expiry/scope validation, persistent asset metadata/image loading, and inline terminal image rendering.
+- Partially shipped behavior: one-channel live Twitch IRC read/send with active-channel composer sends, selected-message replies, `/me` action sends, a Twitch OAuth token validation adapter behind the internal boundary, and `twi doctor` diagnostics for credential presence, required-scope hints, Twitch reachability, terminal hints, Kitty/Ghostty signals, cache writability, and feature modes.
+- Planned behavior: wiring live token validation into CLI diagnostics/startup, `twi login`, multi-channel live chat, persistent asset metadata/image loading, and inline terminal image rendering.
 - Twitch username/token credentials currently come from environment variables or the flat config file; CLI flags currently override channel and config path only.
 - The shell handles resize, chat/composer focus via `tab`, expanded help via `?`, page-key viewport scrolling, selected-message reply mode with `up`/`down` and `r`, `esc` reply cancellation, composer text entry, Enter-to-send for live clients, reduced narrow-width status/help text, send status feedback, and tick-driven reveal animation for scheduled incoming mock messages.
 - `internal/app` owns the UI-facing chat boundary, deterministic fake chat client, live transport adapter, and Bubble Tea shell; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
-- `internal/twitch` owns the `go-twitch-irc` client wrapper and callback normalization for `PRIVMSG`, `NOTICE`, `USERNOTICE`, `ROOMSTATE`, `CLEARCHAT`, `CLEARMSG`, `USERSTATE`, reconnect, connect, disconnect, and TODO-backed raw fallback events. Raw IRC tags are retained only for diagnostics/debug views.
+- `internal/twitch` owns the `go-twitch-irc` client wrapper, Twitch OAuth token validation adapter, and callback normalization for `PRIVMSG`, `NOTICE`, `USERNOTICE`, `ROOMSTATE`, `CLEARCHAT`, `CLEARMSG`, `USERSTATE`, reconnect, connect, disconnect, and TODO-backed raw fallback events. Raw IRC tags are retained only for diagnostics/debug views.
 - `internal/render` converts normalized messages into width-bounded rows of semantic fragments for avatars, timestamps, badges, usernames, replies, notices, actions, deleted messages, mentions, emoji fallbacks, and Twitch emote-token fallbacks. Asset fallback fragments can reserve stable cell widths without loading image data.
 - `internal/storage` defines the context-aware asset cache boundary and an in-memory test cache. Current app views do not read the cache or invoke network/file-backed asset loading.
 - `internal/animation` turns rendered rows into grapheme-safe reveal units and maintains a deterministic bounded reveal queue for `off`, `reduced`, and `fast` animation modes. `internal/app` owns the Bubble Tea tick commands that enqueue incoming mock messages and advance active reveals.
@@ -115,7 +115,7 @@ Planned primary dependencies:
 - Bubbles for viewport, textarea, spinner, help, list, table, and related components.
 - Lip Gloss for layout and styling.
 - go-twitch-irc for the MVP Twitch IRC transport.
-- Helix client for user, avatar, emote, badge, and token validation APIs.
+- Helix client for future user, avatar, emote, and badge APIs.
 - kittyimg for Kitty-compatible terminal image rendering.
 
 ## Testing Strategy
@@ -124,7 +124,7 @@ Unit coverage should include:
 
 - Config precedence.
 - Secret redaction.
-- Token validation outcomes through `internal/twitch.FakeTokenValidator`.
+- Token validation outcomes through `internal/twitch.FakeTokenValidator` and fake HTTP tests for `internal/twitch.OAuthTokenValidator`.
 - Twitch message normalization.
 - IRC emote position parsing.
 - Emoji grapheme detection.
