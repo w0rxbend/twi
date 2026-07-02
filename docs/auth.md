@@ -33,13 +33,30 @@ The interactive setup wizard is future work.
 Suggested environment variables:
 
 ```sh
-TWI_TWITCH_USERNAME=<your Twitch login>
-TWI_TWITCH_OAUTH_TOKEN=<your OAuth token>
-TWI_TWITCH_CLIENT_ID=<client id when Helix/API features need it>
-TWI_TWITCH_CLIENT_SECRET=<client secret only if a future flow needs it>
+TWITCH_USERNAME=<your Twitch login>
+TWITCH_ACCESS_TOKEN=<your OAuth token>
+TWITCH_REFRESH_TOKEN=<your refresh token, future use>
+TWITCH_CLIENT_ID=<client id when Helix/API features need it>
+TWITCH_CLIENT_SECRET=<client secret only if a future flow needs it>
 ```
 
+The canonical `TWI_TWITCH_USERNAME`, `TWI_TWITCH_OAUTH_TOKEN`, `TWI_TWITCH_REFRESH_TOKEN`, `TWI_TWITCH_CLIENT_ID`, and `TWI_TWITCH_CLIENT_SECRET` names still work and take priority when both forms are set. `TWITCH_ACCESS_TOKEN` may be either a plain token or an `oauth:`-prefixed IRC token.
+
 Do not commit shell profiles, `.env` files, config files, screenshots, or logs that contain these values.
+
+## Refresh On Auth Failure
+
+When live Twitch IRC login fails with an authentication error, `twi` tries one OAuth refresh and reconnects with the refreshed access token if these values are configured:
+
+- Twitch username.
+- Current access token.
+- Refresh token.
+- Client ID.
+- Client secret.
+
+The refresh request is sent to Twitch's OAuth token endpoint. The refreshed access token and refresh token are kept in memory for the current process only; they are not written back to `.env` or the config file yet.
+
+If refresh fails, the user-facing error remains redacted and tells you to verify username, OAuth token, and `chat:read`.
 
 ## Planned Login Flow
 

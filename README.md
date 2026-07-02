@@ -1,76 +1,170 @@
-# Twitch Chat TUI
+<p align="center">
+  <img src="docs/assets/twi-banner.svg" alt="twi banner" width="900">
+</p>
 
-`twi` is a terminal user interface for Twitch chat. The goal is a polished, keyboard-first chat client that can read live Twitch chat, send messages, animate incoming messages, and render rich chat content with graceful terminal fallbacks.
+<p align="center">
+  <a href="https://go.dev/"><img alt="Go 1.26" src="https://img.shields.io/badge/Go-1.26-00ADD8?style=for-the-badge&logo=go&logoColor=white"></a>
+  <a href="https://www.twitch.tv/"><img alt="Twitch chat" src="https://img.shields.io/badge/Twitch-chat-9146FF?style=for-the-badge&logo=twitch&logoColor=white"></a>
+  <a href="Dockerfile"><img alt="Docker ready" src="https://img.shields.io/badge/Docker-ready-2496ED?style=for-the-badge&logo=docker&logoColor=white"></a>
+  <a href="docs/config.md"><img alt="Secrets redacted" src="https://img.shields.io/badge/secrets-redacted-111827?style=for-the-badge"></a>
+</p>
 
-`PLAN.md` is the current source of truth for product direction, architecture, and delivery phases. The Go module, CLI/config foundation, non-network Bubble Tea mock shell, one-channel Twitch IRC read/send path, fallback rendering contracts, and diagnostics are implemented.
+# twi
 
-## Project Goals
+`twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-- Show Twitch chat messages live with low latency.
-- Send messages from an in-terminal composer.
-- Provide a colorful Bubble Tea based TUI with status, chat viewport, composer, and help.
-- Support typed-in reveal animation for new messages without corrupting Unicode, styling, or image placeholders.
-- Render usernames, badges, avatars, Twitch emotes, standard emoji, replies, notices, and moderation events clearly.
-- Support inline images in capable terminals while keeping text and initials fallbacks usable everywhere.
-- Keep Twitch credentials secure across environment variables, config files, logs, and diagnostics.
+The project is currently an MVP-shaped Go app: mock chat works without the network, one-channel live Twitch IRC read/send works with credentials, diagnostics are built in, and rich terminal image support is still planned.
 
-## Current Status
+```text
+        +---------------------------------------------+
+        | twi chat --mock                             |
+        |                                             |
+        |  ariadne  chat in a terminal, but cute      |
+        |  modbot   replies, /me, resize, scroll      |
+        |  you      no browser tab circus required    |
+        +---------------------------------------------+
+```
 
-- The repository contains planning docs, a Go module, a `cmd/twi` entrypoint, config loading, secret redaction, diagnostics, a deterministic Bubble Tea mock chat shell, and a live Twitch IRC read/send adapter.
-- The mock shell supports terminal resize, `tab` focus switching between chat and composer, `?` help expansion, page-key chat scrolling, selected-message reply mode, `/me` action sends, a reduced narrow-width layout, and tick-driven reveal animation for incoming mock messages.
-- `twi chat --channel <channel>` starts the same Bubble Tea shell against Twitch IRC when `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN` are configured. The token must be an IRC OAuth token with `chat:read`; sending from the composer also needs `chat:edit`.
-- The current stable Go version was verified from the official Go downloads page as `go1.26.4` on 2026-07-01.
-- The module uses Go `1.26` semantics, `toolchain go1.26.4`, and module-managed `govulncheck`/`staticcheck` tools.
-- Inline image loading and terminal image drawing are not implemented yet; current rendering uses stable text, initials, Unicode, badge, and emote-token fallbacks.
+## Start Here
 
-## CLI
+Run the no-risk mock mode:
 
-The binary name is `twi`.
+```sh
+go run ./cmd/twi chat --mock --channel demo
+```
 
-| Command | Status | Purpose |
+Build and run the binary:
+
+```sh
+go build -o bin/twi ./cmd/twi
+./bin/twi chat --mock --channel demo
+```
+
+Use Docker:
+
+```sh
+docker build -t twi:local .
+docker run --rm -it twi:local chat --mock --channel demo
+```
+
+Check your setup:
+
+```sh
+go run ./cmd/twi doctor
+docker run --rm twi:local doctor
+```
+
+## Live Twitch Chat
+
+Live mode needs a Twitch login, an IRC OAuth token, and one channel. The token needs `chat:read`; sending from the composer also needs `chat:edit`.
+
+```sh
+export TWI_TWITCH_USERNAME="your_twitch_login"
+export TWI_TWITCH_OAUTH_TOKEN="oauth:keep-this-secret"
+
+go run ./cmd/twi chat --channel somechannel
+```
+
+The shorter dotenv-style aliases also work:
+
+```sh
+export TWITCH_USERNAME="your_twitch_login"
+export TWITCH_ACCESS_TOKEN="keep-this-secret"
+export TWITCH_CLIENT_ID="your_client_id"
+export TWITCH_CLIENT_SECRET="keep-this-secret"
+export TWITCH_REFRESH_TOKEN="keep-this-secret"
+```
+
+If Twitch IRC rejects the access token during login, `twi` will try one in-memory OAuth refresh and reconnect when `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are also configured. It does not write the refreshed token back to disk yet.
+
+Docker version:
+
+```sh
+docker run --rm -it \
+  -e TWITCH_USERNAME \
+  -e TWITCH_ACCESS_TOKEN \
+  twi:local chat --channel somechannel
+```
+
+Do not paste real tokens into commits, screenshots, issue comments, terminal recordings, or public support threads. `twi config show` and `twi doctor` redact secrets by design.
+
+## What Works Today
+
+| Command | Status | Use it for |
 | --- | --- | --- |
-| `twi chat --mock [--channel <channel>]` | Current | Start a deterministic non-network Bubble Tea mock chat shell without Twitch credentials. |
-| `twi chat --channel <channel>` | Current | Start the TUI for one Twitch channel using Twitch IRC when username and OAuth token are configured. |
-| `twi chat --channel <one> --channel <two>` | Future | Start multi-channel mode. |
-| `twi login` | Future | Start an OAuth or setup flow. |
-| `twi config show` | Current | Print effective configuration with secrets redacted. |
-| `twi config path` | Current | Print the config file path. |
-| `twi doctor` | Current | Print secret-safe config, credential, token-status, Twitch reachability, terminal, image-signal, cache, and feature-mode diagnostics. |
+| `twi chat --mock [--channel demo]` | Ready | Try the TUI without Twitch credentials. |
+| `twi chat --channel <channel>` | Ready | Join one Twitch channel over IRC. |
+| `twi config show` | Ready | Print effective config with secrets redacted. |
+| `twi config path` | Ready | Show the default config file path. |
+| `twi doctor` | Ready | Diagnose config, credentials, terminal hints, cache access, and Twitch reachability. |
+| `twi login` | Planned | Future interactive OAuth/setup flow. |
+| Multi-channel live chat | Planned | Current live mode intentionally supports one channel. |
+| Inline terminal images | Planned | Current renderer uses stable text and initials fallbacks. |
 
-## MVP Scope
+## Controls
 
-The first runnable milestone should provide:
+| Key | Action |
+| --- | --- |
+| `tab` | Switch focus between chat and composer. |
+| `?` | Toggle expanded help. |
+| `pgup` / `pgdown` | Scroll chat. |
+| `up` / `down` | Select messages for reply mode. |
+| `r` | Reply to the selected message. |
+| `esc` | Cancel reply mode. |
+| `enter` | Send from the composer in live mode. |
+| `/me does a thing` | Send a Twitch action message. |
 
-- A Go module and `cmd/twi` entrypoint. Current.
-- CLI help. Current.
-- Config loading from flags, environment variables, and a config file. Current.
-- Secret redaction utilities. Current.
-- A Bubble Tea root model with status bar, chat viewport, composer input, focus handling, viewport scrolling, compact/expanded help, and narrow-width layout. Current.
-- A fake chat source for development. Current app boundary and deterministic fake exist.
-- `twi chat --mock` with animated mock messages. Current.
-- `twi chat --channel <name>` live IRC read path for one configured channel. Current.
-- Composer sends for the active live channel with visible queued/sent/failed/rate-limited status, replies, and `/me` actions. Current.
+## Configure It
 
-## Future Scope
+Use environment variables for quick runs:
 
-Later milestones add:
+```sh
+export TWI_DEFAULT_CHANNELS="somechannel"
+export TWI_ANIMATION_MODE="fast"
+export TWI_AVATAR_MODE="initials"
+export TWI_EMOTE_MODE="text"
+```
 
-- Richer reconnect handling and Helix-backed live credential/scope validation.
-- Helix-backed identity and asset lookups for avatars, emotes, and badges.
-- Kitty/Ghostty inline image rendering with fallback text, Unicode, and initials.
-- Multi-channel navigation, unread counts, inspect panel, mouse support, and richer setup flows.
+Or create the flat config file shown by:
 
-## Known Limitations
+```sh
+twi config path
+```
 
-- Live Twitch chat currently supports one configured channel. Passing multiple live channels returns an actionable error.
-- `twi login` is not implemented. Configure credentials with environment variables or the flat config file.
-- `twi doctor` names the required `chat:read` and `chat:edit` IRC scopes, but real token identity, expiry, and scope validation are not wired to Helix yet.
-- Inline images are fallback-only. The renderer reserves stable cells for avatars, badges, emoji, and emote tokens, but it does not download assets or draw Kitty/Ghostty images.
-- Manual live read/send validation still requires user-owned Twitch credentials and a channel where the account can chat.
+Example:
 
-## Development Commands
+```toml
+twitch_username = "your_twitch_login"
+twitch_oauth_token = "REDACTED"
+twitch_refresh_token = "REDACTED"
+default_channels = "somechannel"
+enable_kitty_images = true
+image_mode = "auto"
+avatar_mode = "initials"
+emoji_mode = "unicode"
+emote_mode = "text"
+animation_mode = "fast"
+```
 
-These are the standard validation commands:
+Nested TOML tables are not implemented yet. Keep the file flat.
+
+## Docker And Deploy
+
+This is a terminal app, so "deploy" usually means "ship the binary or container to the machine where a human will run it in a real TTY."
+
+```sh
+docker build -t twi:local .
+cp .env.example .env
+docker compose run --rm mock
+docker compose run --rm doctor
+docker compose run --rm live
+```
+
+For live Docker runs, put real values only in your local ignored `.env`, pass credentials through environment variables, or use a private runtime secret mechanism. Do not bake tokens into the image.
+
+More detail: [Docker Guide](docs/docker.md).
+
+## Developer Commands
 
 ```sh
 go version
@@ -79,42 +173,25 @@ go fmt ./...
 go vet ./...
 go test ./...
 go test -race ./...
-```
-
-Pinned module tools:
-
-```sh
 go tool govulncheck ./...
 go tool staticcheck ./...
 ```
 
-Use writable caches in restricted environments when the default Go cache is outside the workspace:
+Restricted environment cache-friendly form:
 
 ```sh
 GOTOOLCHAIN=local GOCACHE=/tmp/twi-gocache GOMODCACHE=/tmp/twi-gomodcache go test ./...
-GOTOOLCHAIN=local GOCACHE=/tmp/twi-gocache GOMODCACHE=/tmp/twi-gomodcache STATICCHECK_CACHE=/tmp/twi-staticcheck-cache go tool staticcheck ./...
 ```
 
-`GOTOOLCHAIN=auto` remains the normal developer setting; `GOTOOLCHAIN=local` is useful only when automatic toolchain download is not available.
+## Docs For Humans
 
-## Secret Handling
-
-Never commit Twitch OAuth tokens, client secrets, `.env` files, local config files with credentials, logs, terminal recordings, or screenshots that expose secrets.
-
-The implementation must not print secrets in:
-
-- `twi config show`
-- `twi doctor`
-- logs
-- errors
-- test snapshots
-- debug panels
-
-Prefer environment variables or a local config file with restrictive permissions until secure token storage is implemented.
-
-## More Documentation
-
+- [Quickstart](docs/quickstart.md)
+- [Docker Guide](docs/docker.md)
 - [Authentication](docs/auth.md)
 - [Configuration](docs/config.md)
 - [Development](docs/development.md)
 - [Terminal Images](docs/terminal-images.md)
+
+## Project Direction
+
+Near-term work is focused on keeping the MVP sharp: better credential validation, richer diagnostics, real asset/image rendering, and eventual multi-channel behavior. The source of truth lives in the product docs under `docs/`.

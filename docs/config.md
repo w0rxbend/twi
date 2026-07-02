@@ -6,7 +6,7 @@ This document describes the configuration model for `twi`. The implemented parse
 
 - Config loading exists for flat `key = value` files, environment variables, and selected CLI overrides.
 - `twi config show` and `twi config path` exist in the CLI.
-- `twi chat --channel <channel>` uses `TWI_TWITCH_USERNAME` and `TWI_TWITCH_OAUTH_TOKEN` for the current one-channel Twitch IRC read path.
+- `twi chat --channel <channel>` uses Twitch username and token values from either canonical `TWI_*` variables or dotenv-friendly `TWITCH_*` aliases for the current one-channel Twitch IRC read path.
 - Twitch credentials are currently read from environment variables or the flat config file. CLI flags currently override `--config` and `--channel`, not username or OAuth token values.
 - Config output redacts OAuth tokens and client secrets.
 - `twi doctor` reports the effective config file path, credential presence,
@@ -55,8 +55,14 @@ Supported variables:
 | --- | --- | --- |
 | `TWI_TWITCH_USERNAME` | No | Twitch login for IRC auth. |
 | `TWI_TWITCH_OAUTH_TOKEN` | Yes | Twitch IRC OAuth token with `chat:read` for live reads and `chat:edit` for composer sends. |
+| `TWI_TWITCH_REFRESH_TOKEN` | Yes | Refresh token used for one in-memory OAuth refresh after live IRC auth failure. |
 | `TWI_TWITCH_CLIENT_ID` | Usually no | Twitch app client ID for Helix/API calls. |
 | `TWI_TWITCH_CLIENT_SECRET` | Yes | Client secret if a future OAuth flow needs it. |
+| `TWITCH_USERNAME` | No | Dotenv alias for Twitch login. Canonical `TWI_TWITCH_USERNAME` wins if both are set. |
+| `TWITCH_ACCESS_TOKEN` | Yes | Dotenv alias for OAuth token. A missing `oauth:` prefix is added for IRC use. Canonical `TWI_TWITCH_OAUTH_TOKEN` wins if both are set. |
+| `TWITCH_REFRESH_TOKEN` | Yes | Dotenv alias for refresh token. Used for one in-memory OAuth refresh after live IRC auth failure. |
+| `TWITCH_CLIENT_ID` | Usually no | Dotenv alias for client ID. |
+| `TWITCH_CLIENT_SECRET` | Yes | Dotenv alias for client secret. |
 | `TWI_DEFAULT_CHANNELS` | No | Default channel list. |
 | `TWI_ENABLE_KITTY_IMAGES` | No | Enable or disable Kitty protocol image support. |
 | `TWI_IMAGE_MODE` | No | Overall image mode. |
@@ -107,6 +113,7 @@ This example matches the current flat parser. A richer TOML schema can be added 
 ```toml
 twitch_username = "my_login"
 twitch_oauth_token = "REDACTED"
+twitch_refresh_token = "REDACTED"
 twitch_client_id = ""
 twitch_client_secret = ""
 default_channels = "somechannel"
@@ -141,6 +148,7 @@ twi doctor
 ```text
 twitch_username = "my_login"
 twitch_oauth_token = "[redacted]"
+twitch_refresh_token = "[redacted]"
 twitch_client_secret = "[redacted]"
 ```
 
@@ -191,3 +199,4 @@ Future target:
 - Full terminal image mode controls.
 - Cache sizing and pruning configuration.
 - Token identity, expiry, and scope validation through a Twitch API client.
+- Persisting refreshed tokens safely after OAuth refresh succeeds.

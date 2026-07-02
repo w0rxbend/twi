@@ -26,8 +26,14 @@ Usage:
 Environment:
   TWI_TWITCH_USERNAME
   TWI_TWITCH_OAUTH_TOKEN
+  TWI_TWITCH_REFRESH_TOKEN
   TWI_TWITCH_CLIENT_ID
   TWI_TWITCH_CLIENT_SECRET
+  TWITCH_USERNAME
+  TWITCH_ACCESS_TOKEN
+  TWITCH_REFRESH_TOKEN
+  TWITCH_CLIENT_ID
+  TWITCH_CLIENT_SECRET
   TWI_DEFAULT_CHANNELS
   TWI_ENABLE_KITTY_IMAGES
   TWI_IMAGE_MODE
@@ -39,9 +45,12 @@ Environment:
 
 var newLiveChatClient = func(ctx context.Context, cfg config.Config) (app.ChatClient, error) {
 	transport, err := twitch.NewIRCClient(twitch.IRCConfig{
-		Username:   cfg.Twitch.Username,
-		OAuthToken: cfg.Twitch.OAuthToken,
-		Channels:   cfg.DefaultChannels[:1],
+		Username:     cfg.Twitch.Username,
+		OAuthToken:   cfg.Twitch.OAuthToken,
+		RefreshToken: cfg.Twitch.RefreshToken,
+		ClientID:     cfg.Twitch.ClientID,
+		ClientSecret: cfg.Twitch.ClientSecret,
+		Channels:     cfg.DefaultChannels[:1],
 	})
 	if err != nil {
 		return nil, err
@@ -145,10 +154,10 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 func validateLiveChatConfig(cfg config.Config) error {
 	var missing []string
 	if strings.TrimSpace(cfg.Twitch.Username) == "" {
-		missing = append(missing, "TWI_TWITCH_USERNAME")
+		missing = append(missing, "TWI_TWITCH_USERNAME or TWITCH_USERNAME")
 	}
 	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		missing = append(missing, "TWI_TWITCH_OAUTH_TOKEN")
+		missing = append(missing, "TWI_TWITCH_OAUTH_TOKEN or TWITCH_ACCESS_TOKEN")
 	}
 	if len(missing) > 0 {
 		return fmt.Errorf("missing Twitch credentials: set %s for live chat, or run `twi chat --mock`; OAuth token must include chat:read and chat:edit", strings.Join(missing, " and "))

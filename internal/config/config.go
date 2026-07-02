@@ -25,6 +25,7 @@ type Config struct {
 type TwitchConfig struct {
 	Username     string
 	OAuthToken   string
+	RefreshToken string
 	ClientID     string
 	ClientSecret string
 }
@@ -124,6 +125,7 @@ func (c Config) RedactedString() string {
 		"path = " + quote(c.Path),
 		"twitch_username = " + quote(c.Twitch.Username),
 		"twitch_oauth_token = " + quote(redact(c.Twitch.OAuthToken)),
+		"twitch_refresh_token = " + quote(redact(c.Twitch.RefreshToken)),
 		"twitch_client_id = " + quote(c.Twitch.ClientID),
 		"twitch_client_secret = " + quote(redact(c.Twitch.ClientSecret)),
 		"default_channels = " + quote(strings.Join(c.DefaultChannels, ",")),
@@ -193,10 +195,22 @@ func applyEnv(cfg *Config, environ []string) {
 
 	for _, key := range keys {
 		switch key {
+		case "TWITCH_USERNAME":
+			cfg.Twitch.Username = env[key]
+		case "TWITCH_ACCESS_TOKEN":
+			cfg.Twitch.OAuthToken = normalizeIRCOAuthToken(env[key])
+		case "TWITCH_REFRESH_TOKEN":
+			cfg.Twitch.RefreshToken = env[key]
+		case "TWITCH_CLIENT_ID":
+			cfg.Twitch.ClientID = env[key]
+		case "TWITCH_CLIENT_SECRET":
+			cfg.Twitch.ClientSecret = env[key]
 		case "TWI_TWITCH_USERNAME":
 			cfg.Twitch.Username = env[key]
 		case "TWI_TWITCH_OAUTH_TOKEN":
 			cfg.Twitch.OAuthToken = env[key]
+		case "TWI_TWITCH_REFRESH_TOKEN":
+			cfg.Twitch.RefreshToken = env[key]
 		case "TWI_TWITCH_CLIENT_ID":
 			cfg.Twitch.ClientID = env[key]
 		case "TWI_TWITCH_CLIENT_SECRET":
@@ -225,6 +239,8 @@ func applyKey(cfg *Config, key, value string) {
 		cfg.Twitch.Username = value
 	case "twitch_oauth_token":
 		cfg.Twitch.OAuthToken = value
+	case "twitch_refresh_token":
+		cfg.Twitch.RefreshToken = value
 	case "twitch_client_id":
 		cfg.Twitch.ClientID = value
 	case "twitch_client_secret":
@@ -244,6 +260,14 @@ func applyKey(cfg *Config, key, value string) {
 	case "animation_mode":
 		cfg.Features.AnimationMode = value
 	}
+}
+
+func normalizeIRCOAuthToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.HasPrefix(strings.ToLower(value), "oauth:") {
+		return value
+	}
+	return "oauth:" + value
 }
 
 func trimValue(value string) string {

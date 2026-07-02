@@ -69,8 +69,9 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 
 	checks := []DoctorCheck{
 		configPathCheck(cfg.Path, opts.ConfigLoadError),
-		credentialCheck("twitch username", cfg.Twitch.Username, "live chat unavailable until TWI_TWITCH_USERNAME is set"),
-		credentialCheck("oauth token", cfg.Twitch.OAuthToken, "live chat unavailable until TWI_TWITCH_OAUTH_TOKEN is set"),
+		credentialCheck("twitch username", cfg.Twitch.Username, "live chat unavailable until TWI_TWITCH_USERNAME or TWITCH_USERNAME is set"),
+		credentialCheck("oauth token", cfg.Twitch.OAuthToken, "live chat unavailable until TWI_TWITCH_OAUTH_TOKEN or TWITCH_ACCESS_TOKEN is set"),
+		credentialCheck("refresh token", cfg.Twitch.RefreshToken, "auth refresh unavailable until TWI_TWITCH_REFRESH_TOKEN or TWITCH_REFRESH_TOKEN is set"),
 		credentialCheck("client id", cfg.Twitch.ClientID, "optional Helix/API features unavailable"),
 		credentialCheck("client secret", cfg.Twitch.ClientSecret, "optional OAuth client-secret flow unavailable"),
 		channelsCheck(cfg.DefaultChannels),
@@ -334,7 +335,7 @@ func redactSensitive(detail string, cfg config.Config) string {
 }
 
 func sensitiveValues(cfg config.Config) []string {
-	values := []string{cfg.Twitch.OAuthToken, cfg.Twitch.ClientSecret}
+	values := []string{cfg.Twitch.OAuthToken, cfg.Twitch.RefreshToken, cfg.Twitch.ClientSecret}
 	token := strings.TrimSpace(cfg.Twitch.OAuthToken)
 	if prefix, body, ok := strings.Cut(token, ":"); ok && strings.EqualFold(prefix, "oauth") {
 		values = append(values, body)
