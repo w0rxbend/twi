@@ -12,7 +12,8 @@ This document describes the authentication model for `twi`. It covers the curren
 - `twi doctor` diagnostics are partially shipped; Twitch OAuth validation is wired into doctor and reports identity, expiry, required IRC scopes, username mismatch, and refresh availability without printing credential values.
 - The internal credential storage boundary and restrictive file fallback are
   wired into `twi login`, `twi chat`, `twi config show`, and `twi doctor`.
-  Setup wizard handoff and richer EventSub/API chat support remain later work.
+  `twi setup` can update non-secret config values and hand off to login.
+  Richer EventSub/API chat support remains later work.
 
 ## MVP Credential Model
 
@@ -34,7 +35,10 @@ The implemented config sources are, from highest to lowest priority:
 4. Saved credential file values for empty credential fields.
 5. Defaults.
 
-The interactive setup wizard is future work.
+`twi setup` is the current guided path for non-secret local configuration. It
+can write username, Twitch app client ID, default channels, image modes, mouse
+mode, emoji provider, and animation mode to `config.toml`, then either stop,
+run `twi login`, or run `twi login --dry-run`.
 
 Suggested environment variables:
 
@@ -108,6 +112,10 @@ The command saves successful login results through the restrictive credential
 file fallback. Environment variables and flat config values still take
 precedence when present, so remove duplicates from shell profiles, `.env`, or
 `config.toml` after confirming saved credentials work.
+
+`twi setup --login` delegates to this login command after writing only
+non-secret config values. `twi setup --login-dry-run` delegates to the bounded
+login smoke path for CI and local checks.
 
 The internal login boundary now lives in `internal/auth`. It defines:
 
@@ -217,9 +225,9 @@ credential material and safe identity metadata:
 Migration is explicit only. `twi` does not silently copy secrets from
 environment variables or the flat config file into credential storage. `twi
 login` saves credentials only after a successful user-authorized OAuth login;
-a future setup command may provide another explicit handoff. Remove duplicate
-secrets from shell profiles, `.env`, or `config.toml` if you no longer want
-those sources to take precedence.
+`twi setup --login` is an explicit handoff to that same login/storage boundary.
+Remove duplicate secrets from shell profiles, `.env`, or `config.toml` if you
+no longer want those sources to take precedence.
 
 Refresh tokens should be used when available and appropriate for the selected OAuth flow.
 

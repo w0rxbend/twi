@@ -546,6 +546,7 @@ func TestDoctorWarnsOnUnknownEmojiProviderEvenWithTemplate(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.EmojiProvider = "surprise"
 	cfg.Features.EmojiURLTemplate = "https://emoji.example/{id}.png"
+	cfg.Features.AnimationMode = "expressive"
 
 	report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
 		Environ:  []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
@@ -558,6 +559,9 @@ func TestDoctorWarnsOnUnknownEmojiProviderEvenWithTemplate(t *testing.T) {
 	}
 	if !strings.Contains(check.Detail, "emoji_provider=surprise") {
 		t.Fatalf("feature modes detail = %q, want unknown emoji provider", check.Detail)
+	}
+	if !strings.Contains(check.Detail, "animation=expressive") {
+		t.Fatalf("feature modes detail = %q, want unknown animation mode", check.Detail)
 	}
 }
 

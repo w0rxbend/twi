@@ -3,8 +3,9 @@
 Status: Risk register aligned with the current MVP. Mock chat is ready;
 multi-channel live IRC read/send, diagnostics, multi-channel UX, and inline
 image plumbing are partial; login can save through the restrictive credential
-file fallback; setup wiring, refresh-token persistence after IRC reconnect, and
-manual Kitty/Ghostty image validation remain planned.
+file fallback; setup can write non-secret config and hand off to login;
+refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image
+validation remain planned.
 
 Credential assumption: Twitch username/token values currently come from
 environment variables, the flat config file, or the private credential file.

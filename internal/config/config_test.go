@@ -188,6 +188,43 @@ func TestCanonicalEnvOverridesTwitchDotenvAliases(t *testing.T) {
 	}
 }
 
+func TestLoadIgnoresEmptyEnvValues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := strings.Join([]string{
+		`twitch_username = "file_user"`,
+		`twitch_client_id = "file-client-id"`,
+		`default_channels = "fileone"`,
+		`animation_mode = "reduced"`,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load([]string{
+		"TWI_TWITCH_USERNAME=",
+		"TWI_TWITCH_CLIENT_ID=",
+		"TWI_DEFAULT_CHANNELS=",
+		"TWI_ANIMATION_MODE=",
+	}, Overrides{ConfigPath: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if cfg.Twitch.Username != "file_user" {
+		t.Fatalf("username = %q, want file_user", cfg.Twitch.Username)
+	}
+	if cfg.Twitch.ClientID != "file-client-id" {
+		t.Fatalf("client ID = %q, want file-client-id", cfg.Twitch.ClientID)
+	}
+	if !reflect.DeepEqual(cfg.DefaultChannels, []string{"fileone"}) {
+		t.Fatalf("channels = %#v, want fileone", cfg.DefaultChannels)
+	}
+	if cfg.Features.AnimationMode != "reduced" {
+		t.Fatalf("animation mode = %q, want reduced", cfg.Features.AnimationMode)
+	}
+}
+
 func TestLoadEnvOnlySkipsConfigFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bad.toml")
@@ -204,6 +241,109 @@ func TestLoadEnvOnlySkipsConfigFile(t *testing.T) {
 	}
 	if cfg.Twitch.Username != "env_user" {
 		t.Fatalf("username = %q, want env_user", cfg.Twitch.Username)
+	}
+}
+
+func TestWriteNonSecretFileCreatesConfigWithoutSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "twi", "config.toml")
+	cfg := Default()
+	cfg.Twitch.Username = "viewer"
+	cfg.Twitch.OAuthToken = "oauth:token-private"
+	cfg.Twitch.RefreshToken = "refresh-private"
+	cfg.Twitch.ClientID = "client-id"
+	cfg.Twitch.ClientSecret = "client-private"
+	cfg.DefaultChannels = []string{"one", "#two"}
+	cfg.Features.EnableKittyImages = false
+	cfg.Features.EnableMouse = false
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.AvatarMode = "image"
+	cfg.Features.EmojiMode = "image"
+	cfg.Features.EmojiProvider = "custom"
+	cfg.Features.EmoteMode = "image"
+	cfg.Features.AnimationMode = "reduced"
+
+	if err := WriteNonSecretFile(path, cfg); err != nil {
+		t.Fatalf("WriteNonSecretFile returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	output := string(data)
+	for _, want := range []string{
+		`twitch_username = "viewer"`,
+		`twitch_client_id = "client-id"`,
+		`default_channels = "one,two"`,
+		`enable_kitty_images = false`,
+		`enable_mouse = false`,
+		`image_mode = "normal"`,
+		`avatar_mode = "image"`,
+		`emoji_mode = "image"`,
+		`emoji_provider = "custom"`,
+		`emote_mode = "image"`,
+		`animation_mode = "reduced"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("written config missing %q:\n%s", want, output)
+		}
+	}
+	for _, forbidden := range []string{"oauth:token-private", "refresh-private", "client-private", "twitch_oauth_token", "twitch_refresh_token", "twitch_client_secret"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("written config leaked %q:\n%s", forbidden, output)
+		}
+	}
+}
+
+func TestWriteNonSecretFileUpdatesAllowedKeysAndPreservesExistingSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	content := strings.Join([]string{
+		"# keep this comment",
+		`twitch_username = "old_viewer"`,
+		`twitch_oauth_token = "oauth:existing-private"`,
+		`twitch_refresh_token = "refresh-existing-private"`,
+		`twitch_client_secret = "client-existing-private"`,
+		`unknown_key = "kept"`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Default()
+	cfg.Twitch.Username = "new_viewer"
+	cfg.Twitch.OAuthToken = "oauth:new-private"
+	cfg.Twitch.RefreshToken = "refresh-new-private"
+	cfg.Twitch.ClientID = "client-id"
+	cfg.Twitch.ClientSecret = "client-new-private"
+	cfg.DefaultChannels = []string{"newchan"}
+	cfg.Features.EnableMouse = false
+
+	if err := WriteNonSecretFile(path, cfg); err != nil {
+		t.Fatalf("WriteNonSecretFile returned error: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	output := string(data)
+	for _, want := range []string{
+		"# keep this comment",
+		`twitch_username = "new_viewer"`,
+		`twitch_oauth_token = "oauth:existing-private"`,
+		`twitch_refresh_token = "refresh-existing-private"`,
+		`twitch_client_secret = "client-existing-private"`,
+		`unknown_key = "kept"`,
+		`twitch_client_id = "client-id"`,
+		`default_channels = "newchan"`,
+		`emoji_provider = "twemoji"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("updated config missing %q:\n%s", want, output)
+		}
+	}
+	for _, forbidden := range []string{"oauth:new-private", "refresh-new-private", "client-new-private"} {
+		if strings.Contains(output, forbidden) {
+			t.Fatalf("updated config wrote new secret %q:\n%s", forbidden, output)
+		}
 	}
 }
 

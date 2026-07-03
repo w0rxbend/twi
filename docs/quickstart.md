@@ -60,7 +60,7 @@ the primary path.
 
 ## 4. Configure Live Twitch Chat
 
-Live mode is partially shipped: it supports one or more Twitch channels over IRC with read, send, selected-message replies, `/me` actions, keyboard-first channel switching/sidebar state, command palette actions, optional mouse controls, and selected-message inspect diagnostics. `twi login` can validate an OAuth browser/callback flow and save returned tokens through the restrictive credential-file fallback without printing them; setup wizard wiring remains pending.
+Live mode is partially shipped: it supports one or more Twitch channels over IRC with read, send, selected-message replies, `/me` actions, keyboard-first channel switching/sidebar state, command palette actions, optional mouse controls, and selected-message inspect diagnostics. `twi setup` can write non-secret config values and hand off to login. `twi login` can validate an OAuth browser/callback flow and save returned tokens through the restrictive credential-file fallback without printing them.
 
 You need:
 
@@ -70,6 +70,23 @@ You need:
 - `chat:edit` scope to send chat.
 
 Username/token credentials currently come from environment variables, the flat config file, or the private credential file. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
+
+Guided setup:
+
+```sh
+go run ./cmd/twi setup
+```
+
+Automation-friendly setup:
+
+```sh
+go run ./cmd/twi setup --non-interactive --username your_twitch_login --channel somechannel --image-mode auto --emoji-provider twemoji --animation-mode fast
+```
+
+Setup does not ask for or write OAuth tokens, refresh tokens, callback codes,
+OAuth state, authorization URLs, or client secrets. To hand off to login after
+writing non-secret config, add `--login`; to exercise the bounded smoke path,
+add `--login-dry-run`.
 
 To check the login command without browser, network, or credentials:
 
@@ -137,9 +154,10 @@ animation_mode = "fast"
 ```
 
 The parser is intentionally small right now. Do not use nested TOML tables yet.
-Prefer `twi login` for saved tokens. If you keep any flat config that contains
-real tokens, keep it private to your user account, for example with `chmod 600`;
-flat config values still take precedence over saved credentials.
+Prefer `twi setup` for non-secret config values and `twi login` for saved
+tokens. If you keep any flat config that contains real tokens, keep it private
+to your user account, for example with `chmod 600`; flat config values still
+take precedence over saved credentials.
 
 ## 6. Diagnose Before Blaming The Terminal
 
@@ -189,7 +207,7 @@ go build -o bin/twi ./cmd/twi
 
 ## Common Fixes
 
-`missing Twitch credentials`: Set `TWITCH_USERNAME` and `TWITCH_ACCESS_TOKEN`, or run `twi chat --mock`.
+`missing Twitch credentials`: Run `twi setup` for username/channels and `twi login` for saved OAuth credentials, set `TWITCH_USERNAME` and `TWITCH_ACCESS_TOKEN`, or run `twi chat --mock`.
 
 Twitch IRC connection status is connection-level: Multi-channel live mode joins each configured channel, but Twitch IRC connect, reconnect, and disconnect callbacks are not independent per-channel events.
 

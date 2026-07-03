@@ -9,14 +9,14 @@ Progress as of the initial swarm pass:
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
 - Current status labels: mock chat is ready; multi-channel live IRC read/send,
   multi-channel UX, diagnostics, inline image plumbing, OAuth login, and
-  restrictive credential-file persistence are partial; setup wizard wiring,
-  refresh-token persistence after IRC reconnect, and manual Kitty/Ghostty image
-  validation are planned.
+  restrictive credential-file persistence are partial; setup can write
+  non-secret config and hand off to login; refresh-token persistence after IRC
+  reconnect and manual Kitty/Ghostty image validation are planned.
 - Credential rule: Twitch username/token values currently come from
   environment variables, the flat config file, or the private credential file;
   environment and flat config values take precedence over saved credentials,
   and CLI overrides cover channel and config path.
-- Remaining near-term work: setup, reconnect hardening, filters, debug logging,
+- Remaining near-term work: reconnect hardening, filters, debug logging,
   release packaging, and manual terminal validation.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
@@ -526,7 +526,7 @@ Goal: Let users validate Twitch OAuth credentials without manually pasting
 tokens into terminal output.
 Context: The CLI now wires `twi login` to a browser/local-callback flow and
 saves successful login results through the restrictive credential-file fallback.
-Setup handoff remains separate follow-up work.
+Setup can hand off to this same login/storage path.
 Files likely touched: `internal/cli`, `internal/config`, `internal/twitch`,
 `docs/auth.md`, `docs/quickstart.md`.
 Implementation notes: The implemented flow requests only required scopes first:
@@ -563,16 +563,21 @@ Follow-ups: Config migration helper.
 Task: Add first-run setup wizard.
 Owner lane: UX/platform engineer.
 Goal: Guide new users through channel, auth, image mode, animation mode, and
-doctor checks.
-Context: Manual config is workable but not friendly.
+login/storage handoff.
+Context: Manual config is workable but not friendly. The implemented setup
+command writes non-secret flat config values and can hand off to `twi login` or
+`twi login --dry-run`.
 Files likely touched: `internal/cli`, `internal/config`, `docs/quickstart.md`.
 Implementation notes: Keep noninteractive flags/env viable for automation and
-Docker.
-Acceptance criteria: A new user can reach working mock mode and then live mode
-from prompts without reading every doc.
-Verification: CLI prompt tests with fake stdin/stdout; manual first-run smoke.
-Risks: Prompt flows can block automation; provide `--non-interactive` or clear
-command alternatives.
+Docker. Never prompt for OAuth tokens, refresh tokens, callback codes, OAuth
+state, authorization URLs, or client secrets.
+Acceptance criteria: A new user can create or update username, client ID,
+channels, image modes, mouse mode, and animation mode from prompts or
+noninteractive flags, then explicitly hand off to login/storage.
+Verification: CLI prompt tests with fake stdin/stdout; noninteractive setup
+smoke; manual first-run smoke.
+Risks: Prompt flows can block automation; `--non-interactive` and
+`--login-dry-run` provide bounded alternatives.
 Follow-ups: Add config migration when schema changes.
 
 ### Phase 6: Release, Operations, And Quality Gates

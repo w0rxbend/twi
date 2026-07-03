@@ -417,7 +417,7 @@ func unknownFeatureModes(features config.FeatureConfig) []string {
 	if !oneOf(features.EmoteMode, "text", "image") {
 		unknown = append(unknown, "emote="+features.EmoteMode)
 	}
-	if !oneOf(features.AnimationMode, "off", "reduced", "fast", "expressive") {
+	if !oneOf(features.AnimationMode, "off", "reduced", "fast") {
 		unknown = append(unknown, "animation="+features.AnimationMode)
 	}
 	return unknown

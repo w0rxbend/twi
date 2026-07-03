@@ -126,6 +126,130 @@ func DefaultCacheDir() (string, error) {
 	return filepath.Join(dir, "twi"), nil
 }
 
+// WriteNonSecretFile creates or updates the flat config file with non-secret
+// values from cfg. Existing secret keys and unknown lines are preserved
+// unchanged, but this function never creates or updates token, refresh-token,
+// or client-secret keys.
+func WriteNonSecretFile(path string, cfg Config) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("config path is required")
+	}
+	updates := map[string]string{
+		"twitch_username":     quote(strings.TrimSpace(cfg.Twitch.Username)),
+		"twitch_client_id":    quote(strings.TrimSpace(cfg.Twitch.ClientID)),
+		"default_channels":    quote(strings.Join(normalizeChannels(cfg.DefaultChannels), ",")),
+		"enable_kitty_images": strconv.FormatBool(cfg.Features.EnableKittyImages),
+		"enable_mouse":        strconv.FormatBool(cfg.Features.EnableMouse),
+		"image_mode":          quote(strings.TrimSpace(cfg.Features.ImageMode)),
+		"avatar_mode":         quote(strings.TrimSpace(cfg.Features.AvatarMode)),
+		"emoji_mode":          quote(strings.TrimSpace(cfg.Features.EmojiMode)),
+		"emoji_provider":      quote(strings.TrimSpace(cfg.Features.EmojiProvider)),
+		"emote_mode":          quote(strings.TrimSpace(cfg.Features.EmoteMode)),
+		"animation_mode":      quote(strings.TrimSpace(cfg.Features.AnimationMode)),
+	}
+	order := []string{
+		"twitch_username",
+		"twitch_client_id",
+		"default_channels",
+		"enable_kitty_images",
+		"enable_mouse",
+		"image_mode",
+		"avatar_mode",
+		"emoji_mode",
+		"emoji_provider",
+		"emote_mode",
+		"animation_mode",
+	}
+	return writeFlatConfigUpdates(path, order, updates)
+}
+
+func writeFlatConfigUpdates(path string, order []string, updates map[string]string) error {
+	var existing string
+	data, err := os.ReadFile(path)
+	switch {
+	case err == nil:
+		existing = string(data)
+	case errors.Is(err, os.ErrNotExist):
+	default:
+		return err
+	}
+
+	seen := map[string]bool{}
+	var lines []string
+	scanner := bufio.NewScanner(strings.NewReader(existing))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if key, ok := configLineKey(line); ok {
+			if value, exists := updates[key]; exists {
+				lines = append(lines, key+" = "+value)
+				seen[key] = true
+				continue
+			}
+		}
+		lines = append(lines, line)
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	if len(lines) > 0 {
+		lines = append(lines, "")
+	}
+	for _, key := range order {
+		if !seen[key] {
+			lines = append(lines, key+" = "+updates[key])
+		}
+	}
+
+	output := strings.Join(lines, "\n")
+	if output != "" && !strings.HasSuffix(output, "\n") {
+		output += "\n"
+	}
+	return writeFilePrivate(path, []byte(output))
+}
+
+func configLineKey(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return "", false
+	}
+	key, _, ok := strings.Cut(trimmed, "=")
+	if !ok {
+		return "", false
+	}
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return "", false
+	}
+	return key, true
+}
+
+func writeFilePrivate(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".config-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
 func (c Config) RedactedString() string {
 	lines := []string{
 		"path = " + quote(c.Path),
@@ -213,47 +337,51 @@ func applyEnv(cfg *Config, environ []string) {
 	sort.Strings(keys)
 
 	for _, key := range keys {
+		value := env[key]
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
 		switch key {
 		case "TWITCH_USERNAME":
-			cfg.Twitch.Username = env[key]
+			cfg.Twitch.Username = value
 		case "TWITCH_ACCESS_TOKEN":
-			cfg.Twitch.OAuthToken = normalizeIRCOAuthToken(env[key])
+			cfg.Twitch.OAuthToken = normalizeIRCOAuthToken(value)
 		case "TWITCH_REFRESH_TOKEN":
-			cfg.Twitch.RefreshToken = env[key]
+			cfg.Twitch.RefreshToken = value
 		case "TWITCH_CLIENT_ID":
-			cfg.Twitch.ClientID = env[key]
+			cfg.Twitch.ClientID = value
 		case "TWITCH_CLIENT_SECRET":
-			cfg.Twitch.ClientSecret = env[key]
+			cfg.Twitch.ClientSecret = value
 		case "TWI_TWITCH_USERNAME":
-			cfg.Twitch.Username = env[key]
+			cfg.Twitch.Username = value
 		case "TWI_TWITCH_OAUTH_TOKEN":
-			cfg.Twitch.OAuthToken = env[key]
+			cfg.Twitch.OAuthToken = value
 		case "TWI_TWITCH_REFRESH_TOKEN":
-			cfg.Twitch.RefreshToken = env[key]
+			cfg.Twitch.RefreshToken = value
 		case "TWI_TWITCH_CLIENT_ID":
-			cfg.Twitch.ClientID = env[key]
+			cfg.Twitch.ClientID = value
 		case "TWI_TWITCH_CLIENT_SECRET":
-			cfg.Twitch.ClientSecret = env[key]
+			cfg.Twitch.ClientSecret = value
 		case "TWI_DEFAULT_CHANNELS":
-			cfg.DefaultChannels = splitList(env[key])
+			cfg.DefaultChannels = splitList(value)
 		case "TWI_ENABLE_KITTY_IMAGES":
-			cfg.Features.EnableKittyImages = parseBool(env[key], cfg.Features.EnableKittyImages)
+			cfg.Features.EnableKittyImages = parseBool(value, cfg.Features.EnableKittyImages)
 		case "TWI_ENABLE_MOUSE":
-			cfg.Features.EnableMouse = parseBool(env[key], cfg.Features.EnableMouse)
+			cfg.Features.EnableMouse = parseBool(value, cfg.Features.EnableMouse)
 		case "TWI_IMAGE_MODE":
-			cfg.Features.ImageMode = env[key]
+			cfg.Features.ImageMode = value
 		case "TWI_AVATAR_MODE":
-			cfg.Features.AvatarMode = env[key]
+			cfg.Features.AvatarMode = value
 		case "TWI_EMOJI_MODE":
-			cfg.Features.EmojiMode = env[key]
+			cfg.Features.EmojiMode = value
 		case "TWI_EMOJI_PROVIDER":
-			cfg.Features.EmojiProvider = env[key]
+			cfg.Features.EmojiProvider = value
 		case "TWI_EMOJI_URL_TEMPLATE":
-			cfg.Features.EmojiURLTemplate = env[key]
+			cfg.Features.EmojiURLTemplate = value
 		case "TWI_EMOTE_MODE":
-			cfg.Features.EmoteMode = env[key]
+			cfg.Features.EmoteMode = value
 		case "TWI_ANIMATION_MODE":
-			cfg.Features.AnimationMode = env[key]
+			cfg.Features.AnimationMode = value
 		}
 	}
 }

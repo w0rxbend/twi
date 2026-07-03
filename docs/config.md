@@ -16,9 +16,10 @@ This document describes the configuration model for `twi`. The implemented parse
   secret values.
 - Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
 - Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned.
-- `twi login` can run the OAuth browser/callback flow and save returned tokens
-  through the restrictive credential-file fallback without printing them. Setup
-  wizard wiring is planned.
+- `twi setup` can create or update non-secret flat config values and hand off
+  to login. `twi login` can run the OAuth browser/callback flow and save
+  returned tokens through the restrictive credential-file fallback without
+  printing them.
 - Nested TOML tables are not implemented yet; keep config files flat.
 
 ## Precedence
@@ -32,7 +33,53 @@ Effective config should be resolved in this order, highest priority first:
 5. Defaults.
 
 This order lets users override local config for one command without editing files.
-The interactive setup wizard is future work.
+Empty environment variable values are ignored, which keeps isolated CI smokes
+from masking config-file values with deliberately blank secret env vars.
+
+## Setup Command
+
+`twi setup` is the guided config path. It writes only non-secret flat config
+keys:
+
+- `twitch_username`
+- `twitch_client_id`
+- `default_channels`
+- `enable_kitty_images`
+- `enable_mouse`
+- `image_mode`
+- `avatar_mode`
+- `emoji_mode`
+- `emoji_provider`
+- `emote_mode`
+- `animation_mode`
+
+It never asks for or writes OAuth tokens, refresh tokens, callback codes, OAuth
+state, authorization URLs, or client secrets. Existing secret lines in
+`config.toml` are preserved unchanged if the file already has them, but setup
+does not create or update those secret keys.
+
+Interactive use:
+
+```sh
+twi setup
+```
+
+Automation-friendly use:
+
+```sh
+twi setup --non-interactive --username my_login --channel somechannel --image-mode auto --emoji-provider twemoji --animation-mode fast
+```
+
+Credential handoff options:
+
+```sh
+twi setup --login
+twi setup --login-dry-run
+```
+
+`--login` delegates to `twi login` after writing non-secret config. `--login-dry-run`
+uses the login smoke path without opening a browser, starting a callback
+listener, contacting Twitch, printing secrets, or writing credentials.
 
 ## Config Paths
 
@@ -137,9 +184,8 @@ Animation modes:
 - `off`
 - `reduced`
 - `fast`
-- `expressive`
 
-The current parser accepts these values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; unknown animation values are treated as `fast` by the shell. `avatar_mode = "image"` enables batched live avatar URL metadata lookup when Twitch API credentials are present. `emoji_provider = "twemoji"` uses the built-in pinned public Twemoji PNG template; `emoji_provider = "custom"` requires `emoji_url_template` with `{id}`. The Kitty renderer core exists behind the internal renderer boundary, and chat rows can substitute prepared image cells while preserving fallback text. Image, emoji, emote, and Kitty settings drive fallback rendering, diagnostics, renderer capability decisions, visible-row asset event scheduling, and live image-stack installation.
+The current parser accepts mode values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; `twi setup` rejects other animation modes, and `twi doctor` warns when a config file contains one. `avatar_mode = "image"` enables batched live avatar URL metadata lookup when Twitch API credentials are present. `emoji_provider = "twemoji"` uses the built-in pinned public Twemoji PNG template; `emoji_provider = "custom"` requires `emoji_url_template` with `{id}`. The Kitty renderer core exists behind the internal renderer boundary, and chat rows can substitute prepared image cells while preserving fallback text. Image, emoji, emote, and Kitty settings drive fallback rendering, diagnostics, renderer capability decisions, visible-row asset event scheduling, and live image-stack installation.
 
 ## Example Config
 
@@ -179,18 +225,20 @@ twi chat --mock
 twi config show
 twi config path
 twi doctor
+twi login
+twi setup
 ```
 
 `twi login` is implemented as a browser/local-callback OAuth flow with a
 `--dry-run` explanation path. Successful logins save credentials through the
-restrictive fallback-file store. Setup wizard wiring and manual Kitty/Ghostty
-validation are still planned. Twitch IRC chat is current when username, OAuth
-token, and at least one channel are configured. Live image startup is current
-for enabled asset kinds when config, credentials, cache writability, and
-terminal capability allow it. Multi-channel sidebar, command palette,
-selected-message inspect, and optional mouse controls are current app behavior.
-Future flags for auth and mode settings should follow the precedence rules
-above.
+restrictive fallback-file store. `twi setup` is implemented for non-secret
+settings and login handoff. Manual Kitty/Ghostty validation is still planned.
+Twitch IRC chat is current when username, OAuth token, and at least one channel
+are configured. Live image startup is current for enabled asset kinds when
+config, credentials, cache writability, and terminal capability allow it.
+Multi-channel sidebar, command palette, selected-message inspect, and optional
+mouse controls are current app behavior. Future flags for auth and mode
+settings should follow the precedence rules above.
 
 ## Redacted Config Output
 
@@ -249,6 +297,7 @@ Current behavior:
 - Load basic image fallback settings.
 - Save successful `twi login` results through the restrictive credential-file
   fallback.
+- Create or update non-secret config with `twi setup`.
 - Install live image asset services for allowed avatar, badge, emote, and emoji
   kinds when config, credentials, cache, and terminal checks pass.
 - Redact secrets in all config output.
@@ -257,7 +306,7 @@ Current behavior:
 
 Future target:
 
-- Interactive setup wizard.
+- Startup token validation with scope checks.
 - Optional OS keychain backend only after explicit platform support decisions.
 - Non-Unix no-follow and ACL hardening for the fallback credential file.
 - Full terminal image mode controls.

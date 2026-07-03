@@ -33,12 +33,13 @@ docker compose run --rm mock
 Live chat is partially shipped for configured Twitch IRC channels. It can read, send,
 reply, and send `/me` actions when username/token credentials are configured.
 The keyboard-first channel sidebar, command palette, selected-message inspect
-panel, and optional mouse controls are current app behavior. `twi login` is an
-OAuth browser/callback flow that saves returned tokens through the restrictive
-credential-file fallback without printing them; setup wiring, refresh-token
-persistence after IRC reconnect, and manual Kitty/Ghostty image validation are
-still planned. Live image asset wiring is current when config, credentials,
-cache, and terminal checks allow it.
+panel, and optional mouse controls are current app behavior. `twi setup` writes
+non-secret config values and can hand off to login. `twi login` is an OAuth
+browser/callback flow that saves returned tokens through the restrictive
+credential-file fallback without printing them; refresh-token persistence after
+IRC reconnect and manual Kitty/Ghostty image validation are still planned. Live
+image asset wiring is current when config, credentials, cache, and terminal
+checks allow it.
 
 Username/token credentials currently come from environment variables, the flat
 config file, or the private credential file. Docker examples pass them through
@@ -115,6 +116,22 @@ docker run --rm -it \
 ```
 
 Do not commit `.local`, config files with credentials, shell history containing tokens, or exported logs.
+
+You can create a non-secret mounted config without a prompt:
+
+```sh
+mkdir -p "$PWD/.local/twi-config"
+sudo chown 10001:10001 "$PWD/.local/twi-config"
+docker run --rm \
+  -v "$PWD/.local/twi-config:/config" \
+  twi:local setup --non-interactive --username your_twitch_login --channel somechannel --login-dry-run
+```
+
+The setup command does not write OAuth tokens, refresh tokens, callback codes,
+OAuth state, authorization URLs, or client secrets. Use environment variables,
+the flat config file, or the private credential file created by `twi login` for
+credentials. The container runs as UID/GID `10001`, so bind-mounted config
+directories must be writable by that account.
 
 ## Deploy Notes
 

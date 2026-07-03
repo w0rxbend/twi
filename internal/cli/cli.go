@@ -28,6 +28,7 @@ Usage:
   twi config path
   twi doctor
   twi login [--dry-run]
+  twi setup
 
 Environment:
   TWI_TWITCH_USERNAME
@@ -123,6 +124,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runDoctor(args[1:], stdout, stderr)
 	case "login":
 		return runLogin(args[1:], stdout, stderr)
+	case "setup":
+		return runSetup(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 2

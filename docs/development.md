@@ -11,8 +11,8 @@ This document summarizes the development workflow and architecture for `twi`. It
 - Use Go modules only. Do not use GOPATH workflows.
 - Ready behavior: a deterministic non-network Bubble Tea mock shell, config path/show commands, and text/initials/Unicode/badge/emote-token fallback rendering.
 - Partially shipped behavior: multi-channel live Twitch IRC read/send with active-channel composer sends, selected-message replies and inspect diagnostics, `/me` action sends, keyboard-first channel sidebar, command palette, optional mouse support, Twitch avatar metadata, Twitch emote/badge metadata resolution, standard emoji provider metadata, public image downloading, visible-row asset event integration, bounded PNG/JPEG/GIF image decode and cell preparation, inline image renderer plumbing, default live asset resolver/downloader/preparer/renderer wiring, and `twi doctor` diagnostics for credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch reachability, terminal hints, Kitty/Ghostty signals, cache writability, image capability, live image-stack readiness, and feature modes.
-- Partially shipped auth behavior: `twi login` runs a browser/local-callback OAuth flow with a `--dry-run` explanation path and saves returned tokens through the restrictive credential-file fallback without printing them.
-- Planned behavior: setup wizard wiring, refresh-token persistence after IRC reconnect, and manual Kitty/Ghostty inline image validation.
+- Partially shipped auth/setup behavior: `twi setup` writes non-secret config values and can hand off to login; `twi login` runs a browser/local-callback OAuth flow with a `--dry-run` explanation path and saves returned tokens through the restrictive credential-file fallback without printing them.
+- Planned behavior: refresh-token persistence after IRC reconnect and manual Kitty/Ghostty inline image validation.
 - Twitch username/token credentials currently come from environment variables, the flat config file, or the private credential file; environment and flat config values take precedence over saved credentials, and CLI flags currently override channels and config path only.
 - The shell handles resize, chat/composer focus via `tab`, channel switching via `[`/`]`, a normal/wide channel sidebar with unread counts and connection indicators, collapsed narrow-width channel status, command palette via `ctrl+p`, expanded help via `?`, page-key viewport scrolling, selected-message reply mode with `up`/`down` and `r`, selected-message inspect with `i`, `esc` inspect/reply cancellation, optional mouse wheel/sidebar/composer/message interactions, composer text entry, Enter-to-send for live clients, reduced narrow-width status/help text, send status feedback, and tick-driven reveal animation for scheduled incoming mock messages.
 - `internal/app` owns the UI-facing chat boundary, deterministic fake chat client, live transport adapter, and Bubble Tea shell; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
@@ -110,6 +110,7 @@ go run ./cmd/twi chat --mock --channel example
 go run ./cmd/twi chat --mock --channel one --channel two
 go run ./cmd/twi doctor
 go run ./cmd/twi config show
+go run ./cmd/twi setup --non-interactive --config "$(mktemp -d)/config.toml" --username example --channel example --login-dry-run
 go run ./cmd/twi chat --channel example
 git diff --check
 ```

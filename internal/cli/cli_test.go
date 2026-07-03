@@ -44,7 +44,7 @@ func TestHelp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0", code)
 	}
-	for _, want := range []string{"twi chat", "TWI_ENABLE_MOUSE", "TWI_EMOJI_PROVIDER", "TWI_EMOJI_URL_TEMPLATE"} {
+	for _, want := range []string{"twi chat", "twi setup", "TWI_ENABLE_MOUSE", "TWI_EMOJI_PROVIDER", "TWI_EMOJI_URL_TEMPLATE"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("help output missing %q: %q", want, stdout.String())
 		}
@@ -52,6 +52,236 @@ func TestHelp(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
+}
+
+func TestSetupHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"setup", "--help"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"twi setup", "non-secret", "--non-interactive", "--login-dry-run", "credential store"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("setup help output missing %q: %q", want, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestSetupNonInteractiveWritesConfigAndRunsLoginDryRunWithoutSecrets(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:setup-access-secret")
+	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "setup-refresh-secret")
+	path := filepath.Join(t.TempDir(), "config.toml")
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"setup",
+		"--config", path,
+		"--non-interactive",
+		"--username", "viewer",
+		"--client-id", "client-id",
+		"--channel", "one",
+		"--channel", "#two",
+		"--enable-kitty-images=false",
+		"--enable-mouse=false",
+		"--image-mode", "normal",
+		"--avatar-mode", "image",
+		"--emoji-mode", "image",
+		"--emoji-provider", "custom",
+		"--emote-mode", "image",
+		"--animation-mode", "reduced",
+		"--login-dry-run",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Updated non-secret config") || !strings.Contains(stdout.String(), "Twitch OAuth login dry run") {
+		t.Fatalf("setup output missing config update or login dry run:\n%s", stdout.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	configOutput := string(data)
+	for _, want := range []string{
+		`twitch_username = "viewer"`,
+		`twitch_client_id = "client-id"`,
+		`default_channels = "one,two"`,
+		`enable_kitty_images = false`,
+		`enable_mouse = false`,
+		`image_mode = "normal"`,
+		`avatar_mode = "image"`,
+		`emoji_mode = "image"`,
+		`emoji_provider = "custom"`,
+		`emote_mode = "image"`,
+		`animation_mode = "reduced"`,
+	} {
+		if !strings.Contains(configOutput, want) {
+			t.Fatalf("setup config missing %q:\n%s", want, configOutput)
+		}
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String()+configOutput,
+		"client-secret", "setup-access-secret", "setup-refresh-secret", "oauth:setup-access-secret", "twitch_client_secret", "twitch_oauth_token", "twitch_refresh_token")
+}
+
+func TestSetupRejectsUnsupportedAnimationMode(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	path := filepath.Join(t.TempDir(), "config.toml")
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"setup",
+		"--config", path,
+		"--non-interactive",
+		"--username", "viewer",
+		"--channel", "one",
+		"--animation-mode", "expressive",
+	}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("Run returned %d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "animation mode must be one of: off, reduced, fast") {
+		t.Fatalf("stderr = %q, want supported animation mode list", stderr.String())
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("config file stat error = %v, want not exist", err)
+	}
+}
+
+func TestSetupNonInteractiveRejectsUnsupportedExistingMode(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte(strings.Join([]string{
+		`twitch_username = "viewer"`,
+		`default_channels = "one"`,
+		`animation_mode = "expressive"`,
+	}, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{
+		"setup",
+		"--config", path,
+		"--non-interactive",
+		"--client-id", "client-id",
+	}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("Run returned %d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "setup config: animation mode must be one of: off, reduced, fast") {
+		t.Fatalf("stderr = %q, want supported animation mode list", stderr.String())
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	if !strings.Contains(string(data), `animation_mode = "expressive"`) {
+		t.Fatalf("config was unexpectedly rewritten:\n%s", string(data))
+	}
+}
+
+func TestSetupWizardPromptsAndRunsFakeLoginHandoff(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+	path := filepath.Join(t.TempDir(), "config.toml")
+
+	resetLoginTestHooks(t)
+	oldSetupInput := setupInput
+	setupInput = strings.NewReader(strings.Join([]string{
+		"viewer",
+		"client-id",
+		"#one, two",
+		"n",
+		"normal",
+		"image",
+		"image",
+		"twemoji",
+		"image",
+		"reduced",
+		"n",
+		"login",
+	}, "\n") + "\n")
+	t.Cleanup(func() {
+		setupInput = oldSetupInput
+	})
+
+	credentialStore := storage.NewMemoryCredentialStore()
+	newCredentialStore = func() (storage.CredentialStore, error) {
+		return credentialStore, nil
+	}
+	fakeFlow := auth.NewFakeLoginFlow()
+	fakeFlow.QueueBegin(auth.LoginChallenge{
+		AuthorizationURL: auth.NewSecret("https://auth.example/authorize?client_id=client-id&state=state-secret"),
+		State:            auth.NewSecret("state-secret"),
+		Scopes:           auth.RequiredChatScopes(),
+		ExpiresAt:        time.Now().Add(time.Minute),
+	}, nil)
+	fakeFlow.QueueComplete(auth.LoginResult{
+		Identity: auth.Identity{UserID: "42", Login: "viewer"},
+		Tokens: auth.TokenSet{
+			AccessToken:  auth.NewSecret("oauth:access-secret"),
+			RefreshToken: auth.NewSecret("refresh-secret"),
+			Scopes:       auth.RequiredChatScopes(),
+		},
+		Scopes: auth.RequiredChatScopes(),
+	}, nil)
+	newLoginFlow = func() auth.LoginFlow {
+		return fakeFlow
+	}
+	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+		return &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
+			Code:  auth.NewSecret("callback-code"),
+			State: auth.NewSecret("state-secret"),
+		}}, nil
+	}
+	openLoginBrowser = func(context.Context, string) error {
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"setup", "--config", path}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q stdout=%q", code, stderr.String(), stdout.String())
+	}
+	for _, want := range []string{"Twitch username", "Twitch app client ID", "Default channels", "Emoji provider", "Credential setup", "Starting login handoff", "Login succeeded for Twitch user: viewer"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("setup wizard output missing %q:\n%s", want, stdout.String())
+		}
+	}
+	requests := fakeFlow.BeginRequests()
+	if len(requests) != 1 {
+		t.Fatalf("begin requests = %d, want 1", len(requests))
+	}
+	if requests[0].ClientID != "client-id" || requests[0].ClientSecret.Reveal() != "client-secret" {
+		t.Fatalf("begin request config = %#v, want setup client ID and env client secret", requests[0])
+	}
+	saves := credentialStore.SavedRecords()
+	if len(saves) != 1 || saves[0].AccessToken.Reveal() != "oauth:access-secret" || saves[0].RefreshToken.Reveal() != "refresh-secret" {
+		t.Fatalf("saved records = %#v, want fake login tokens saved", saves)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+	configOutput := string(data)
+	for _, want := range []string{`twitch_username = "viewer"`, `twitch_client_id = "client-id"`, `default_channels = "one,two"`, `emoji_provider = "twemoji"`} {
+		if !strings.Contains(configOutput, want) {
+			t.Fatalf("setup config missing %q:\n%s", want, configOutput)
+		}
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String()+configOutput,
+		"client-secret", "state-secret", "callback-code", "oauth:access-secret", "access-secret", "refresh-secret", "https://auth.example")
 }
 
 func TestLoginHelp(t *testing.T) {
