@@ -437,6 +437,149 @@ func TestDiskAssetCachePrunesOldestRecordsBySize(t *testing.T) {
 	}
 }
 
+func TestDiskAssetCachePrunesCacheOwnedDownloadArtifactsWithoutDeletingUnrelatedFiles(t *testing.T) {
+	root := t.TempDir()
+	cache := NewDiskAssetCache(root)
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	stale := writeCacheOwnedArtifactFixture(t, root, "downloads", "asset-stale.bin", "stale")
+	kept := writeCacheOwnedArtifactFixture(t, root, "downloads", "notes.bin", "keep")
+	old := now.Add(-49 * time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("Chtimes stale download returned error: %v", err)
+	}
+	if err := os.Chtimes(kept, old, old); err != nil {
+		t.Fatalf("Chtimes unrelated download returned error: %v", err)
+	}
+
+	report, err := cache.Prune(context.Background(), PruneOptions{
+		Now:      now,
+		MaxAge:   48 * time.Hour,
+		MaxBytes: -1,
+	})
+	if err != nil {
+		t.Fatalf("Prune returned error: %v", err)
+	}
+	if report.EntriesScanned != 1 || report.EntriesPruned != 1 || report.ExpiredPruned != 1 || report.BytesPruned != 5 {
+		t.Fatalf("prune report = %#v, want one stale download artifact pruned", report)
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale download stat error = %v, want os.ErrNotExist", err)
+	}
+	if _, err := os.Stat(kept); err != nil {
+		t.Fatalf("unrelated download stat error = %v, want kept file", err)
+	}
+}
+
+func TestDiskAssetCachePrunesPreparedRendererArtifactsBySizeWithoutDeletingUnrelatedFiles(t *testing.T) {
+	root := t.TempDir()
+	cache := NewDiskAssetCache(root)
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	oldPrepared := writeCacheOwnedArtifactFixture(t, root, "prepared", "prepared-old.png", "aaaaaaaa")
+	newPrepared := writeCacheOwnedArtifactFixture(t, root, "prepared", "prepared-new.png", "bbbbbbbb")
+	kept := writeCacheOwnedArtifactFixture(t, root, "prepared", "prepared-note.txt", "cccccccc")
+	old := now.Add(-2 * time.Hour)
+	newer := now.Add(-time.Hour)
+	if err := os.Chtimes(oldPrepared, old, old); err != nil {
+		t.Fatalf("Chtimes old prepared returned error: %v", err)
+	}
+	if err := os.Chtimes(newPrepared, newer, newer); err != nil {
+		t.Fatalf("Chtimes new prepared returned error: %v", err)
+	}
+	if err := os.Chtimes(kept, old, old); err != nil {
+		t.Fatalf("Chtimes unrelated prepared returned error: %v", err)
+	}
+
+	report, err := cache.Prune(context.Background(), PruneOptions{
+		Now:      now,
+		MaxAge:   -1,
+		MaxBytes: 8,
+	})
+	if err != nil {
+		t.Fatalf("Prune returned error: %v", err)
+	}
+	if report.BytesBefore != 16 || report.BytesAfter != 8 || report.SizePruned != 1 || report.EntriesPruned != 1 {
+		t.Fatalf("prune report = %#v, want one old prepared artifact pruned by size", report)
+	}
+	if _, err := os.Stat(oldPrepared); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("old prepared stat error = %v, want os.ErrNotExist", err)
+	}
+	for _, path := range []string{newPrepared, kept} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("kept artifact %q stat error = %v", path, err)
+		}
+	}
+}
+
+func TestDiskAssetCachePrunesPreparedTemporaryArtifactsWithoutDeletingUnrelatedFiles(t *testing.T) {
+	root := t.TempDir()
+	cache := NewDiskAssetCache(root)
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	stale := writeCacheOwnedArtifactFixture(t, root, filepath.Join("emoji", "aa", strings.Repeat("a", 64)), ".prepared-cache-stale.tmp", "stale-prepared")
+	kept := writeCacheOwnedArtifactFixture(t, root, filepath.Join("emoji", "aa", strings.Repeat("a", 64)), ".custom-cache-stale.tmp", "keep-prepared")
+	old := now.Add(-49 * time.Hour)
+	if err := os.Chtimes(stale, old, old); err != nil {
+		t.Fatalf("Chtimes stale prepared temp returned error: %v", err)
+	}
+	if err := os.Chtimes(kept, old, old); err != nil {
+		t.Fatalf("Chtimes unrelated temp returned error: %v", err)
+	}
+
+	report, err := cache.Prune(context.Background(), PruneOptions{
+		Now:      now,
+		MaxAge:   48 * time.Hour,
+		MaxBytes: -1,
+	})
+	if err != nil {
+		t.Fatalf("Prune returned error: %v", err)
+	}
+	if report.EntriesScanned != 1 || report.EntriesPruned != 1 || report.ExpiredPruned != 1 {
+		t.Fatalf("prune report = %#v, want one stale prepared temp pruned", report)
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stale prepared temp stat error = %v, want os.ErrNotExist", err)
+	}
+	if _, err := os.Stat(kept); err != nil {
+		t.Fatalf("unrelated temp stat error = %v, want kept file", err)
+	}
+}
+
+func TestDiskAssetCachePrunesExpiredMetadataOnlyRecords(t *testing.T) {
+	root := t.TempDir()
+	cache := NewDiskAssetCache(root)
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	expired := AssetKey{Kind: "emoji_metadata", ID: "1f600"}
+	fresh := AssetKey{Kind: "emoji_metadata", ID: "1f601"}
+
+	putDiskCacheFixture(t, cache, AssetRecord{
+		Key:       expired,
+		FetchedAt: now.Add(-2 * time.Hour),
+		ExpiresAt: now.Add(-time.Second),
+	})
+	putDiskCacheFixture(t, cache, AssetRecord{
+		Key:       fresh,
+		FetchedAt: now.Add(-2 * time.Hour),
+		ExpiresAt: now.Add(time.Hour),
+	})
+
+	report, err := cache.Prune(context.Background(), PruneOptions{
+		Now:      now,
+		MaxAge:   -1,
+		MaxBytes: -1,
+	})
+	if err != nil {
+		t.Fatalf("Prune returned error: %v", err)
+	}
+	if report.BytesBefore != 0 || report.BytesAfter != 0 || report.EntriesPruned != 1 || report.ExpiredPruned != 1 {
+		t.Fatalf("prune report = %#v, want one zero-byte metadata-only prune", report)
+	}
+	if _, ok, err := cache.GetAsset(context.Background(), expired); err != nil || ok {
+		t.Fatalf("expired metadata GetAsset ok=%v err=%v, want miss nil", ok, err)
+	}
+	if _, ok, err := cache.GetAsset(context.Background(), fresh); err != nil || !ok {
+		t.Fatalf("fresh metadata GetAsset ok=%v err=%v, want hit nil", ok, err)
+	}
+}
+
 func TestDiskAssetCacheCountsCorruptPayloadsDuringSizePruning(t *testing.T) {
 	root := t.TempDir()
 	cache := NewDiskAssetCache(root)
@@ -716,6 +859,18 @@ func writeAssetFixture(t *testing.T, content string) string {
 	path := filepath.Join(t.TempDir(), "asset.bin")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("WriteFile fixture returned error: %v", err)
+	}
+	return path
+}
+
+func writeCacheOwnedArtifactFixture(t *testing.T, root, dir, name, content string) string {
+	t.Helper()
+	path := filepath.Join(root, dir, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("MkdirAll artifact fixture returned error: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile artifact fixture returned error: %v", err)
 	}
 	return path
 }

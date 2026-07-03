@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
@@ -246,6 +247,125 @@ func TestPNGImagePreparerNormalizesSupportedFormatsToFixedPNGRecords(t *testing.
 				}
 			}
 		})
+	}
+}
+
+func TestPNGImagePreparerStoresPreparedOutputsInCache(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := writePNGImageFixture(t)
+	sourceBytes, err := os.ReadFile(sourcePath)
+	if err != nil {
+		t.Fatalf("ReadFile source fixture returned error: %v", err)
+	}
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(time.Hour)
+	preparer := NewPNGImagePreparer(ImagePrepareOptions{
+		PreparedCache:   storage.NewDiskAssetCache(root),
+		CellPixelWidth:  10,
+		CellPixelHeight: 12,
+		Now:             func() time.Time { return now },
+	})
+
+	record, err := preparer.PrepareImage(context.Background(), storage.AssetRecord{
+		Key:         storage.AssetKey{Kind: "twitch_emote", ID: "25"},
+		Path:        sourcePath,
+		SourceURL:   "https://cdn.example/emotes/25",
+		MediaType:   "image/png",
+		WidthCells:  1,
+		HeightCells: 1,
+		FetchedAt:   now.Add(-time.Hour),
+		ExpiresAt:   expiresAt,
+	}, ImageSpec{
+		Ref:         twitch.AssetRef{Kind: "twitch_emote", ID: "25"},
+		WidthCells:  3,
+		HeightCells: 2,
+		Fallback:    "Kappa",
+	})
+	if err != nil {
+		t.Fatalf("PrepareImage returned error: %v", err)
+	}
+	if !strings.HasPrefix(record.Path, root) || filepath.Base(record.Path) != "asset.bin" {
+		t.Fatalf("prepared path = %q, want cache-owned asset.bin under %q", record.Path, root)
+	}
+	if record.SourceURL != "" {
+		t.Fatalf("prepared SourceURL = %q, want empty render-only record", record.SourceURL)
+	}
+	if record.PayloadIdentity != imagePayloadIdentity(sourceBytes) {
+		t.Fatalf("prepared payload identity = %q, want source digest", record.PayloadIdentity)
+	}
+	if !record.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("prepared ExpiresAt = %s, want %s", record.ExpiresAt, expiresAt)
+	}
+	file, err := os.Open(record.Path)
+	if err != nil {
+		t.Fatalf("open cached prepared image: %v", err)
+	}
+	defer file.Close()
+	config, format, err := image.DecodeConfig(file)
+	if err != nil {
+		t.Fatalf("DecodeConfig cached prepared image returned error: %v", err)
+	}
+	if format != "png" {
+		t.Fatalf("cached prepared format = %q, want png", format)
+	}
+	if config.Width != 30 || config.Height != 24 {
+		t.Fatalf("cached prepared pixels = %dx%d, want 30x24", config.Width, config.Height)
+	}
+}
+
+func TestPNGImagePreparerPreparedCacheKeyIncludesTargetPixels(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := writePNGImageFixture(t)
+	source := storage.AssetRecord{
+		Key:         storage.AssetKey{Kind: "emoji", ID: "1f600"},
+		Path:        sourcePath,
+		MediaType:   "image/png",
+		WidthCells:  1,
+		HeightCells: 1,
+		FetchedAt:   time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
+	}
+	spec := ImageSpec{
+		Ref:         twitch.AssetRef{Kind: "emoji", ID: "1f600"},
+		WidthCells:  3,
+		HeightCells: 2,
+		Fallback:    "😀",
+	}
+	cache := storage.NewDiskAssetCache(root)
+
+	first, err := NewPNGImagePreparer(ImagePrepareOptions{
+		PreparedCache:   cache,
+		CellPixelWidth:  10,
+		CellPixelHeight: 12,
+	}).PrepareImage(context.Background(), source, spec)
+	if err != nil {
+		t.Fatalf("first PrepareImage returned error: %v", err)
+	}
+	second, err := NewPNGImagePreparer(ImagePrepareOptions{
+		PreparedCache:   cache,
+		CellPixelWidth:  20,
+		CellPixelHeight: 12,
+	}).PrepareImage(context.Background(), source, spec)
+	if err != nil {
+		t.Fatalf("second PrepareImage returned error: %v", err)
+	}
+	if first.Path == second.Path {
+		t.Fatalf("prepared paths matched for different target pixels: %q", first.Path)
+	}
+
+	file, err := os.Open(second.Path)
+	if err != nil {
+		t.Fatalf("open second prepared image: %v", err)
+	}
+	defer file.Close()
+	config, format, err := image.DecodeConfig(file)
+	if err != nil {
+		t.Fatalf("DecodeConfig second prepared image returned error: %v", err)
+	}
+	if format != "png" {
+		t.Fatalf("second prepared format = %q, want png", format)
+	}
+	if config.Width != 60 || config.Height != 24 {
+		t.Fatalf("second prepared pixels = %dx%d, want 60x24", config.Width, config.Height)
 	}
 }
 

@@ -233,7 +233,7 @@ func liveClientOptions(cfg config.Config, environ []string, cacheDir string) app
 			Cache: cache,
 		},
 		AssetKinds:    decision.SupportedKindSet(),
-		ImagePreparer: render.NewPNGImagePreparer(render.ImagePrepareOptions{PreparedDir: filepath.Join(decision.CacheDir, "prepared")}),
+		ImagePreparer: render.NewPNGImagePreparer(render.ImagePrepareOptions{PreparedCache: cache}),
 		ImageRenderer: render.NewKittyRenderer(decision.Capability),
 	}
 	if userLookup != nil {

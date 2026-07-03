@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/w0rxbend/twi/internal/storage"
 )
@@ -74,6 +75,8 @@ type ImagePrepareOptions struct {
 	CellPixelWidth  int
 	CellPixelHeight int
 	PreparedDir     string
+	PreparedCache   storage.AssetCache
+	Now             func() time.Time
 }
 
 // PNGImagePreparer decodes PNG, JPEG, and GIF first-frame assets and writes a
@@ -148,6 +151,17 @@ func (p *PNGImagePreparer) PrepareImage(ctx context.Context, asset storage.Asset
 	if err != nil {
 		return record, err
 	}
+	record.PayloadIdentity = imagePayloadIdentity(data)
+	targetWidth, targetHeight, err := preparedPixelSize(record.WidthCells, record.HeightCells, opts)
+	if err != nil {
+		return record, err
+	}
+	if cached, ok, err := cachedPreparedImage(ctx, opts, asset, record, targetWidth, targetHeight); err != nil {
+		return record, err
+	} else if ok {
+		return cached, nil
+	}
+
 	config, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return record, fmt.Errorf("%w: %w", ErrImagePreparationFailed, ErrImageCorruptData)
@@ -169,15 +183,11 @@ func (p *PNGImagePreparer) PrepareImage(ctx context.Context, asset storage.Asset
 	if !supportedDecodedImageFormat(format) {
 		return record, fmt.Errorf("%w: %w", ErrImagePreparationFailed, ErrImageUnsupportedMediaType)
 	}
-	targetWidth, targetHeight, err := preparedPixelSize(record.WidthCells, record.HeightCells, opts)
-	if err != nil {
-		return record, err
-	}
 	prepared := cropScaleImage(source, targetWidth, targetHeight)
 	if err := ctx.Err(); err != nil {
 		return record, err
 	}
-	path, err := writePreparedPNG(ctx, opts, asset, data, record.WidthCells, record.HeightCells, prepared)
+	path, err := writePreparedPNG(ctx, opts, asset, record, data, targetWidth, targetHeight, prepared)
 	if err != nil {
 		return record, err
 	}
@@ -315,6 +325,11 @@ func preparedPixelSize(widthCells, heightCells int, opts ImagePrepareOptions) (i
 	return width, height, nil
 }
 
+func imagePayloadIdentity(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
 func cropScaleImage(source image.Image, targetWidth, targetHeight int) *image.NRGBA {
 	sourceBounds := source.Bounds()
 	crop := centerCropRect(sourceBounds, targetWidth, targetHeight)
@@ -359,7 +374,14 @@ func centerCropRect(bounds image.Rectangle, targetWidth, targetHeight int) image
 	return image.Rect(bounds.Min.X, y0, bounds.Max.X, y0+cropHeight)
 }
 
-func writePreparedPNG(ctx context.Context, opts ImagePrepareOptions, asset storage.AssetRecord, data []byte, widthCells, heightCells int, img image.Image) (string, error) {
+func writePreparedPNG(ctx context.Context, opts ImagePrepareOptions, asset, record storage.AssetRecord, data []byte, targetWidth, targetHeight int, img image.Image) (string, error) {
+	if opts.PreparedCache != nil {
+		path, err := writeCachedPreparedPNG(ctx, opts, asset, record, targetWidth, targetHeight, img)
+		if err == nil {
+			return path, nil
+		}
+		return "", err
+	}
 	dir, err := preparedImageDir(opts, asset)
 	if err != nil {
 		return "", err
@@ -370,7 +392,7 @@ func writePreparedPNG(ctx context.Context, opts ImagePrepareOptions, asset stora
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	path := filepath.Join(dir, preparedImageFilename(asset, data, widthCells, heightCells))
+	path := filepath.Join(dir, preparedImageFilename(asset, data, record.WidthCells, record.HeightCells))
 	tmp, err := os.CreateTemp(dir, ".prepared-*.tmp")
 	if err != nil {
 		return "", fmt.Errorf("%w: prepared image file is unavailable", ErrImagePreparationFailed)
@@ -400,6 +422,135 @@ func writePreparedPNG(ctx context.Context, opts ImagePrepareOptions, asset stora
 	}
 	removeTmp = false
 	return path, nil
+}
+
+func cachedPreparedImage(ctx context.Context, opts ImagePrepareOptions, asset, record storage.AssetRecord, targetWidth, targetHeight int) (storage.AssetRecord, bool, error) {
+	if opts.PreparedCache == nil {
+		return storage.AssetRecord{}, false, nil
+	}
+	key, ok := preparedImageCacheKey(asset, record, targetWidth, targetHeight)
+	if !ok {
+		return storage.AssetRecord{}, false, fmt.Errorf("%w: %w", ErrImagePreparationFailed, ErrImageUnsafeAsset)
+	}
+	cached, ok, err := opts.PreparedCache.GetAsset(ctx, key)
+	if err != nil {
+		return storage.AssetRecord{}, false, fmt.Errorf("%w: read prepared image cache", ErrImagePreparationFailed)
+	}
+	if !ok || !preparedCacheRecordFresh(cached, imagePrepareNow(opts)) || strings.TrimSpace(cached.Path) == "" {
+		return storage.AssetRecord{}, false, nil
+	}
+	return cached, true, nil
+}
+
+func writeCachedPreparedPNG(ctx context.Context, opts ImagePrepareOptions, asset, record storage.AssetRecord, targetWidth, targetHeight int, img image.Image) (string, error) {
+	dir, err := preparedImageDir(opts, asset)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("%w: prepared image directory is unavailable", ErrImagePreparationFailed)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	tmp, err := os.CreateTemp(dir, ".prepared-cache-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("%w: prepared image file is unavailable", ErrImagePreparationFailed)
+	}
+	tmpPath := tmp.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := png.Encode(tmp, img); err != nil {
+		_ = tmp.Close()
+		return "", fmt.Errorf("%w: encode prepared image", ErrImagePreparationFailed)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("%w: write prepared image", ErrImagePreparationFailed)
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	cacheRecord, ok := preparedImageCacheRecord(opts, asset, record, tmpPath, targetWidth, targetHeight)
+	if !ok {
+		return "", fmt.Errorf("%w: %w", ErrImagePreparationFailed, ErrImageUnsafeAsset)
+	}
+	if err := opts.PreparedCache.PutAsset(ctx, cacheRecord); err != nil {
+		return "", fmt.Errorf("%w: write prepared image cache", ErrImagePreparationFailed)
+	}
+	cached, ok, err := opts.PreparedCache.GetAsset(ctx, cacheRecord.Key)
+	if err != nil {
+		return "", fmt.Errorf("%w: read prepared image cache", ErrImagePreparationFailed)
+	}
+	if !ok || strings.TrimSpace(cached.Path) == "" {
+		removeTmp = false
+		return tmpPath, nil
+	}
+	if filepath.Clean(cached.Path) == filepath.Clean(tmpPath) {
+		removeTmp = false
+	}
+	return cached.Path, nil
+}
+
+func preparedImageCacheRecord(opts ImagePrepareOptions, asset, record storage.AssetRecord, path string, targetWidth, targetHeight int) (storage.AssetRecord, bool) {
+	key, ok := preparedImageCacheKey(asset, record, targetWidth, targetHeight)
+	if !ok {
+		return storage.AssetRecord{}, false
+	}
+	fetchedAt := asset.FetchedAt
+	if fetchedAt.IsZero() {
+		fetchedAt = imagePrepareNow(opts)
+	}
+	return storage.AssetRecord{
+		Key:             key,
+		Path:            path,
+		PayloadIdentity: record.PayloadIdentity,
+		MediaType:       "image/png",
+		WidthCells:      record.WidthCells,
+		HeightCells:     record.HeightCells,
+		FetchedAt:       fetchedAt,
+		ExpiresAt:       asset.ExpiresAt,
+	}, true
+}
+
+func preparedImageCacheKey(asset, record storage.AssetRecord, targetWidth, targetHeight int) (storage.AssetKey, bool) {
+	if containsUnsafeImageIdentity(asset.Key.Kind) || containsUnsafeImageIdentity(asset.Key.ID) {
+		return storage.AssetKey{}, false
+	}
+	if targetWidth <= 0 || targetHeight <= 0 {
+		return storage.AssetKey{}, false
+	}
+	payload := strings.TrimSpace(record.PayloadIdentity)
+	if payload == "" || containsUnsafeImageIdentity(payload) {
+		return storage.AssetKey{}, false
+	}
+	input := strings.Join([]string{
+		asset.Key.Kind,
+		asset.Key.ID,
+		payload,
+		strconv.Itoa(record.WidthCells),
+		strconv.Itoa(record.HeightCells),
+		strconv.Itoa(targetWidth),
+		strconv.Itoa(targetHeight),
+	}, "\x00")
+	sum := sha256.Sum256([]byte(input))
+	return storage.AssetKey{Kind: "prepared_image", ID: hex.EncodeToString(sum[:])}, true
+}
+
+func preparedCacheRecordFresh(record storage.AssetRecord, now time.Time) bool {
+	return record.ExpiresAt.IsZero() || record.ExpiresAt.After(now)
+}
+
+func imagePrepareNow(opts ImagePrepareOptions) time.Time {
+	if opts.Now != nil {
+		return opts.Now()
+	}
+	return time.Now()
 }
 
 func preparedImageDir(opts ImagePrepareOptions, asset storage.AssetRecord) (string, error) {

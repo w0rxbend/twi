@@ -3,6 +3,9 @@ package assets
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -201,6 +204,56 @@ func TestResolverDownloadsAndCachesCacheMiss(t *testing.T) {
 	}
 	if cached != event.Record {
 		t.Fatalf("cached record = %#v, want %#v", cached, event.Record)
+	}
+}
+
+func TestResolverReturnsCacheOwnedPathAndRemovesTemporaryDownload(t *testing.T) {
+	root := t.TempDir()
+	downloadDir := filepath.Join(root, "downloads")
+	if err := os.MkdirAll(downloadDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll download fixture returned error: %v", err)
+	}
+	temporaryPath := filepath.Join(downloadDir, "asset-temp.bin")
+	if err := os.WriteFile(temporaryPath, []byte("downloaded image bytes"), 0o600); err != nil {
+		t.Fatalf("WriteFile temporary download returned error: %v", err)
+	}
+	ref := twitch.AssetRef{Kind: KindEmoji, ID: "1f600"}
+	resolver := &Resolver{
+		Metadata: &fakeMetadataLookup{
+			result: Metadata{
+				Ref:       ref,
+				URL:       "https://cdn.example/emoji/1f600.png",
+				MediaType: "image/png",
+			},
+		},
+		Downloader: &fakeDownloader{
+			result: DownloadResult{
+				Path:            temporaryPath,
+				PayloadIdentity: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				MediaType:       "image/png",
+				TemporaryPath:   true,
+			},
+		},
+		Cache: storage.NewDiskAssetCache(root),
+	}
+
+	event := resolver.Resolve(context.Background(), Request{ID: "req-cache-owned", Ref: ref})
+
+	if event.Kind != EventDownloaded {
+		t.Fatalf("event.Kind = %s, want %s", event.Kind, EventDownloaded)
+	}
+	if event.Record.Path == temporaryPath || !strings.HasPrefix(event.Record.Path, root) {
+		t.Fatalf("event.Record.Path = %q, want cache-owned path under %q", event.Record.Path, root)
+	}
+	if _, err := os.Stat(temporaryPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("temporary download stat error = %v, want os.ErrNotExist", err)
+	}
+	got, err := os.ReadFile(event.Record.Path)
+	if err != nil {
+		t.Fatalf("ReadFile cached asset returned error: %v", err)
+	}
+	if string(got) != "downloaded image bytes" {
+		t.Fatalf("cached asset bytes = %q, want downloaded bytes", got)
 	}
 }
 

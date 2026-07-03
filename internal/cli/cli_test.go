@@ -198,8 +198,12 @@ func TestLiveChatConfiguredWiresImageStackWhenReady(t *testing.T) {
 	if _, ok := got.AssetResolver.(*assets.Resolver); !ok {
 		t.Fatalf("AssetResolver = %T, want *assets.Resolver", got.AssetResolver)
 	}
-	if _, ok := got.ImagePreparer.(*render.PNGImagePreparer); !ok {
+	preparer, ok := got.ImagePreparer.(*render.PNGImagePreparer)
+	if !ok {
 		t.Fatalf("ImagePreparer = %T, want *render.PNGImagePreparer", got.ImagePreparer)
+	}
+	if preparer.Options.PreparedCache == nil || preparer.Options.PreparedDir != "" {
+		t.Fatalf("ImagePreparer options = %#v, want cache-backed prepared outputs without standalone prepared dir", preparer.Options)
 	}
 	if _, ok := got.ImageRenderer.(*render.KittyRenderer); !ok {
 		t.Fatalf("ImageRenderer = %T, want *render.KittyRenderer", got.ImageRenderer)

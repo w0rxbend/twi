@@ -7,10 +7,10 @@
 - Text, Unicode, initials, and compact badge fallbacks are implemented for chat rows.
 - Renderer asset fallback fragments can reserve stable cell widths before images are available.
 - Chat row generation can attach prepared renderer cells by stable URL-free asset key. When a room ID or safe channel name is available, prepared-cell keys include that channel identity so reused asset IDs cannot cross-populate another channel. Unsupported terminals, image-off mode, missing assets, and render failures keep the same fallback rows and reserved widths.
-- `internal/render.PNGImagePreparer` decodes bounded downloaded PNG, JPEG, and first-frame GIF assets, crops/scales them to the requested terminal cell rectangle, and writes renderer-ready PNG files without exposing source URLs, source paths, or token-like values in errors.
-- `internal/assets.PublicImageDownloader` fetches only validated public HTTP(S) PNG, JPEG, and GIF sources, validates redirects and public hosts, enforces response-size limits, writes URL-free local files without sending auth or cookie headers, and records a URL-free SHA-256 payload identity for the downloaded bytes.
+- `internal/render.PNGImagePreparer` decodes bounded downloaded PNG, JPEG, and first-frame GIF assets, crops/scales them to the requested terminal cell rectangle, and writes renderer-ready PNG records through the asset cache when configured, without exposing source URLs, source paths, or token-like values in errors.
+- `internal/assets.PublicImageDownloader` fetches only validated public HTTP(S) PNG, JPEG, and GIF sources, validates redirects and public hosts, enforces response-size limits, writes URL-free temporary staging files without sending auth or cookie headers, and records a URL-free SHA-256 payload identity for the downloaded bytes. The resolver switches successful downloads to cache-owned paths after write-through and removes the staging file when possible.
 - Visible-row asset events remember permanent preparation/render failures by URL-free asset identity, safe downloaded record metadata, optional payload identity, and requested cell size so unchanged corrupt, oversized, unsafe, or unsupported assets keep stable fallbacks without repeated decode/render work while changed bytes can retry.
-- `internal/storage.AssetCache` provides context-aware cache methods. The in-memory implementation is intended for deterministic tests, and `internal/storage.DiskAssetCache` persists metadata plus cache-owned bytes under the platform cache directory using deterministic hashed paths.
+- `internal/storage.AssetCache` provides context-aware cache methods. The in-memory implementation is intended for deterministic tests, and `internal/storage.DiskAssetCache` persists metadata plus cache-owned downloaded and prepared bytes under the platform cache directory using deterministic hashed paths.
 - `twi doctor` reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, selected image/avatar/emoji/emote modes, the resolved image capability state, and the live image-stack state.
 - `internal/render.KittyRenderer` can produce fixed-cell Kitty graphics output for prepared cached PNG assets in supported terminals.
 - Live startup installs the concrete resolver, public downloader, disk cache, emoji provider, Twitch metadata clients, PNG preparer, and Kitty renderer when config, credentials, cache, and terminal capability checks allow it.
@@ -162,6 +162,8 @@ Cache behavior should:
   provider-specific expiry is unavailable.
 - Prune oldest payloads first when the asset cache exceeds its default
   512 MiB size budget.
+- Prune cache-owned downloaded bytes, prepared renderer artifacts, and
+  metadata-only records without deleting unrelated files.
 - Use ETag or Last-Modified where practical.
 - Avoid refetching avatars for every message from the same user.
 - Batch Twitch user lookups to avoid API limits.

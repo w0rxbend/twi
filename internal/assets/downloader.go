@@ -139,6 +139,7 @@ func (d *PublicImageDownloader) Download(ctx context.Context, req DownloadReques
 		PayloadIdentity: downloadPayloadIdentity(data),
 		MediaType:       mediaType,
 		FetchedAt:       opts.Now(),
+		TemporaryPath:   true,
 	}, nil
 }
 

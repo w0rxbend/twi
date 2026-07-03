@@ -478,6 +478,15 @@ func (c *DiskAssetCache) pruneEntries(ctx context.Context, root string) ([]prune
 				return err
 			}
 			addOrphanPruneEntry(entriesByDir, filepath.Dir(path), info.Size(), info.ModTime())
+		default:
+			if !cacheOwnedImageArtifact(root, path) {
+				return nil
+			}
+			info, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			addOrphanPruneEntry(entriesByDir, path, info.Size(), info.ModTime())
 		}
 		return nil
 	})
@@ -490,6 +499,48 @@ func (c *DiskAssetCache) pruneEntries(ctx context.Context, root string) ([]prune
 		entries = append(entries, entry)
 	}
 	return entries, ctx.Err()
+}
+
+func cacheOwnedImageArtifact(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == "." || filepath.IsAbs(rel) {
+		return false
+	}
+	slashRel := filepath.ToSlash(rel)
+	if strings.HasPrefix(slashRel, "../") || slashRel == ".." {
+		return false
+	}
+	if cacheOwnedTemporaryArtifact(filepath.Base(slashRel)) {
+		return true
+	}
+	parts := strings.Split(slashRel, "/")
+	if len(parts) != 2 {
+		return false
+	}
+	name := parts[1]
+	switch parts[0] {
+	case "downloads":
+		return strings.HasPrefix(name, "asset-") && strings.HasSuffix(name, ".bin")
+	case "prepared":
+		return strings.HasPrefix(name, "prepared-") && strings.HasSuffix(name, ".png")
+	default:
+		return false
+	}
+}
+
+func cacheOwnedTemporaryArtifact(name string) bool {
+	switch {
+	case strings.HasPrefix(name, ".asset-") && strings.HasSuffix(name, ".tmp"):
+		return true
+	case strings.HasPrefix(name, ".metadata-") && strings.HasSuffix(name, ".tmp"):
+		return true
+	case strings.HasPrefix(name, ".prepared-") && strings.HasSuffix(name, ".tmp"):
+		return true
+	case strings.HasPrefix(name, ".prepared-cache-") && strings.HasSuffix(name, ".tmp"):
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *DiskAssetCache) pruneEntryFromMetadata(ctx context.Context, path string) (pruneEntry, bool, error) {

@@ -3,6 +3,8 @@ package assets
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -123,6 +125,7 @@ type DownloadResult struct {
 	HeightCells     int
 	FetchedAt       time.Time
 	ExpiresAt       time.Time
+	TemporaryPath   bool
 }
 
 // Resolver composes lookup, download, and cache boundaries for one asset.
@@ -207,6 +210,14 @@ func (r *Resolver) Resolve(ctx context.Context, req Request) Event {
 	if r.Cache != nil && record.Key.ID != "" {
 		if err := r.Cache.PutAsset(ctx, record); err != nil {
 			return r.errorEvent(event, err)
+		}
+		cached, ok, err := r.Cache.GetAsset(ctx, record.Key)
+		if err != nil {
+			return r.errorEvent(event, err)
+		}
+		if ok && strings.TrimSpace(cached.Path) != "" {
+			removeTemporaryDownload(download, cached.Path)
+			record = cached
 		}
 	}
 
@@ -336,6 +347,16 @@ func recordFromDownload(key storage.AssetKey, metadata Metadata, download Downlo
 		record.ExpiresAt = metadata.ExpiresAt
 	}
 	return record
+}
+
+func removeTemporaryDownload(download DownloadResult, cachedPath string) {
+	if !download.TemporaryPath || strings.TrimSpace(download.Path) == "" || strings.TrimSpace(cachedPath) == "" {
+		return
+	}
+	if filepath.Clean(download.Path) == filepath.Clean(cachedPath) {
+		return
+	}
+	_ = os.Remove(download.Path)
 }
 
 func firstNonEmpty(values ...string) string {

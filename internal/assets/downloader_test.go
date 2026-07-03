@@ -61,6 +61,9 @@ func TestPublicImageDownloaderDownloadsSniffedPNGToSafePath(t *testing.T) {
 	if !result.FetchedAt.Equal(now) {
 		t.Fatalf("result.FetchedAt = %s, want %s", result.FetchedAt, now)
 	}
+	if !result.TemporaryPath {
+		t.Fatal("result.TemporaryPath = false, want downloader-owned staging file")
+	}
 	got, err := os.ReadFile(result.Path)
 	if err != nil {
 		t.Fatalf("ReadFile downloaded asset returned error: %v", err)
