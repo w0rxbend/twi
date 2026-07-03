@@ -33,16 +33,17 @@ docker compose run --rm mock
 Live chat is partially shipped for configured Twitch IRC channels. It can read, send,
 reply, and send `/me` actions when username/token credentials are configured.
 The keyboard-first channel sidebar, command palette, selected-message inspect
-panel, and optional mouse controls are current app behavior. `twi login` is a
-no-persistence OAuth browser/callback flow; the credential storage boundary and
-restrictive fallback-file plan are defined, while setup wiring, actual
-credential persistence, and manual Kitty/Ghostty image validation are still
-planned. Live image asset wiring is current when config, credentials, cache, and
-terminal checks allow it.
+panel, and optional mouse controls are current app behavior. `twi login` is an
+OAuth browser/callback flow that saves returned tokens through the restrictive
+credential-file fallback without printing them; setup wiring, refresh-token
+persistence after IRC reconnect, and manual Kitty/Ghostty image validation are
+still planned. Live image asset wiring is current when config, credentials,
+cache, and terminal checks allow it.
 
-Username/token credentials currently come from environment variables or the
-flat config file. Docker examples pass them through environment variables; CLI
-flags currently override channel and config path only.
+Username/token credentials currently come from environment variables, the flat
+config file, or the private credential file. Docker examples pass them through
+environment variables; CLI flags currently override channel and config path
+only. Environment and flat config values take precedence over saved credentials.
 
 Set credentials in your shell:
 

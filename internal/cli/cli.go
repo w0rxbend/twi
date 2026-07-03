@@ -94,6 +94,16 @@ var buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr erro
 	})
 }
 
+var newCredentialStore = func() (storage.CredentialStore, error) {
+	return storage.NewDefaultCredentialFileStore()
+}
+
+type credentialLoadStatus struct {
+	Path    string
+	Present bool
+	Err     error
+}
+
 // Run executes the command line entrypoint. It returns a process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
@@ -155,6 +165,11 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
+	status, err := applyStoredCredentials(context.Background(), &cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "load credentials: %v\n", status.Err)
+		return 1
+	}
 	if len(cfg.DefaultChannels) == 0 {
 		fmt.Fprintln(stderr, "no channel configured; pass --channel or set TWI_DEFAULT_CHANNELS")
 		return 2
@@ -329,7 +344,7 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 		if err := fs.Parse(args[1:]); err != nil {
 			return 2
 		}
-		cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
+		cfg, _, err := loadConfigWithStoredCredentials(context.Background(), os.Environ(), config.Overrides{ConfigPath: cfgPath})
 		if err != nil {
 			fmt.Fprintf(stderr, "load config: %v\n", err)
 			return 1
@@ -362,12 +377,114 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 		}
 		cfg = fallback
 	}
+	credentialStatus, credentialErr := applyStoredCredentials(context.Background(), &cfg)
+	if credentialErr != nil {
+		credentialStatus.Err = credentialErr
+	}
 
 	report := buildDoctorReport(context.Background(), cfg, loadErr)
+	if credentialStatus.Path != "" || credentialStatus.Present || credentialStatus.Err != nil {
+		check := credentialFileDoctorCheck(credentialStatus)
+		fmt.Fprintf(stdout, "[%s] %s: %s\n", check.Status, check.Name, check.Detail)
+	}
 	for _, check := range report.Checks {
 		fmt.Fprintf(stdout, "[%s] %s: %s\n", check.Status, check.Name, check.Detail)
 	}
 	return 0
+}
+
+func loadConfigWithStoredCredentials(ctx context.Context, environ []string, overrides config.Overrides) (config.Config, credentialLoadStatus, error) {
+	cfg, err := config.Load(environ, overrides)
+	if err != nil {
+		return cfg, credentialLoadStatus{}, err
+	}
+	status, err := applyStoredCredentials(ctx, &cfg)
+	return cfg, status, err
+}
+
+func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credentialLoadStatus, error) {
+	store, err := newCredentialStore()
+	status := credentialLoadStatus{}
+	if store != nil {
+		status.Path = credentialStorePath(store)
+	}
+	if err != nil {
+		status.Err = err
+		return status, err
+	}
+	if store == nil {
+		return status, nil
+	}
+
+	record, ok, err := store.LoadCredentials(ctx)
+	if err != nil {
+		status.Err = err
+		return status, err
+	}
+	status.Present = ok
+	if ok {
+		applyCredentialRecord(cfg, record)
+	}
+	return status, nil
+}
+
+func credentialStorePath(store storage.CredentialStore) string {
+	if withPath, ok := store.(interface{ Path() string }); ok {
+		return withPath.Path()
+	}
+	return ""
+}
+
+func applyCredentialRecord(cfg *config.Config, record storage.CredentialRecord) {
+	if cfg == nil {
+		return
+	}
+	if strings.TrimSpace(cfg.Twitch.Username) == "" {
+		cfg.Twitch.Username = strings.TrimSpace(record.Login)
+	}
+	if strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		cfg.Twitch.OAuthToken = normalizeIRCOAuthToken(record.AccessToken.Reveal())
+	}
+	if strings.TrimSpace(cfg.Twitch.RefreshToken) == "" {
+		cfg.Twitch.RefreshToken = record.RefreshToken.Reveal()
+	}
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" {
+		cfg.Twitch.ClientID = strings.TrimSpace(record.ClientID)
+	}
+}
+
+func normalizeIRCOAuthToken(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.HasPrefix(strings.ToLower(value), "oauth:") {
+		return value
+	}
+	return "oauth:" + value
+}
+
+func credentialFileDoctorCheck(status credentialLoadStatus) app.DoctorCheck {
+	path := strings.TrimSpace(status.Path)
+	if path == "" {
+		path = "credential file"
+	}
+	if status.Err != nil {
+		return app.DoctorCheck{
+			Name:   "credential file",
+			Status: app.DoctorStatusWarn,
+			Detail: fmt.Sprintf("%s load failed: %v; using env/config/defaults", path, status.Err),
+		}
+	}
+	if status.Present {
+		return app.DoctorCheck{
+			Name:   "credential file",
+			Status: app.DoctorStatusOK,
+			Detail: path + " loaded",
+		}
+	}
+	return app.DoctorCheck{
+		Name:   "credential file",
+		Status: app.DoctorStatusWarn,
+		Detail: path + " not found; run `twi login` after configuring a Twitch app client",
+	}
 }
 
 type channelFlags []string

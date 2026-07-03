@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -18,8 +19,22 @@ import (
 	"github.com/w0rxbend/twi/internal/auth"
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/render"
+	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "twi-cli-test-config-")
+	if err != nil {
+		panic(err)
+	}
+	if err := os.Setenv("XDG_CONFIG_HOME", dir); err != nil {
+		panic(err)
+	}
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
+}
 
 func TestHelp(t *testing.T) {
 	var stdout, stderr bytes.Buffer
@@ -47,7 +62,7 @@ func TestLoginHelp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
-	for _, want := range []string{"twi login", "chat:read", "chat:edit", "not printed or saved", "TWI_TWITCH_CLIENT_ID"} {
+	for _, want := range []string{"twi login", "chat:read", "chat:edit", "not printed", "credential store", "TWI_TWITCH_CLIENT_ID"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("login help output missing %q: %q", want, stdout.String())
 		}
@@ -81,8 +96,8 @@ func TestLoginDryRunExplainsFlowAndRedactsSecrets(t *testing.T) {
 		"Redirect URI: http://127.0.0.1:17643/oauth/twitch/callback?state=<redacted>&client_secret=<redacted>&code=<redacted>",
 		"Client ID: present",
 		"Client secret: present",
-		"not saved or printed",
-		"TWI_TWITCH_OAUTH_TOKEN",
+		"saved privately",
+		"saved credentials",
 	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("dry-run output missing %q: %q", want, stdout.String())
@@ -91,11 +106,32 @@ func TestLoginDryRunExplainsFlowAndRedactsSecrets(t *testing.T) {
 	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret", "oauth:access-secret", "access-secret", "refresh-secret", "state-secret", "callback-code")
 }
 
-func TestLoginCompletesFakeFlowWithoutPrintingOrPersistingTokens(t *testing.T) {
+func TestLoginDryRunIgnoresMalformedStoredCredentials(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	writeRawStoredCredentialFile(t, `{"version":1,"twitch":{"access_token":"oauth:stored-secret","expires_at":"oauth:bad-time"}}`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml", "--dry-run"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Twitch OAuth login dry run") {
+		t.Fatalf("dry-run output missing heading: %q", stdout.String())
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "oauth:stored-secret", "stored-secret", "oauth:bad-time", "bad-time")
+}
+
+func TestLoginCompletesFakeFlowSavesCredentialsWithoutPrintingTokens(t *testing.T) {
 	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
 	resetLoginTestHooks(t)
+	credentialStore := storage.NewMemoryCredentialStore()
+	newCredentialStore = func() (storage.CredentialStore, error) {
+		return credentialStore, nil
+	}
 
 	fakeFlow := auth.NewFakeLoginFlow()
 	fakeFlow.QueueBegin(auth.LoginChallenge{
@@ -152,13 +188,132 @@ func TestLoginCompletesFakeFlowWithoutPrintingOrPersistingTokens(t *testing.T) {
 	if requests[0].ClientID != "client-id" || requests[0].ClientSecret.Reveal() != "client-secret" {
 		t.Fatalf("begin request config = %#v, want configured client", requests[0])
 	}
-	for _, want := range []string{"Starting Twitch OAuth login", "chat:read", "chat:edit", "Login succeeded for Twitch user: viewer", "Refresh token: received", "tokens were not saved or printed"} {
+	saves := credentialStore.SavedRecords()
+	if len(saves) != 1 {
+		t.Fatalf("saved credential records = %d, want 1", len(saves))
+	}
+	if saves[0].Login != "viewer" || saves[0].ClientID != "client-id" {
+		t.Fatalf("saved credential identity = %#v, want viewer/client-id", saves[0])
+	}
+	if saves[0].AccessToken.Reveal() != "oauth:access-secret" || saves[0].RefreshToken.Reveal() != "refresh-secret" {
+		t.Fatal("saved credential tokens did not match login result")
+	}
+	for _, want := range []string{"Starting Twitch OAuth login", "chat:read", "chat:edit", "Login succeeded for Twitch user: viewer", "Refresh token: received", "Credentials saved"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("login output missing %q: %q", want, stdout.String())
 		}
 	}
 	assertOutputDoesNotContain(t, stdout.String()+stderr.String(),
 		"client-secret", "state-secret", "callback-code", "oauth:access-secret", "access-secret", "refresh-secret", "https://auth.example")
+}
+
+func TestLoginOverwritesMalformedStoredCredentialsWithoutPrintingTokens(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+	writeRawStoredCredentialFile(t, `{"version":1,"twitch":{"access_token":"oauth:old-stored-secret","expires_at":"oauth:bad-time"}}`)
+
+	resetLoginTestHooks(t)
+	fakeFlow := auth.NewFakeLoginFlow()
+	fakeFlow.QueueBegin(auth.LoginChallenge{
+		AuthorizationURL: auth.NewSecret("https://auth.example/authorize?state=state-secret"),
+		State:            auth.NewSecret("state-secret"),
+		Scopes:           auth.RequiredChatScopes(),
+	}, nil)
+	fakeFlow.QueueComplete(auth.LoginResult{
+		Identity: auth.Identity{UserID: "42", Login: "viewer"},
+		Tokens: auth.TokenSet{
+			AccessToken:  auth.NewSecret("new-access-secret"),
+			RefreshToken: auth.NewSecret("new-refresh-secret"),
+			Scopes:       auth.RequiredChatScopes(),
+		},
+		Scopes: auth.RequiredChatScopes(),
+	}, nil)
+	newLoginFlow = func() auth.LoginFlow {
+		return fakeFlow
+	}
+	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+		return &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
+			Code:  auth.NewSecret("callback-code"),
+			State: auth.NewSecret("state-secret"),
+		}}, nil
+	}
+	openLoginBrowser = func(context.Context, string) error {
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	store, err := storage.NewDefaultCredentialFileStore()
+	if err != nil {
+		t.Fatalf("NewDefaultCredentialFileStore returned error: %v", err)
+	}
+	record, ok, err := store.LoadCredentials(context.Background())
+	if err != nil {
+		t.Fatalf("LoadCredentials after login returned error: %v", err)
+	}
+	if !ok {
+		t.Fatal("LoadCredentials after login ok = false, want saved credentials")
+	}
+	if record.AccessToken.Reveal() != "new-access-secret" || record.RefreshToken.Reveal() != "new-refresh-secret" {
+		t.Fatalf("saved tokens = (%q, %q), want new login tokens", record.AccessToken.Reveal(), record.RefreshToken.Reveal())
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(),
+		"client-secret", "state-secret", "callback-code", "new-access-secret", "new-refresh-secret", "old-stored-secret", "oauth:bad-time", "https://auth.example")
+}
+
+func TestLoginCredentialSaveFailureIsRedacted(t *testing.T) {
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+
+	resetLoginTestHooks(t)
+	newCredentialStore = func() (storage.CredentialStore, error) {
+		return saveFailCredentialStore{err: errors.New("cannot write oauth:access-secret refresh_token=refresh-secret client_secret=client-secret")}, nil
+	}
+
+	fakeFlow := auth.NewFakeLoginFlow()
+	fakeFlow.QueueBegin(auth.LoginChallenge{
+		AuthorizationURL: auth.NewSecret("https://auth.example/authorize?state=state-secret"),
+		State:            auth.NewSecret("state-secret"),
+		Scopes:           auth.RequiredChatScopes(),
+	}, nil)
+	fakeFlow.QueueComplete(auth.LoginResult{
+		Identity: auth.Identity{UserID: "42", Login: "viewer"},
+		Tokens: auth.TokenSet{
+			AccessToken:  auth.NewSecret("oauth:access-secret"),
+			RefreshToken: auth.NewSecret("refresh-secret"),
+			Scopes:       auth.RequiredChatScopes(),
+		},
+		Scopes: auth.RequiredChatScopes(),
+	}, nil)
+	newLoginFlow = func() auth.LoginFlow {
+		return fakeFlow
+	}
+	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+		return &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
+			Code:  auth.NewSecret("callback-code"),
+			State: auth.NewSecret("state-secret"),
+		}}, nil
+	}
+	openLoginBrowser = func(context.Context, string) error {
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "save credentials:") || !strings.Contains(stderr.String(), auth.RedactedSecret) {
+		t.Fatalf("stderr missing redacted save failure: %q", stderr.String())
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret", "state-secret", "callback-code", "oauth:access-secret", "access-secret", "refresh-secret", "https://auth.example")
 }
 
 func TestLoginCancellationIsClearAndRedacted(t *testing.T) {
@@ -356,6 +511,23 @@ func TestMockChat(t *testing.T) {
 	if !strings.Contains(stdout.String(), "#example") {
 		t.Fatalf("mock chat output missing channel: %q", stdout.String())
 	}
+}
+
+func TestMockChatIgnoresMalformedStoredCredentials(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	writeRawStoredCredentialFile(t, `{"version":1,"twitch":{"access_token":"oauth:stored-secret","expires_at":"oauth:bad-time"}}`)
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--mock", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "#example") {
+		t.Fatalf("mock chat output missing channel: %q", stdout.String())
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "oauth:stored-secret", "stored-secret", "oauth:bad-time", "bad-time")
 }
 
 func TestLiveChatMissingCredentialsAreActionableAndRedacted(t *testing.T) {
@@ -576,6 +748,40 @@ func TestConfigShowRedactsSecrets(t *testing.T) {
 	}
 }
 
+func TestConfigShowLoadsStoredCredentialsAndRedactsTokens(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	writeStoredCredentialFixture(t, storage.CredentialRecord{
+		UserID:       "42",
+		Login:        "viewer",
+		DisplayName:  "Viewer",
+		ClientID:     "client-id",
+		AccessToken:  auth.NewSecret("stored-access-token"),
+		RefreshToken: auth.NewSecret("stored-refresh-secret"),
+		TokenType:    "bearer",
+		Scopes:       auth.RequiredChatScopes(),
+		UpdatedAt:    time.Now(),
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"config", "show", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{
+		`twitch_username = "viewer"`,
+		`twitch_oauth_token = "[redacted]"`,
+		`twitch_refresh_token = "[redacted]"`,
+		`twitch_client_id = "client-id"`,
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("config output missing %q:\n%s", want, stdout.String())
+		}
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "stored-access-token", "stored-refresh-secret")
+}
+
 func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:access-token-private")
 	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "refresh-secret")
@@ -619,6 +825,130 @@ func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 			t.Fatalf("doctor output leaked %q: %s", secret, stdout.String())
 		}
 	}
+}
+
+func TestDoctorLoadsStoredCredentialsWithoutPrintingTokens(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	writeStoredCredentialFixture(t, storage.CredentialRecord{
+		UserID:       "42",
+		Login:        "viewer",
+		DisplayName:  "Viewer",
+		ClientID:     "client-id",
+		AccessToken:  auth.NewSecret("stored-access-token"),
+		RefreshToken: auth.NewSecret("stored-refresh-secret"),
+		TokenType:    "bearer",
+		Scopes:       auth.RequiredChatScopes(),
+		UpdatedAt:    time.Now(),
+	})
+
+	fake := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+		Result: twitch.TokenValidationResult{
+			Status:   twitch.TokenValidationValid,
+			Identity: twitch.TokenIdentity{UserID: "42", Login: "viewer"},
+			Scopes:   twitch.RequiredIRCScopes(),
+		},
+	})
+
+	oldNewDoctorTokenValidator := newDoctorTokenValidator
+	oldDoctorReachabilityProbe := doctorReachabilityProbe
+	oldDoctorCacheDir := doctorCacheDir
+	defer func() {
+		newDoctorTokenValidator = oldNewDoctorTokenValidator
+		doctorReachabilityProbe = oldDoctorReachabilityProbe
+		doctorCacheDir = oldDoctorCacheDir
+	}()
+	newDoctorTokenValidator = func() twitch.TokenValidator {
+		return fake
+	}
+	doctorReachabilityProbe = func(context.Context) error {
+		return nil
+	}
+	doctorCacheDir = func() string {
+		return t.TempDir()
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"[ok] credential file:", "[ok] twitch username: present", "[ok] oauth token: present", "[ok] token validation:"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("doctor output missing %q:\n%s", want, stdout.String())
+		}
+	}
+	requests := fake.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("validator requests = %d, want 1", len(requests))
+	}
+	if requests[0].Username != "viewer" || requests[0].OAuthToken != "oauth:stored-access-token" || requests[0].RefreshToken != "stored-refresh-secret" || requests[0].ClientID != "client-id" {
+		t.Fatalf("validator request = %#v, want stored credentials", requests[0])
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "stored-access-token", "stored-refresh-secret")
+}
+
+func TestDoctorEnvCredentialsTakePrecedenceOverStoredCredentials(t *testing.T) {
+	clearTwitchCredentialEnv(t)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("TWI_TWITCH_USERNAME", "env_viewer")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:env-access-token")
+	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "env-refresh-secret")
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "env-client-id")
+	writeStoredCredentialFixture(t, storage.CredentialRecord{
+		UserID:       "42",
+		Login:        "stored_viewer",
+		DisplayName:  "StoredViewer",
+		ClientID:     "stored-client-id",
+		AccessToken:  auth.NewSecret("stored-access-token"),
+		RefreshToken: auth.NewSecret("stored-refresh-secret"),
+		TokenType:    "bearer",
+		Scopes:       auth.RequiredChatScopes(),
+		UpdatedAt:    time.Now(),
+	})
+
+	fake := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+		Result: twitch.TokenValidationResult{
+			Status:   twitch.TokenValidationValid,
+			Identity: twitch.TokenIdentity{UserID: "42", Login: "env_viewer"},
+			Scopes:   twitch.RequiredIRCScopes(),
+		},
+	})
+
+	oldNewDoctorTokenValidator := newDoctorTokenValidator
+	oldDoctorReachabilityProbe := doctorReachabilityProbe
+	oldDoctorCacheDir := doctorCacheDir
+	defer func() {
+		newDoctorTokenValidator = oldNewDoctorTokenValidator
+		doctorReachabilityProbe = oldDoctorReachabilityProbe
+		doctorCacheDir = oldDoctorCacheDir
+	}()
+	newDoctorTokenValidator = func() twitch.TokenValidator {
+		return fake
+	}
+	doctorReachabilityProbe = func(context.Context) error {
+		return nil
+	}
+	doctorCacheDir = func() string {
+		return t.TempDir()
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"doctor", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	requests := fake.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("validator requests = %d, want 1", len(requests))
+	}
+	if requests[0].Username != "env_viewer" || requests[0].OAuthToken != "oauth:env-access-token" || requests[0].RefreshToken != "env-refresh-secret" || requests[0].ClientID != "env-client-id" {
+		t.Fatalf("validator request = %#v, want env credentials to win", requests[0])
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(),
+		"env-access-token", "env-refresh-secret", "stored-access-token", "stored-refresh-secret")
 }
 
 func TestDefaultDoctorReportWiresTokenValidator(t *testing.T) {
@@ -772,11 +1102,13 @@ func resetLoginTestHooks(t *testing.T) {
 	oldNewLoginContext := newLoginContext
 	oldNewLoginCallbackWaiter := newLoginCallbackWaiter
 	oldOpenLoginBrowser := openLoginBrowser
+	oldNewCredentialStore := newCredentialStore
 	t.Cleanup(func() {
 		newLoginFlow = oldNewLoginFlow
 		newLoginContext = oldNewLoginContext
 		newLoginCallbackWaiter = oldNewLoginCallbackWaiter
 		openLoginBrowser = oldOpenLoginBrowser
+		newCredentialStore = oldNewCredentialStore
 	})
 }
 
@@ -803,4 +1135,76 @@ func assertOutputDoesNotContain(t *testing.T, output string, values ...string) {
 			t.Fatalf("output leaked %q: %s", value, output)
 		}
 	}
+}
+
+func clearTwitchCredentialEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"TWI_TWITCH_USERNAME",
+		"TWI_TWITCH_OAUTH_TOKEN",
+		"TWI_TWITCH_REFRESH_TOKEN",
+		"TWI_TWITCH_CLIENT_ID",
+		"TWI_TWITCH_CLIENT_SECRET",
+		"TWITCH_USERNAME",
+		"TWITCH_ACCESS_TOKEN",
+		"TWITCH_REFRESH_TOKEN",
+		"TWITCH_CLIENT_ID",
+		"TWITCH_CLIENT_SECRET",
+	} {
+		t.Setenv(key, "")
+	}
+}
+
+func writeStoredCredentialFixture(t *testing.T, record storage.CredentialRecord) {
+	t.Helper()
+	store, err := storage.NewDefaultCredentialFileStore()
+	if err != nil {
+		t.Fatalf("NewDefaultCredentialFileStore returned error: %v", err)
+	}
+	if err := store.SaveCredentials(context.Background(), record); err != nil {
+		t.Fatalf("SaveCredentials fixture returned error: %v", err)
+	}
+}
+
+func writeRawStoredCredentialFile(t *testing.T, content string) {
+	t.Helper()
+	path, err := storage.DefaultCredentialFilePath()
+	if err != nil {
+		t.Fatalf("DefaultCredentialFilePath returned error: %v", err)
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, storage.CredentialDirectoryMode); err != nil {
+		t.Fatalf("mkdir credential dir: %v", err)
+	}
+	if err := os.Chmod(dir, storage.CredentialDirectoryMode); err != nil {
+		t.Fatalf("chmod credential dir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), storage.CredentialFileMode); err != nil {
+		t.Fatalf("write credential file: %v", err)
+	}
+	if err := os.Chmod(path, storage.CredentialFileMode); err != nil {
+		t.Fatalf("chmod credential file: %v", err)
+	}
+}
+
+type saveFailCredentialStore struct {
+	err error
+}
+
+func (s saveFailCredentialStore) LoadCredentials(ctx context.Context) (storage.CredentialRecord, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return storage.CredentialRecord{}, false, err
+	}
+	return storage.CredentialRecord{}, false, nil
+}
+
+func (s saveFailCredentialStore) SaveCredentials(ctx context.Context, _ storage.CredentialRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return s.err
+}
+
+func (s saveFailCredentialStore) DeleteCredentials(ctx context.Context) error {
+	return ctx.Err()
 }

@@ -18,6 +18,7 @@ import (
 
 	"github.com/w0rxbend/twi/internal/auth"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/storage"
 )
 
 const (
@@ -40,9 +41,9 @@ Behavior:
   twi opens a browser, listens for the localhost OAuth callback, validates the
   returned token with Twitch, and prints only identity/scope status. Access
   tokens, refresh tokens, callback codes, OAuth state, authorization URLs, and
-  client secrets are not printed or saved. Until credential storage lands, keep
-  using TWI_TWITCH_USERNAME plus TWI_TWITCH_OAUTH_TOKEN/TWITCH_ACCESS_TOKEN or
-  the flat config file for live chat credentials.
+  client secrets are not printed. Successful logins save tokens through the
+  private credential store. Environment variables and flat config credentials
+  still take precedence when present.
 
 Flags:
 `
@@ -155,7 +156,7 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 
 	fmt.Fprintf(stdout, "Starting Twitch OAuth login for scopes: %s\n", strings.Join(auth.ScopeValues(challenge.Scopes), ", "))
 	fmt.Fprintln(stdout, "A browser window will open. Approve the requested scopes, then return to this terminal.")
-	fmt.Fprintln(stdout, "Tokens will be validated but not saved or printed.")
+	fmt.Fprintln(stdout, "Tokens will be validated, saved privately, and never printed.")
 
 	if err := openLoginBrowser(ctx, challenge.AuthorizationURL.Reveal()); err != nil {
 		printLoginError(stderr, "open browser", err, challengeRedactor)
@@ -196,6 +197,20 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 		result.Tokens.AccessToken,
 		result.Tokens.RefreshToken,
 	)
+	record := storage.CredentialRecordFromLoginResult(result, request.ClientID, time.Now().UTC())
+	store, err := newCredentialStore()
+	if err != nil {
+		printLoginError(stderr, "prepare credential storage", err, resultRedactor)
+		return 1
+	}
+	if store == nil {
+		printLoginError(stderr, "prepare credential storage", errors.New("credential store unavailable"), resultRedactor)
+		return 1
+	}
+	if err := store.SaveCredentials(ctx, record); err != nil {
+		printLoginError(stderr, "save credentials", err, resultRedactor)
+		return 1
+	}
 	printLoginSuccess(stdout, result, resultRedactor)
 	return 0
 }
@@ -221,7 +236,7 @@ func validateLoginConfig(request auth.LoginRequest) error {
 		missing = append(missing, "--redirect-uri")
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("login requires %s; existing env/config token credentials still work for `twi chat` until login storage is implemented", strings.Join(missing, " and "))
+		return fmt.Errorf("login requires %s; existing env/config token credentials still work for `twi chat`, and saved credential files are used when those sources are empty", strings.Join(missing, " and "))
 	}
 	return nil
 }
@@ -240,8 +255,8 @@ func printLoginDryRun(stdout io.Writer, cfg config.Config, redirectURI string, t
 	fmt.Fprintf(stdout, "Client ID: %s\n", presentMissing(cfg.Twitch.ClientID))
 	fmt.Fprintf(stdout, "Client secret: %s\n", presentMissing(cfg.Twitch.ClientSecret))
 	fmt.Fprintln(stdout, "Real login opens a browser and waits for a localhost callback.")
-	fmt.Fprintln(stdout, "Tokens are validated but not saved or printed yet.")
-	fmt.Fprintln(stdout, "For live chat today, keep using TWI_TWITCH_USERNAME plus TWI_TWITCH_OAUTH_TOKEN/TWITCH_ACCESS_TOKEN or the flat config file.")
+	fmt.Fprintln(stdout, "Tokens are validated, saved privately, and never printed.")
+	fmt.Fprintln(stdout, "For live chat, saved credentials are used when environment variables or flat config credentials are empty.")
 }
 
 func presentMissing(value string) string {
@@ -266,8 +281,8 @@ func printLoginSuccess(stdout io.Writer, result auth.LoginResult, redactor auth.
 	} else {
 		fmt.Fprintln(stdout, "Refresh token: not returned")
 	}
-	fmt.Fprintln(stdout, "Credential storage is not implemented yet; tokens were not saved or printed.")
-	fmt.Fprintln(stdout, "Continue using environment variables or the flat config file for live chat credentials.")
+	fmt.Fprintln(stdout, "Credentials saved to the private credential store.")
+	fmt.Fprintln(stdout, "Environment variables and flat config credentials still take precedence when present.")
 }
 
 func printLoginError(stderr io.Writer, action string, err error, redactor auth.Redactor) {

@@ -2,13 +2,14 @@
 
 Status: Risk register aligned with the current MVP. Mock chat is ready;
 multi-channel live IRC read/send, diagnostics, multi-channel UX, and inline
-image plumbing are partial; login is a no-persistence OAuth command; the
-credential storage boundary is defined; setup wiring, actual credential
-persistence, and manual Kitty/Ghostty image validation remain planned.
+image plumbing are partial; login can save through the restrictive credential
+file fallback; setup wiring, refresh-token persistence after IRC reconnect, and
+manual Kitty/Ghostty image validation remain planned.
 
 Credential assumption: Twitch username/token values currently come from
-environment variables or the flat config file. CLI overrides cover channel and
-config path, not username or token values.
+environment variables, the flat config file, or the private credential file.
+Environment and flat config values take precedence over saved credentials. CLI
+overrides cover channel and config path, not username or token values.
 
 Likelihood and impact use `Low`, `Medium`, or `High`.
 

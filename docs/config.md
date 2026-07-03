@@ -8,7 +8,7 @@ This document describes the configuration model for `twi`. The implemented parse
 - `twi config show` and `twi config path` exist in the CLI.
 - Mock chat is ready and does not require credentials or network access.
 - Multi-channel live IRC read/send is partially shipped: `twi chat --channel <channel> [--channel other]` can read, send, reply, and send `/me` actions when username/token credentials are configured.
-- Twitch credentials are currently read from environment variables or the flat config file. CLI flags currently override `--config` and `--channel`, not username or OAuth token values.
+- Twitch credentials are currently read from environment variables, the flat config file, or the private credential file. CLI flags currently override `--config` and `--channel`, not username or OAuth token values.
 - Config output redacts OAuth tokens and client secrets.
 - `twi doctor` diagnostics are partially shipped and report the effective config file path, credential presence,
   selected feature modes, Twitch IRC reachability, terminal hints, Kitty graphics
@@ -16,10 +16,9 @@ This document describes the configuration model for `twi`. The implemented parse
   secret values.
 - Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
 - Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned.
-- `twi login` can run the no-persistence OAuth browser/callback flow. The
-  internal credential storage boundary and restrictive file fallback plan are
-  defined, but no command writes stored credentials yet. Setup wizard wiring is
-  planned.
+- `twi login` can run the OAuth browser/callback flow and save returned tokens
+  through the restrictive credential-file fallback without printing them. Setup
+  wizard wiring is planned.
 - Nested TOML tables are not implemented yet; keep config files flat.
 
 ## Precedence
@@ -29,7 +28,8 @@ Effective config should be resolved in this order, highest priority first:
 1. CLI flags for `--config` and `--channel`.
 2. Environment variables.
 3. Config file.
-4. Defaults.
+4. Saved credential file values for empty credential fields.
+5. Defaults.
 
 This order lets users override local config for one command without editing files.
 The interactive setup wizard is future work.
@@ -54,20 +54,25 @@ $XDG_CACHE_HOME/twi
 
 Cache contents should include non-secret metadata and downloaded assets only, such as avatar, emote, badge, and emoji data.
 
-The planned credential fallback path is a separate private file in the platform
-config directory:
+The credential fallback path is a separate private file in the platform config
+directory:
 
 ```text
 $XDG_CONFIG_HOME/twi/credentials.json
 ~/.config/twi/credentials.json
 ```
 
-This fallback is not the flat `config.toml` file. When it is implemented, `twi`
-must create the containing directory with `0700` permissions and the credential
-file with `0600` permissions, and it must reject credential files or directories
-whose permissions do not match those exact modes. No OS keychain backend is
-implemented today; the storage interface only leaves room for one after platform
-support is designed and documented.
+This fallback is not the flat `config.toml` file. `twi` creates the containing
+directory with `0700` permissions and the credential file with `0600`
+permissions, and it rejects credential files or directories whose permissions
+do not match those exact modes. It also rejects symlinks at the credential
+directory or file path. No OS keychain backend is implemented today; the storage
+interface only leaves room for one after platform support is designed and
+documented.
+
+Unix builds use a no-follow file open in addition to stable symlink checks. On
+non-Unix platforms, the fallback currently documents only stable path checks;
+platform-specific no-follow and ACL hardening remains future work.
 
 ## Environment Variables
 
@@ -159,9 +164,10 @@ animation_mode = "fast"
 ```
 
 Do not paste a real token into shared docs, commits, logs, or support issues.
-If you keep credentials in this flat config file before the credential storage
-fallback is wired, keep the file private to your user account, for example with
-`chmod 600`. `twi` does not yet migrate values out of `config.toml`.
+Prefer `twi login` for saved tokens. If you keep credentials in this flat config
+file too, keep the file private to your user account, for example with
+`chmod 600`. `twi` does not automatically migrate values out of `config.toml`,
+and flat config values still take precedence over saved credentials.
 
 ## CLI Commands And Flags
 
@@ -175,16 +181,16 @@ twi config path
 twi doctor
 ```
 
-`twi login` is implemented as a no-persistence browser/local-callback OAuth
-flow with a `--dry-run` explanation path. Credential storage has an internal
-boundary and restrictive fallback-file plan, but login/setup do not save
-credentials yet. Setup wizard wiring and manual Kitty/Ghostty validation are
-still planned. Twitch IRC chat is current when username, OAuth token, and at
-least one channel are configured. Live image startup is current for enabled
-asset kinds when config, credentials, cache writability, and terminal capability
-allow it. Multi-channel sidebar, command palette, selected-message inspect, and
-optional mouse controls are current app behavior. Future flags for auth and mode
-settings should follow the precedence rules above.
+`twi login` is implemented as a browser/local-callback OAuth flow with a
+`--dry-run` explanation path. Successful logins save credentials through the
+restrictive fallback-file store. Setup wizard wiring and manual Kitty/Ghostty
+validation are still planned. Twitch IRC chat is current when username, OAuth
+token, and at least one channel are configured. Live image startup is current
+for enabled asset kinds when config, credentials, cache writability, and
+terminal capability allow it. Multi-channel sidebar, command palette,
+selected-message inspect, and optional mouse controls are current app behavior.
+Future flags for auth and mode settings should follow the precedence rules
+above.
 
 ## Redacted Config Output
 
@@ -237,10 +243,12 @@ messages still route by their normalized channel names.
 
 Current behavior:
 
-- Load username and OAuth token from env/config.
+- Load username and OAuth token from env/config and saved credential files.
 - Load channel names from `--channel`, `TWI_DEFAULT_CHANNELS`, or config.
 - Load animation mode.
 - Load basic image fallback settings.
+- Save successful `twi login` results through the restrictive credential-file
+  fallback.
 - Install live image asset services for allowed avatar, badge, emote, and emoji
   kinds when config, credentials, cache, and terminal checks pass.
 - Redact secrets in all config output.
@@ -250,8 +258,8 @@ Current behavior:
 Future target:
 
 - Interactive setup wizard.
-- Credential storage implementation using the restrictive file fallback, with
-  any OS keychain backend added only after explicit platform support decisions.
+- Optional OS keychain backend only after explicit platform support decisions.
+- Non-Unix no-follow and ACL hardening for the fallback credential file.
 - Full terminal image mode controls.
 - Cache sizing and pruning configuration.
 - Persisting refreshed tokens safely after OAuth refresh succeeds.
