@@ -145,6 +145,38 @@ func TestEmojiMetadataProviderDefaultTwemojiTemplate(t *testing.T) {
 	}
 }
 
+func TestValidateEmojiProviderConfig(t *testing.T) {
+	if err := ValidateEmojiProviderConfig(EmojiProviderConfig{}); err != nil {
+		t.Fatalf("default provider validation returned error: %v", err)
+	}
+	if err := ValidateEmojiProviderConfig(EmojiProviderConfig{
+		Provider:    "custom",
+		URLTemplate: "https://emoji.example/assets/{id}.png",
+	}); err != nil {
+		t.Fatalf("custom provider validation returned error: %v", err)
+	}
+
+	for _, tt := range []struct {
+		name     string
+		provider EmojiProviderConfig
+	}{
+		{name: "custom missing template", provider: EmojiProviderConfig{Provider: "custom"}},
+		{name: "missing placeholder", provider: EmojiProviderConfig{Provider: "custom", URLTemplate: "https://emoji.example/assets/static.png"}},
+		{name: "credential marker", provider: EmojiProviderConfig{Provider: "custom", URLTemplate: "https://emoji.example/{id}.png?access_token=secret"}},
+		{name: "unknown provider", provider: EmojiProviderConfig{Provider: "surprise"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateEmojiProviderConfig(tt.provider)
+			if !errors.Is(err, ErrInvalidEmojiProviderConfig) {
+				t.Fatalf("ValidateEmojiProviderConfig error = %v, want ErrInvalidEmojiProviderConfig", err)
+			}
+			if err != nil && strings.Contains(err.Error(), "access_token=secret") {
+				t.Fatalf("validation error leaked credential marker value: %q", err)
+			}
+		})
+	}
+}
+
 func TestEmojiMetadataProviderUsesCacheHitWithoutTemplateValidation(t *testing.T) {
 	cache := storage.NewMemoryAssetCache()
 	key := storage.AssetKey{Kind: KindEmoji, ID: "1f600"}

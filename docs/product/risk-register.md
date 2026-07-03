@@ -2,9 +2,8 @@
 
 Status: Risk register aligned with the current MVP. Mock chat is ready;
 multi-channel live IRC read/send, diagnostics, multi-channel UX, and inline
-image plumbing are partial; login/setup, secure credential storage, default
-live image resolver wiring, and manual Kitty/Ghostty image validation remain
-planned.
+image plumbing are partial; login/setup, secure credential storage, and manual
+Kitty/Ghostty image validation remain planned.
 
 Credential assumption: Twitch username/token values currently come from
 environment variables or the flat config file. CLI overrides cover channel and

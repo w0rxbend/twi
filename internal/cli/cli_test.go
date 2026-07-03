@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"github.com/w0rxbend/twi/internal/app"
+	"github.com/w0rxbend/twi/internal/assets"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
 
@@ -149,6 +151,95 @@ func TestLiveChatConfiguredStartsClientWithMultipleChannels(t *testing.T) {
 	}
 	if got, want := strings.Join(gotRunChannels, ","), "alpha,Beta"; got != want {
 		t.Fatalf("run channels = %q, want %q", got, want)
+	}
+}
+
+func TestLiveChatConfiguredWiresImageStackWhenReady(t *testing.T) {
+	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "fixture-client")
+	t.Setenv("TWI_IMAGE_MODE", "normal")
+	t.Setenv("TWI_AVATAR_MODE", "image")
+	t.Setenv("TWI_EMOJI_MODE", "image")
+	t.Setenv("TWI_EMOTE_MODE", "image")
+	t.Setenv("TERM", "xterm-kitty")
+	t.Setenv("COLORTERM", "truecolor")
+	t.Setenv("KITTY_WINDOW_ID", "42")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	oldNewLiveChatClient := newLiveChatClient
+	oldRunLiveChat := runLiveChat
+	defer func() {
+		newLiveChatClient = oldNewLiveChatClient
+		runLiveChat = oldRunLiveChat
+	}()
+
+	fake := app.NewFakeChatClient(1)
+	newLiveChatClient = func(context.Context, config.Config) (app.ChatClient, error) {
+		return fake, nil
+	}
+	var got app.ClientOptions
+	runLiveChat = func(_ io.Writer, _ config.Config, client app.ChatClient, opts app.ClientOptions) error {
+		if client != fake {
+			t.Fatalf("runLiveChat client = %#v, want fake", client)
+		}
+		got = opts
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if _, ok := got.AvatarResolver.(*assets.AvatarBatchResolver); !ok {
+		t.Fatalf("AvatarResolver = %T, want *assets.AvatarBatchResolver", got.AvatarResolver)
+	}
+	if _, ok := got.AssetResolver.(*assets.Resolver); !ok {
+		t.Fatalf("AssetResolver = %T, want *assets.Resolver", got.AssetResolver)
+	}
+	if _, ok := got.ImagePreparer.(*render.PNGImagePreparer); !ok {
+		t.Fatalf("ImagePreparer = %T, want *render.PNGImagePreparer", got.ImagePreparer)
+	}
+	if _, ok := got.ImageRenderer.(*render.KittyRenderer); !ok {
+		t.Fatalf("ImageRenderer = %T, want *render.KittyRenderer", got.ImageRenderer)
+	}
+	for _, kind := range []string{assets.KindAvatar, assets.KindBadge, assets.KindTwitchEmote, assets.KindEmoji} {
+		if !got.AssetKinds[kind] {
+			t.Fatalf("AssetKinds[%q] = false, want true; kinds=%#v", kind, got.AssetKinds)
+		}
+	}
+	if strings.Contains(stderr.String(), "oauth:secret-token") {
+		t.Fatalf("stderr leaked token: %q", stderr.String())
+	}
+}
+
+func TestLiveClientOptionsGateImageStackByTerminalAndCredentials(t *testing.T) {
+	cfg := config.Default()
+	cfg.Twitch.Username = "viewer"
+	cfg.Twitch.OAuthToken = "oauth:secret-token"
+	cfg.Twitch.ClientID = "fixture-client"
+	cfg.Features.ImageMode = "auto"
+	cfg.Features.AvatarMode = "image"
+	cfg.Features.EmojiMode = "image"
+	cfg.Features.EmoteMode = "image"
+
+	unsupported := liveClientOptions(cfg, []string{"TERM=xterm-256color", "COLORTERM=truecolor"}, t.TempDir())
+	if unsupported.AssetResolver != nil || unsupported.ImageRenderer != nil || unsupported.AvatarResolver != nil {
+		t.Fatalf("unsupported auto options = %#v, want no live image stack", unsupported)
+	}
+
+	cfg.Features.ImageMode = "normal"
+	cfg.Twitch.ClientID = ""
+	partial := liveClientOptions(cfg, []string{"TERM=xterm-kitty", "COLORTERM=truecolor", "KITTY_WINDOW_ID=42"}, t.TempDir())
+	if partial.AssetResolver == nil || partial.ImageRenderer == nil || partial.ImagePreparer == nil {
+		t.Fatalf("partial emoji stack options = %#v, want resolver/preparer/renderer", partial)
+	}
+	if partial.AvatarResolver != nil {
+		t.Fatalf("partial AvatarResolver = %T, want nil without Twitch API client ID", partial.AvatarResolver)
+	}
+	if got, want := assetKindNames(partial.AssetKinds), []string{assets.KindEmoji}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("partial AssetKinds = %#v, want %#v", got, want)
 	}
 }
 
@@ -320,4 +411,15 @@ func doctorCheck(t *testing.T, report app.DoctorReport, name string) app.DoctorC
 	}
 	t.Fatalf("doctor report missing check %q: %#v", name, report.Checks)
 	return app.DoctorCheck{}
+}
+
+func assetKindNames(kinds map[string]bool) []string {
+	order := []string{assets.KindAvatar, assets.KindBadge, assets.KindTwitchEmote, assets.KindEmoji}
+	var names []string
+	for _, kind := range order {
+		if kinds[kind] {
+			names = append(names, kind)
+		}
+	}
+	return names
 }

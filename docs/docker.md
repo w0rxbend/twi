@@ -34,8 +34,9 @@ Live chat is partially shipped for configured Twitch IRC channels. It can read, 
 reply, and send `/me` actions when username/token credentials are configured.
 The keyboard-first channel sidebar, command palette, selected-message inspect
 panel, and optional mouse controls are current app behavior. Login/setup,
-secure credential storage, default live image resolver wiring, and manual
-Kitty/Ghostty image validation are still planned.
+secure credential storage, and manual Kitty/Ghostty image validation are still
+planned. Live image asset wiring is current when config, credentials, cache,
+and terminal checks allow it.
 
 Username/token credentials currently come from environment variables or the
 flat config file. Docker examples pass them through environment variables; CLI

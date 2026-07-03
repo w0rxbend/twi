@@ -22,6 +22,7 @@ const (
 type Request struct {
 	ID          string
 	Ref         twitch.AssetRef
+	Channel     string
 	ChannelID   string
 	UserID      string
 	UserLogin   string

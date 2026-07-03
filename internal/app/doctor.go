@@ -80,6 +80,7 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 		kittyGraphicsCheck(cfg, opts.Environ),
 		cacheCheck(opts.CacheDir),
 		imageCapabilityCheck(cfg, opts.Environ, opts.CacheDir),
+		imageStackCheck(cfg, opts.Environ, opts.CacheDir),
 		cachePruningCheck(ctx, opts.CacheDir),
 		featureModesCheck(cfg.Features),
 	}
@@ -320,6 +321,16 @@ func imageCapabilityCheck(cfg config.Config, environ []string, cacheDir string) 
 func imageCapabilityDecision(cfg config.Config, environ []string, cacheDir string) (render.ImageCapabilityDecision, error) {
 	writable, err := imageCacheWritable(cacheDir)
 	return render.DecideImageCapabilities(cfg.Features, render.DetectTerminalImageSignals(environ), writable), err
+}
+
+func imageStackCheck(cfg config.Config, environ []string, cacheDir string) DoctorCheck {
+	decision := DecideLiveImageStack(cfg, environ, cacheDir)
+	switch decision.Status {
+	case ImageStackEnabled, ImageStackDisabled:
+		return okCheck("image stack", decision.Detail)
+	default:
+		return warnCheck("image stack", decision.Detail)
+	}
 }
 
 func imageCacheWritable(cacheDir string) (bool, error) {

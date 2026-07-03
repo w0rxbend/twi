@@ -52,6 +52,20 @@ func NewEmojiMetadataProvider(config EmojiProviderConfig) *EmojiMetadataProvider
 	return &EmojiMetadataProvider{config: config}
 }
 
+// ValidateEmojiProviderConfig checks provider settings without touching the
+// cache or network. It is intended for startup gating before async asset work
+// is installed.
+func ValidateEmojiProviderConfig(config EmojiProviderConfig) error {
+	provider := NewEmojiMetadataProvider(config)
+	template, err := provider.urlTemplate()
+	if err != nil {
+		return err
+	}
+	sourceURL := strings.ReplaceAll(template, emojiTemplatePlaceholder2, "1f600")
+	sourceURL = strings.ReplaceAll(sourceURL, emojiTemplatePlaceholder, "1f600")
+	return validateEmojiSourceURL(sourceURL)
+}
+
 // LookupMetadata resolves standard emoji refs. Unknown emoji refs return
 // metadata without a URL so callers can keep native Unicode fallback text.
 func (p *EmojiMetadataProvider) LookupMetadata(ctx context.Context, req MetadataRequest) (Metadata, error) {

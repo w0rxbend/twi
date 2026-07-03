@@ -70,6 +70,25 @@ func TestLiveChatClientBridgesTransportEvents(t *testing.T) {
 		t.Fatalf("notice state = %#v, want connected notice detail", got)
 	}
 
+	userNoticeAt := connectedAt.Add(1500 * time.Millisecond)
+	transport.emit(twitch.Event{
+		Kind: twitch.EventUserNotice,
+		UserNotice: twitch.UserNotice{
+			ID:          "user-notice-1",
+			Channel:     "example",
+			RoomID:      "141981764",
+			Timestamp:   userNoticeAt,
+			AuthorLogin: "viewer",
+			AuthorID:    "42",
+			DisplayName: "Viewer",
+			SystemText:  "Viewer subscribed.",
+			Text:        "great stream",
+		},
+	})
+	if got := <-client.Messages(); got.Type != twitch.MessageTypeNotice || got.ChannelID != "141981764" {
+		t.Fatalf("user notice message = %#v, want room ID propagated", got)
+	}
+
 	transport.emit(twitch.Event{
 		Kind: twitch.EventConnection,
 		Connection: twitch.ConnectionEvent{

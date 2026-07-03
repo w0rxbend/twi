@@ -6,16 +6,17 @@
 
 - Text, Unicode, initials, and compact badge fallbacks are implemented for chat rows.
 - Renderer asset fallback fragments can reserve stable cell widths before images are available.
-- Chat row generation can attach prepared renderer cells by stable URL-free asset key. Unsupported terminals, image-off mode, missing assets, and render failures keep the same fallback rows and reserved widths.
+- Chat row generation can attach prepared renderer cells by stable URL-free asset key. When a room ID or safe channel name is available, prepared-cell keys include that channel identity so reused asset IDs cannot cross-populate another channel. Unsupported terminals, image-off mode, missing assets, and render failures keep the same fallback rows and reserved widths.
 - `internal/render.PNGImagePreparer` decodes bounded downloaded PNG, JPEG, and first-frame GIF assets, crops/scales them to the requested terminal cell rectangle, and writes renderer-ready PNG files without exposing source URLs, source paths, or token-like values in errors.
 - `internal/assets.PublicImageDownloader` fetches only validated public HTTP(S) PNG, JPEG, and GIF sources, validates redirects and public hosts, enforces response-size limits, writes URL-free local files without sending auth or cookie headers, and records a URL-free SHA-256 payload identity for the downloaded bytes.
 - Visible-row asset events remember permanent preparation/render failures by URL-free asset identity, safe downloaded record metadata, optional payload identity, and requested cell size so unchanged corrupt, oversized, unsafe, or unsupported assets keep stable fallbacks without repeated decode/render work while changed bytes can retry.
 - `internal/storage.AssetCache` provides context-aware cache methods. The in-memory implementation is intended for deterministic tests, and `internal/storage.DiskAssetCache` persists metadata plus cache-owned bytes under the platform cache directory using deterministic hashed paths.
-- `twi doctor` reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, selected image/avatar/emoji/emote modes, and the resolved image capability state.
+- `twi doctor` reports image-related readiness through terminal color hints, Kitty/Ghostty environment signals, cache writability, selected image/avatar/emoji/emote modes, the resolved image capability state, and the live image-stack state.
 - `internal/render.KittyRenderer` can produce fixed-cell Kitty graphics output for prepared cached PNG assets in supported terminals.
+- Live startup installs the concrete resolver, public downloader, disk cache, emoji provider, Twitch metadata clients, PNG preparer, and Kitty renderer when config, credentials, cache, and terminal capability checks allow it.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
-- Known limitation: default live startup does not yet install the concrete asset resolver/downloader/preparer/renderer stack, and Kitty/Ghostty inline drawing still needs manual terminal validation in a compatible terminal.
+- Known limitation: Kitty/Ghostty inline drawing still needs manual terminal validation in a compatible terminal.
 
 ## Support Tiers
 
@@ -39,25 +40,25 @@ Tier 3:
 
 Overall status: partial. The renderer, cache boundary, public image downloader,
 bounded image decode/cell preparation, fixed-width prepared cell substitution,
-capability decisions, and visible-row asset event path are implemented. Default
-live resolver/downloader/preparer/renderer wiring and manual Kitty/Ghostty
-validation are still planned.
+capability decisions, visible-row asset event path, and default live
+resolver/downloader/preparer/renderer wiring are implemented. Manual
+Kitty/Ghostty validation is still planned.
 
 Avatars:
 
 - Current: resolve Twitch user `profile_image_url` metadata through Helix Get Users for visible live-chat authors when `avatar_mode = "image"` and Twitch API credentials are configured.
 - Current: cache profile metadata by user ID and login and keep initials/user-chip fallbacks stable.
 - Current: downloaded PNG/JPEG/GIF avatar assets can be normalized to fixed-width PNG cells through the async image preparation/render boundaries.
-- Partial: app asset events can substitute prepared fixed-width cells when an asset resolver, preparer, and renderer are installed.
-- Planned: default live startup wiring and manual Kitty/Ghostty validation.
+- Current: live startup installs avatar asset events when `avatar_mode = "image"`, Twitch API credentials are present, the asset cache is writable, and Kitty-compatible capability is available.
+- Planned: manual Kitty/Ghostty validation.
 
 Twitch emotes:
 
 - Current: parse emote positions from Twitch IRC tags and preserve compact fallback tokens.
 - Current: resolve Twitch emote metadata and CDN template URLs into cached public image refs.
 - Current: downloaded PNG/JPEG/GIF emote assets can be normalized to fixed-width PNG cells through the async image preparation/render boundaries.
-- Partial: prepared cells can replace fallback tokens where supported and available.
-- Planned: default live startup wiring and manual Kitty/Ghostty validation.
+- Current: prepared cells can replace fallback tokens where supported and available; missing Twitch API credentials keep exact emote tokens.
+- Planned: manual Kitty/Ghostty validation.
 
 Standard emoji:
 
@@ -65,14 +66,15 @@ Standard emoji:
 - Current: map emoji grapheme clusters to provider-neutral, URL-free asset keys.
 - Current: resolve standard emoji asset keys to public provider metadata with URL-free cache keys.
 - Current: downloaded PNG/JPEG/GIF emoji assets can be normalized to fixed-width PNG cells through the async image preparation/render boundaries.
-- Planned: default live startup wiring and manual Kitty/Ghostty validation.
+- Current: live startup can install the configured emoji provider without Twitch API credentials when the provider config, cache, and terminal checks pass.
+- Planned: manual Kitty/Ghostty validation.
 
 Badges:
 
 - Current: resolve/cache Twitch badge metadata into public image refs and compact labels.
 - Current: downloaded PNG/JPEG/GIF badge assets can be normalized to fixed-width PNG cells through the async image preparation/render boundaries.
-- Partial: prepared cells can replace compact labels where supported and available.
-- Planned: default live startup wiring and manual Kitty/Ghostty validation.
+- Current: prepared cells can replace compact labels where supported and available; missing Twitch API credentials keep compact badge labels.
+- Planned: manual Kitty/Ghostty validation.
 
 ## Capability Decisions
 
@@ -94,9 +96,18 @@ Resolved states:
   or writable-cache signals; fallbacks remain available.
 
 Inline image drawing has a bounded decode/preparation step, renderer core,
-row-level substitution point, and Bubble Tea asset-event path for visible rows.
-Default live resolver wiring and manual Kitty/Ghostty validation are still
-planned.
+row-level substitution point, Bubble Tea asset-event path for visible rows, and
+default live resolver wiring. Manual Kitty/Ghostty validation is still planned.
+
+## Live Image Stack States
+
+`twi doctor` reports a separate `image stack` line for live startup readiness:
+
+- `enabled`: config requests image-capable output, the terminal has a Kitty/Ghostty signal, the cache is writable, and every requested asset kind has required metadata dependencies.
+- `disabled`: image mode or Kitty images are disabled by config; text, initials, badge labels, emote tokens, and Unicode emoji stay active.
+- `unsupported`: `image_mode = "auto"` found no Kitty/Ghostty graphics signal; no live image asset events are installed.
+- `degraded`: part of the stack can run, such as emoji images without Twitch API credentials, or the terminal lacks true-color hints; fallbacks remain active for unavailable image assets.
+- `missing-dependency`: no requested image asset kind can run because a required dependency is absent, such as `TWI_TWITCH_CLIENT_ID` for Twitch-backed avatars, badges, or emotes, an OAuth token for Twitch API metadata, a valid emoji provider template, or a writable asset cache.
 
 ## Configuration
 
@@ -131,6 +142,7 @@ placeholders before cells are available.
 - Reserve stable layout width for image placeholders so late image loads do not shift chat rows.
 - Keep fallbacks visually intentional, not raw debug labels.
 - Preserve Unicode and emoji text when images are unavailable.
+- Scope prepared terminal cells by safe room/channel identity when channel context is present; never include source URLs, local paths, OAuth tokens, client secrets, or credential-bearing values in prepared-cell keys.
 - Treat unsupported media, corrupt bytes, unsafe image paths/keys, and oversized images as stable fallback states for the same downloaded record and payload identity; retry transient resolver, downloader, cache, filesystem, context failures, and changed downloaded bytes.
 - Keep typed-in reveal animation fragment-aware so it does not split grapheme clusters, ANSI styles, emote tokens, emoji, or image placeholders.
 - Degrade to reduced or off animation if rendering falls behind.

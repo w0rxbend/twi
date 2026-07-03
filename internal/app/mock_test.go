@@ -1534,6 +1534,110 @@ func TestLiveShellAssetEventsRefreshVisibleRows(t *testing.T) {
 	}
 }
 
+func TestLiveShellPreparedImageCellsAreScopedByChannelIdentity(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+
+	ref := twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"}
+	alphaKey, ok := render.ImageCellKeyForRefInChannel(ref, "100", "alpha")
+	if !ok {
+		t.Fatal("alpha image cell key rejected unexpectedly")
+	}
+	betaKey, ok := render.ImageCellKeyForRefInChannel(ref, "200", "beta")
+	if !ok {
+		t.Fatal("beta image cell key rejected unexpectedly")
+	}
+	if alphaKey == betaKey || alphaKey.ChannelIdentity == "" || betaKey.ChannelIdentity == "" {
+		t.Fatalf("channel-scoped keys not distinct: alpha=%#v beta=%#v", alphaKey, betaKey)
+	}
+
+	resolver := &appFakeAssetResolver{}
+	renderer := &appFakeImageRenderer{cells: map[render.ImageCellKey]string{
+		alphaKey: "ALPHA ",
+		betaKey:  "BETA  ",
+	}}
+	model := newLiveShellModelWithClockAndOptions("alpha", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImageRenderer: renderer,
+	})
+
+	alphaMessage := assetEventMessage("alpha-asset", "25", "😀")
+	alphaMessage.Channel = "alpha"
+	alphaMessage.ChannelID = "100"
+	alphaMessage.Badges = nil
+	betaMessage := assetEventMessage("beta-asset", "25", "😀")
+	betaMessage.Channel = "beta"
+	betaMessage.ChannelID = "200"
+	betaMessage.Badges = nil
+	model.channels.ensure("alpha").messages = []twitch.ChatMessage{alphaMessage}
+	model.channels.ensure("beta").messages = []twitch.ChatMessage{betaMessage}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("alpha assetLookupTick returned nil command, want resolver command")
+	}
+	alphaBatch := cmd().(assetPreparedBatchMsg)
+	if len(resolver.last) != 1 {
+		t.Fatalf("alpha asset requests = %d, want 1: %#v", len(resolver.last), resolver.last)
+	}
+	if got, want := resolver.last[0].ChannelID, "100"; got != want {
+		t.Fatalf("alpha request ChannelID = %q, want %q", got, want)
+	}
+	if got, want := resolver.last[0].Channel, "alpha"; got != want {
+		t.Fatalf("alpha request Channel = %q, want %q", got, want)
+	}
+	if !strings.Contains(resolver.last[0].ID, "room:100") {
+		t.Fatalf("alpha request ID = %q, want room identity", resolver.last[0].ID)
+	}
+	updated, _ = model.Update(alphaBatch)
+	model = updated.(mockShellModel)
+	if view := model.View(); !strings.Contains(view, "ALPHA") || strings.Contains(view, "BETA") {
+		t.Fatalf("alpha view used wrong prepared cell:\n%s", view)
+	}
+
+	if !model.channels.setActive("beta") {
+		t.Fatal("failed to switch active channel to beta")
+	}
+	model.clampScroll()
+	if view := model.View(); strings.Contains(view, "ALPHA") || strings.Contains(view, "BETA") || !strings.Contains(view, "Kappa") {
+		t.Fatalf("beta view reused a prepared cell before beta render; want fallback only:\n%s", view)
+	}
+
+	resolver.last = nil
+	updated, cmd = model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("beta assetLookupTick returned nil command, want resolver command")
+	}
+	betaBatch := cmd().(assetPreparedBatchMsg)
+	if len(resolver.last) != 1 {
+		t.Fatalf("beta asset requests = %d, want 1: %#v", len(resolver.last), resolver.last)
+	}
+	if got, want := resolver.last[0].ChannelID, "200"; got != want {
+		t.Fatalf("beta request ChannelID = %q, want %q", got, want)
+	}
+	if !strings.Contains(resolver.last[0].ID, "room:200") {
+		t.Fatalf("beta request ID = %q, want room identity", resolver.last[0].ID)
+	}
+	updated, _ = model.Update(betaBatch)
+	model = updated.(mockShellModel)
+	if view := model.View(); !strings.Contains(view, "BETA") || strings.Contains(view, "ALPHA") {
+		t.Fatalf("beta view used wrong prepared cell:\n%s", view)
+	}
+
+	keyState := fmt.Sprintf("%#v", model.imageCells)
+	for _, notWant := range []string{"https://", "access_token", "refresh_token", "client_secret", "/tmp/", "../", `C:\`} {
+		if strings.Contains(keyState, notWant) {
+			t.Fatalf("prepared image cell keys leaked unsafe text %q: %s", notWant, keyState)
+		}
+	}
+}
+
 func TestLiveShellAssetEventsPrepareDownloadedRecordBeforeRendering(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.ImageMode = "normal"
@@ -1870,13 +1974,13 @@ func TestAssetPermanentFailureKeyRejectsPathShapedState(t *testing.T) {
 		if key, ok := assetPermanentFailureKeyForEvent(event, render.ImageSpec{Ref: ref, WidthCells: 6, HeightCells: 1, Fallback: "Kappa"}); ok {
 			t.Fatalf("path-shaped asset ref %#v produced failure key %#v, want rejected", ref, key)
 		}
-		if id := assetRequestID(ref, "example"); id != "" {
+		if id := assetRequestID(ref, "", "example"); id != "" {
 			t.Fatalf("path-shaped asset ref %#v produced request ID %q, want empty", ref, id)
 		}
 	}
 
 	safeBadge := twitch.AssetRef{Kind: assets.KindBadge, ID: "moderator/1"}
-	if id := assetRequestID(safeBadge, "example"); id == "" {
+	if id := assetRequestID(safeBadge, "", "example"); id == "" {
 		t.Fatalf("safe badge ref %#v produced empty request ID", safeBadge)
 	}
 
@@ -1979,12 +2083,12 @@ func TestImageCellKeyFromAssetEventRejectsUnsafeRecordKeyFallback(t *testing.T) 
 			Key: storage.AssetKey{Kind: assets.KindAvatar, ID: "https://cdn.example/avatar.png?access_token=secret"},
 		},
 	}
-	if key, ok := imageCellKeyFromAssetEvent(event); ok {
+	if key, ok := imageCellKeyFromAssetEvent(event, render.ImageSpec{}); ok {
 		t.Fatalf("unsafe record key fallback = %#v, true; want false", key)
 	}
 
 	event.Record.Key = storage.AssetKey{Kind: assets.KindTwitchEmote, ID: "25"}
-	key, ok := imageCellKeyFromAssetEvent(event)
+	key, ok := imageCellKeyFromAssetEvent(event, render.ImageSpec{})
 	if !ok || key != (render.ImageCellKey{Kind: assets.KindTwitchEmote, ID: "25"}) {
 		t.Fatalf("safe record key fallback = %#v ok=%v, want twitch emote key", key, ok)
 	}
@@ -2059,6 +2163,120 @@ func TestLiveShellDisabledOrUnsupportedEmojiImagesDoNotScheduleAssetWork(t *test
 				t.Fatalf("native emoji fallback missing before/after:\nbefore:\n%s\nafter:\n%s", before, after)
 			}
 		})
+	}
+}
+
+func TestLiveShellAssetKindsGateMissingCredentialFallbacks(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.AvatarMode = "image"
+	cfg.Features.EmojiMode = "image"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{}
+	renderer := &appFakeImageRenderer{cells: map[render.ImageCellKey]string{
+		{Kind: assets.KindAvatar, ID: "42"}:         "[A42]",
+		{Kind: assets.KindBadge, ID: "moderator/1"}: "BMOD  ",
+		{Kind: assets.KindTwitchEmote, ID: "25"}:    "EM25  ",
+		{Kind: assets.KindEmoji, ID: "1f600"}:       ":)",
+	}}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		AssetKinds:    map[string]bool{assets.KindEmoji: true},
+		ImageRenderer: renderer,
+	})
+	model.activeChannelState().messages = []twitch.ChatMessage{assetEventMessage("emoji-only-live-stack", "25", "😀")}
+
+	before := model.View()
+	if !strings.Contains(before, "[V]") || !strings.Contains(before, "Kappa") || !strings.Contains(before, "😀") {
+		t.Fatalf("fallbacks missing before asset work:\n%s", before)
+	}
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	requests := model.pendingAssetRequests()
+	if got, want := requestKinds(requests), []string{assets.KindEmoji}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("request kinds = %#v, want %#v; requests=%#v", got, want, requests)
+	}
+
+	updated, cmd := model.Update(assetLookupTickMsg{})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want emoji resolver command")
+	}
+	updated, _ = model.Update(cmd().(assetPreparedBatchMsg))
+	model = updated.(mockShellModel)
+	after := model.View()
+	if !strings.Contains(after, ":)") {
+		t.Fatalf("emoji cell missing after allowed asset work:\n%s", after)
+	}
+	for _, want := range []string{"[V]", "Kappa"} {
+		if !strings.Contains(after, want) {
+			t.Fatalf("fallback %q missing after missing-credential gated asset work:\n%s", want, after)
+		}
+	}
+	for _, notWant := range []string{"[A42]", "BMOD", "EM25"} {
+		if strings.Contains(after, notWant) {
+			t.Fatalf("gated asset cell %q rendered unexpectedly:\n%s", notWant, after)
+		}
+	}
+}
+
+func TestLiveShellAssetRequestsPreferChannelIDForMetadata(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImageRenderer: &appFakeImageRenderer{},
+	})
+	message := assetEventMessage("channel-id-metadata", "25", "😀")
+	message.Channel = "example"
+	message.ChannelID = "141981764"
+	message.Badges = nil
+	model.activeChannelState().messages = []twitch.ChatMessage{message}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	_, cmd := model.Update(assetLookupTickMsg{})
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want resolver command")
+	}
+	_ = cmd()
+	if len(resolver.last) != 1 {
+		t.Fatalf("asset requests = %d, want 1: %#v", len(resolver.last), resolver.last)
+	}
+	if got, want := resolver.last[0].ChannelID, "141981764"; got != want {
+		t.Fatalf("request ChannelID = %q, want room ID %q", got, want)
+	}
+}
+
+func TestLiveShellAssetRequestsDoNotUseChannelNameAsChannelID(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.ImageMode = "normal"
+	cfg.Features.EmoteMode = "image"
+	resolver := &appFakeAssetResolver{}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, NewFakeChatClient(1), nil, ClientOptions{
+		AssetResolver: resolver,
+		ImageRenderer: &appFakeImageRenderer{},
+	})
+	message := assetEventMessage("missing-room-id-metadata", "25", "Kappa")
+	message.Channel = "example"
+	message.ChannelID = ""
+	message.Badges = nil
+	model.activeChannelState().messages = []twitch.ChatMessage{message}
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 96, Height: 12})
+	model = updated.(mockShellModel)
+	_, cmd := model.Update(assetLookupTickMsg{})
+	if cmd == nil {
+		t.Fatal("assetLookupTick returned nil command, want resolver command")
+	}
+	_ = cmd()
+	if len(resolver.last) != 1 {
+		t.Fatalf("asset requests = %d, want 1: %#v", len(resolver.last), resolver.last)
+	}
+	if got := resolver.last[0].ChannelID; got != "" {
+		t.Fatalf("request ChannelID = %q, want empty when room ID is unavailable", got)
 	}
 }
 
@@ -2885,8 +3103,12 @@ func (f *appFakeImageRenderer) RenderImage(_ context.Context, asset storage.Asse
 	if f.err != nil {
 		return render.ImageCell{}, f.err
 	}
-	key, _ := render.ImageCellKeyForRef(spec.Ref)
+	key, _ := render.ImageCellKeyForRefInChannel(spec.Ref, spec.ChannelID, spec.Channel)
 	text := f.cells[key]
+	if text == "" {
+		key, _ := render.ImageCellKeyForRef(spec.Ref)
+		text = f.cells[key]
+	}
 	if text == "" {
 		text = spec.Fallback
 	}
@@ -2932,6 +3154,7 @@ func preparedAssetForTest(ref twitch.AssetRef, text string, width int) assetPrep
 				WidthCells: width,
 			},
 		},
+		spec: render.ImageSpec{Ref: ref, Channel: "example", WidthCells: width, HeightCells: 1},
 		cell: render.ImageCell{Text: fitLine(text, width), WidthCells: width},
 	}
 }

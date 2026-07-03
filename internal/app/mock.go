@@ -43,6 +43,7 @@ type AvatarResolver interface {
 type ClientOptions struct {
 	AvatarResolver AvatarResolver
 	AssetResolver  assets.EventResolver
+	AssetKinds     map[string]bool
 	ImagePreparer  render.ImagePreparer
 	ImageRenderer  render.ImageRenderer
 }
@@ -64,6 +65,7 @@ type mockShellModel struct {
 	client                ChatClient
 	avatarResolver        AvatarResolver
 	assetResolver         assets.EventResolver
+	assetKinds            map[string]bool
 	imagePreparer         render.ImagePreparer
 	imageRenderer         render.ImageRenderer
 	incoming              []twitch.ChatMessage
@@ -179,6 +181,7 @@ type assetPreparedBatchMsg struct {
 type assetPermanentFailureKey struct {
 	AssetKind             string
 	AssetID               string
+	ChannelIdentity       string
 	RecordKind            string
 	RecordID              string
 	RecordUnsafe          bool
@@ -350,6 +353,7 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		client:                client,
 		avatarResolver:        opts.AvatarResolver,
 		assetResolver:         opts.AssetResolver,
+		assetKinds:            cloneAssetKinds(opts.AssetKinds),
 		imagePreparer:         opts.ImagePreparer,
 		imageRenderer:         opts.ImageRenderer,
 		avatarRequested:       make(map[string]bool),
@@ -1688,6 +1692,8 @@ func imageSpecFromAssetRequest(request assets.Request, event assets.Event) rende
 	}
 	return render.ImageSpec{
 		Ref:         ref,
+		Channel:     request.Channel,
+		ChannelID:   request.ChannelID,
 		WidthCells:  request.WidthCells,
 		HeightCells: request.HeightCells,
 		Fallback:    request.Fallback,
@@ -1751,7 +1757,7 @@ func (m mockShellModel) assetRequestForFragment(message twitch.ChatMessage, frag
 	if !m.assetFragmentEnabled(fragment) {
 		return assets.Request{}, false
 	}
-	key, ok := render.ImageCellKeyForRef(fragment.Ref)
+	key, ok := render.ImageCellKeyForRefInChannel(fragment.Ref, message.ChannelID, message.Channel)
 	if !ok {
 		return assets.Request{}, false
 	}
@@ -1759,9 +1765,10 @@ func (m mockShellModel) assetRequestForFragment(message twitch.ChatMessage, frag
 		return assets.Request{}, false
 	}
 	request := assets.Request{
-		ID:          assetRequestID(fragment.Ref, message.Channel),
+		ID:          assetRequestID(fragment.Ref, message.ChannelID, message.Channel),
 		Ref:         fragment.Ref,
-		ChannelID:   firstNonEmptyString(message.Channel, m.activeChannelName()),
+		Channel:     message.Channel,
+		ChannelID:   strings.TrimSpace(message.ChannelID),
 		UserID:      message.AuthorID,
 		UserLogin:   message.AuthorLogin,
 		Fallback:    fragment.Text,
@@ -1775,6 +1782,9 @@ func (m mockShellModel) assetRequestForFragment(message twitch.ChatMessage, frag
 }
 
 func (m mockShellModel) assetFragmentEnabled(fragment render.Fragment) bool {
+	if !m.assetKindEnabled(fragment.Ref.Kind) {
+		return false
+	}
 	switch fragment.Kind {
 	case render.FragmentAvatar:
 		return m.imageCapability.Avatar.Active
@@ -1789,6 +1799,13 @@ func (m mockShellModel) assetFragmentEnabled(fragment render.Fragment) bool {
 	}
 }
 
+func (m mockShellModel) assetKindEnabled(kind string) bool {
+	if len(m.assetKinds) == 0 {
+		return true
+	}
+	return m.assetKinds[kind]
+}
+
 func (m mockShellModel) imageCapabilityHasActiveAssets() bool {
 	return m.imageCapability.Avatar.Active ||
 		m.imageCapability.Emoji.Active ||
@@ -1801,19 +1818,16 @@ func (m mockShellModel) visibleAssetMessages() []twitch.ChatMessage {
 	return m.visibleAvatarMessages()
 }
 
-func assetRequestID(ref twitch.AssetRef, channel string) string {
-	key, ok := render.ImageCellKeyForRef(ref)
+func assetRequestID(ref twitch.AssetRef, channelID, channel string) string {
+	key, ok := render.ImageCellKeyForRefInChannel(ref, channelID, channel)
 	if !ok {
 		return ""
 	}
-	if unsafeAssetStateIdentity(key.Kind) || unsafeAssetStateIdentity(key.ID) {
+	if unsafeAssetStateIdentity(key.Kind) || unsafeAssetStateIdentity(key.ID) || unsafeAssetStateIdentity(key.ChannelIdentity) {
 		return ""
 	}
-	if key.Kind == assets.KindBadge && strings.TrimSpace(channel) != "" {
-		if unsafeAssetStateIdentity(channel) {
-			return ""
-		}
-		return key.Kind + "\x00" + channel + "\x00" + key.ID
+	if key.ChannelIdentity != "" {
+		return key.Kind + "\x00" + key.ChannelIdentity + "\x00" + key.ID
 	}
 	return key.Kind + "\x00" + key.ID
 }
@@ -1836,7 +1850,7 @@ func (m *mockShellModel) applyAssetResults(results []assetPreparedMsg) {
 		if result.cell.Text == "" {
 			continue
 		}
-		key, ok := imageCellKeyFromAssetEvent(result.event)
+		key, ok := imageCellKeyFromAssetEvent(result.event, result.spec)
 		if !ok {
 			continue
 		}
@@ -1881,20 +1895,21 @@ func isPermanentAssetFailure(result assetPreparedMsg) bool {
 }
 
 func assetPermanentFailureKeyForEvent(event assets.Event, spec render.ImageSpec) (assetPermanentFailureKey, bool) {
-	assetKey, ok := render.ImageCellKeyForRef(spec.Ref)
+	assetKey, ok := render.ImageCellKeyForRefInChannel(spec.Ref, spec.ChannelID, spec.Channel)
 	if !ok {
-		assetKey, ok = imageCellKeyFromAssetEvent(event)
+		assetKey, ok = imageCellKeyFromAssetEvent(event, spec)
 	}
 	if !ok {
 		return assetPermanentFailureKey{}, false
 	}
-	if unsafeAssetStateIdentity(assetKey.Kind) || unsafeAssetStateIdentity(assetKey.ID) {
+	if unsafeAssetStateIdentity(assetKey.Kind) || unsafeAssetStateIdentity(assetKey.ID) || unsafeAssetStateIdentity(assetKey.ChannelIdentity) {
 		return assetPermanentFailureKey{}, false
 	}
 
 	key := assetPermanentFailureKey{
 		AssetKind:            assetKey.Kind,
 		AssetID:              assetKey.ID,
+		ChannelIdentity:      assetKey.ChannelIdentity,
 		RecordWidthCells:     event.Record.WidthCells,
 		RecordHeightCells:    event.Record.HeightCells,
 		FetchedAtUnixNano:    unixNanoOrZero(event.Record.FetchedAt),
@@ -2041,6 +2056,17 @@ func cloneAssetPermanentFailures(src map[assetPermanentFailureKey]struct{}) map[
 	return dst
 }
 
+func cloneAssetKinds(src map[string]bool) map[string]bool {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]bool, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
+}
+
 func (m *mockShellModel) clearAssetRequestRetry(id string) {
 	if id == "" || m.assetRetryAfter == nil {
 		return
@@ -2082,12 +2108,12 @@ func (m *mockShellModel) forgetAssetRequest(id string) {
 	m.clearAssetRequestRetry(id)
 }
 
-func imageCellKeyFromAssetEvent(event assets.Event) (render.ImageCellKey, bool) {
-	if key, ok := render.ImageCellKeyForRef(event.Ref); ok {
+func imageCellKeyFromAssetEvent(event assets.Event, spec render.ImageSpec) (render.ImageCellKey, bool) {
+	if key, ok := render.ImageCellKeyForRefInChannel(event.Ref, spec.ChannelID, spec.Channel); ok {
 		return key, true
 	}
 	if event.Record.Key.Kind != "" && event.Record.Key.ID != "" {
-		return render.ImageCellKeyForRef(twitch.AssetRef{Kind: event.Record.Key.Kind, ID: event.Record.Key.ID})
+		return render.ImageCellKeyForRefInChannel(twitch.AssetRef{Kind: event.Record.Key.Kind, ID: event.Record.Key.ID}, spec.ChannelID, spec.Channel)
 	}
 	return render.ImageCellKey{}, false
 }

@@ -176,4 +176,4 @@ go build -o bin/twi ./cmd/twi
 
 Twitch IRC connection status is connection-level: Multi-channel live mode joins each configured channel, but Twitch IRC connect, reconnect, and disconnect callbacks are not independent per-channel events.
 
-Images look like text: Expected in the default path. Inline terminal image plumbing is partial, but default live resolver wiring and manual Kitty/Ghostty validation are still planned; current rendering keeps stable text, initials, Unicode, badge, and emote-token fallbacks.
+Images look like text: Expected when image mode is disabled, unsupported by the terminal, degraded, missing dependencies, still loading, or failed. Inline terminal image plumbing is partial and live resolver wiring is current, but manual Kitty/Ghostty validation is still planned; current rendering keeps stable text, initials, Unicode, badge, and emote-token fallbacks.

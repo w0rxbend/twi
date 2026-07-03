@@ -275,6 +275,7 @@ func messageFromUserNotice(notice twitch.UserNotice) twitch.ChatMessage {
 	return twitch.ChatMessage{
 		ID:          notice.ID,
 		Channel:     notice.Channel,
+		ChannelID:   notice.RoomID,
 		Timestamp:   notice.Timestamp,
 		AuthorLogin: notice.AuthorLogin,
 		AuthorID:    notice.AuthorID,

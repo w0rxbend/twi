@@ -157,6 +157,62 @@ func TestAvatarBatchResolverRefreshesExpiredCache(t *testing.T) {
 	}
 }
 
+func TestAvatarBatchResolverPreservesDownloadedAvatarCacheData(t *testing.T) {
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	cache := storage.NewMemoryAssetCache()
+	if err := cache.PutAsset(context.Background(), storage.AssetRecord{
+		Key:             storage.AssetKey{Kind: KindAvatar, ID: "42"},
+		Path:            "cache/avatar-42.png",
+		SourceURL:       "https://static-cdn.example/viewer.png",
+		PayloadIdentity: "sha256:0000000000000000000000000000000000000000000000000000000000000042",
+		MediaType:       "image/png",
+		WidthCells:      4,
+		HeightCells:     2,
+		FetchedAt:       now.Add(-2 * time.Hour),
+		ExpiresAt:       now.Add(-time.Second),
+	}); err != nil {
+		t.Fatalf("PutAsset returned error: %v", err)
+	}
+	lookup := &fakeAvatarLookup{users: []twitch.UserIdentity{{
+		UserID:          "42",
+		Login:           "viewer",
+		ProfileImageURL: "https://static-cdn.example/viewer.png",
+	}}}
+	resolver := &AvatarBatchResolver{
+		Lookup: lookup,
+		Cache:  cache,
+		Now:    func() time.Time { return now },
+		TTL:    time.Hour,
+	}
+
+	results, err := resolver.ResolveAvatars(context.Background(), []AvatarRequest{{UserID: "42", UserLogin: "viewer"}})
+	if err != nil {
+		t.Fatalf("ResolveAvatars error = %v", err)
+	}
+	if lookup.calls != 1 {
+		t.Fatalf("lookup calls = %d, want refresh", lookup.calls)
+	}
+	if len(results) != 1 || results[0].AvatarURL != "https://static-cdn.example/viewer.png" || results[0].FromCache {
+		t.Fatalf("results = %#v, want refreshed network metadata", results)
+	}
+	record, ok, err := cache.GetAsset(context.Background(), storage.AssetKey{Kind: KindAvatar, ID: "42"})
+	if err != nil || !ok {
+		t.Fatalf("cached avatar ok=%v err=%v, want hit nil", ok, err)
+	}
+	if got, want := record.Path, "cache/avatar-42.png"; got != want {
+		t.Fatalf("cached Path = %q, want preserved downloaded path %q", got, want)
+	}
+	if got, want := record.PayloadIdentity, "sha256:0000000000000000000000000000000000000000000000000000000000000042"; got != want {
+		t.Fatalf("cached PayloadIdentity = %q, want %q", got, want)
+	}
+	if record.WidthCells != 4 || record.HeightCells != 2 {
+		t.Fatalf("cached dimensions = %dx%d, want 4x2", record.WidthCells, record.HeightCells)
+	}
+	if !record.ExpiresAt.Equal(now.Add(time.Hour)) {
+		t.Fatalf("cached ExpiresAt = %s, want refreshed %s", record.ExpiresAt, now.Add(time.Hour))
+	}
+}
+
 func TestAvatarBatchResolverReportsMissingUsers(t *testing.T) {
 	lookup := &fakeAvatarLookup{users: []twitch.UserIdentity{{
 		UserID:          "42",

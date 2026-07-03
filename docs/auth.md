@@ -10,7 +10,7 @@ This document describes the authentication model for `twi`. It covers the curren
 - Multi-channel live IRC read/send is partially shipped for configured credentials, including composer sends, selected-message replies, and `/me` actions.
 - Multi-channel UX is partially shipped: the keyboard-first sidebar, command palette, optional mouse controls, and selected-message inspect panel are current behavior.
 - `twi doctor` diagnostics are partially shipped; Twitch OAuth validation is wired into doctor and reports identity, expiry, required IRC scopes, username mismatch, and refresh availability without printing credential values.
-- Later milestones may add interactive OAuth, setup wizard, secure credential storage, default live image resolver wiring, and richer EventSub/API chat support.
+- Later milestones may add interactive OAuth, setup wizard, secure credential storage, and richer EventSub/API chat support.
 
 ## MVP Credential Model
 

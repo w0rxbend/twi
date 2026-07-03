@@ -435,6 +435,113 @@ func TestDoctorReportsImageCapabilityStates(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsImageStackStates(t *testing.T) {
+	imageFeatures := config.Default().Features
+	imageFeatures.ImageMode = "normal"
+	imageFeatures.AvatarMode = "image"
+	imageFeatures.EmojiMode = "image"
+	imageFeatures.EmoteMode = "image"
+
+	for _, tt := range []struct {
+		name       string
+		features   config.FeatureConfig
+		twitch     config.TwitchConfig
+		environ    []string
+		wantStatus DoctorStatus
+		wantDetail []string
+	}{
+		{
+			name:     "enabled",
+			features: imageFeatures,
+			twitch: config.TwitchConfig{
+				OAuthToken: "oauth:fixture-token",
+				ClientID:   "fixture-client",
+			},
+			environ:    []string{"TERM=xterm-kitty", "COLORTERM=truecolor", "KITTY_WINDOW_ID=42"},
+			wantStatus: DoctorStatusOK,
+			wantDetail: []string{"enabled", "supported=avatar,badge,twitch_emote,emoji", "cache=writable"},
+		},
+		{
+			name: "disabled",
+			features: func() config.FeatureConfig {
+				features := imageFeatures
+				features.ImageMode = "off"
+				return features
+			}(),
+			environ:    []string{"TERM=xterm-kitty", "COLORTERM=truecolor", "KITTY_WINDOW_ID=42"},
+			wantStatus: DoctorStatusOK,
+			wantDetail: []string{"disabled", "image_mode=off", "text fallbacks active"},
+		},
+		{
+			name: "unsupported",
+			features: func() config.FeatureConfig {
+				features := imageFeatures
+				features.ImageMode = "auto"
+				return features
+			}(),
+			twitch: config.TwitchConfig{
+				OAuthToken: "oauth:fixture-token",
+				ClientID:   "fixture-client",
+			},
+			environ:    []string{"TERM=xterm-256color", "COLORTERM=truecolor"},
+			wantStatus: DoctorStatusWarn,
+			wantDetail: []string{"unsupported", "no Kitty/Ghostty", "text fallbacks active"},
+		},
+		{
+			name: "missing dependency",
+			features: func() config.FeatureConfig {
+				features := config.Default().Features
+				features.ImageMode = "normal"
+				features.EmoteMode = "image"
+				return features
+			}(),
+			twitch: config.TwitchConfig{
+				OAuthToken: "oauth:fixture-token",
+			},
+			environ:    []string{"TERM=xterm-kitty", "COLORTERM=truecolor", "KITTY_WINDOW_ID=42"},
+			wantStatus: DoctorStatusWarn,
+			wantDetail: []string{"missing-dependency", "TWI_TWITCH_CLIENT_ID", "text fallbacks active"},
+		},
+		{
+			name:     "degraded ready",
+			features: imageFeatures,
+			twitch: config.TwitchConfig{
+				OAuthToken: "oauth:fixture-token",
+				ClientID:   "fixture-client",
+			},
+			environ:    []string{"TERM=xterm-kitty", "KITTY_WINDOW_ID=42"},
+			wantStatus: DoctorStatusWarn,
+			wantDetail: []string{"degraded", "supported=avatar,badge,twitch_emote,emoji", "no true-color hint", "fallbacks remain available"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Path = filepath.Join(t.TempDir(), "missing.toml")
+			cfg.Features = tt.features
+			cfg.Twitch = tt.twitch
+
+			report := DoctorWithOptions(context.Background(), cfg, DoctorOptions{
+				Environ:           tt.environ,
+				CacheDir:          filepath.Join(t.TempDir(), "cache"),
+				ReachabilityProbe: func(context.Context) error { return nil },
+			})
+
+			check := doctorCheck(t, report, "image stack")
+			if check.Status != tt.wantStatus {
+				t.Fatalf("image stack status = %q, want %q; detail=%q", check.Status, tt.wantStatus, check.Detail)
+			}
+			for _, want := range tt.wantDetail {
+				if !strings.Contains(check.Detail, want) {
+					t.Fatalf("image stack detail = %q, want it to contain %q", check.Detail, want)
+				}
+			}
+			if strings.Contains(check.Detail, "oauth:fixture-token") {
+				t.Fatalf("image stack detail leaked token: %q", check.Detail)
+			}
+		})
+	}
+}
+
 func TestDoctorWarnsOnUnknownEmojiProviderEvenWithTemplate(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.EmojiProvider = "surprise"

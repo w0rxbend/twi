@@ -5,6 +5,7 @@ import "time"
 type ChatMessage struct {
 	ID          string
 	Channel     string
+	ChannelID   string
 	Timestamp   time.Time
 	AuthorLogin string
 	AuthorID    string

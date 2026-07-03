@@ -15,7 +15,7 @@ This document describes the configuration model for `twi`. The implemented parse
   signals, and cache directory writability without printing token or client
   secret values.
 - Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
-- Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, and visible-row asset event scheduling exist; default live resolver/downloader/preparer/renderer wiring and manual Kitty/Ghostty validation remain planned.
+- Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned.
 - `twi login`, setup wizard, and secure credential storage are planned.
 - Nested TOML tables are not implemented yet; keep config files flat.
 
@@ -116,7 +116,7 @@ Animation modes:
 - `fast`
 - `expressive`
 
-The current parser accepts these values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; unknown animation values are treated as `fast` by the shell. `avatar_mode = "image"` enables batched live avatar URL metadata lookup when Twitch API credentials are present. `emoji_provider = "twemoji"` uses the built-in pinned public Twemoji PNG template; `emoji_provider = "custom"` requires `emoji_url_template` with `{id}`. The Kitty renderer core exists behind the internal renderer boundary, and chat rows can substitute prepared image cells while preserving fallback text. Image, emoji, emote, and Kitty settings currently drive fallback rendering, diagnostics, renderer capability decisions, and visible-row asset event scheduling.
+The current parser accepts these values as strings. Animation mode currently supports `off`, `reduced`, and `fast`; unknown animation values are treated as `fast` by the shell. `avatar_mode = "image"` enables batched live avatar URL metadata lookup when Twitch API credentials are present. `emoji_provider = "twemoji"` uses the built-in pinned public Twemoji PNG template; `emoji_provider = "custom"` requires `emoji_url_template` with `{id}`. The Kitty renderer core exists behind the internal renderer boundary, and chat rows can substitute prepared image cells while preserving fallback text. Image, emoji, emote, and Kitty settings drive fallback rendering, diagnostics, renderer capability decisions, visible-row asset event scheduling, and live image-stack installation.
 
 ## Example Config
 
@@ -154,12 +154,14 @@ twi config path
 twi doctor
 ```
 
-`twi login`, setup wizard, secure credential storage, default live image
-resolver wiring, and manual Kitty/Ghostty validation are still planned. Twitch
-IRC chat is current when username, OAuth token, and at least one channel are
-configured. Multi-channel sidebar, command palette, selected-message inspect,
-and optional mouse controls are current app behavior. Future flags for auth and
-mode settings should follow the precedence rules above.
+`twi login`, setup wizard, secure credential storage, and manual Kitty/Ghostty
+validation are still planned. Twitch IRC chat is current when username, OAuth
+token, and at least one channel are configured. Live image startup is current
+for enabled asset kinds when config, credentials, cache writability, and
+terminal capability allow it. Multi-channel sidebar, command palette,
+selected-message inspect, and optional mouse controls are current app behavior.
+Future flags for auth and mode settings should follow the precedence rules
+above.
 
 ## Redacted Config Output
 
@@ -193,6 +195,8 @@ The current diagnostics include:
 - Terminal, true-color/256-color, configured mouse support, and mouse
   capability hints from environment variables.
 - Kitty/Ghostty graphics signals and the active image fallback state.
+- Live image-stack readiness: enabled, disabled, unsupported, degraded, or
+  missing dependency.
 - Cache directory writability using a single fixed-content probe file that is
   removed immediately, plus asset-cache pruning status for expired entries and
   the default size budget.
@@ -214,6 +218,8 @@ Current behavior:
 - Load channel names from `--channel`, `TWI_DEFAULT_CHANNELS`, or config.
 - Load animation mode.
 - Load basic image fallback settings.
+- Install live image asset services for allowed avatar, badge, emote, and emoji
+  kinds when config, credentials, cache, and terminal checks pass.
 - Redact secrets in all config output.
 - Report effective diagnostics through `twi doctor` without requiring
   credentials.

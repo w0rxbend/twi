@@ -9,15 +9,14 @@ Progress as of the initial swarm pass:
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
 - Current status labels: mock chat is ready; multi-channel live IRC read/send,
   multi-channel UX, diagnostics, and inline image plumbing are partial; `twi
-  login`, setup wizard, secure credential storage, default live image resolver
-  wiring, and manual Kitty/Ghostty image validation are planned.
+  login`, setup wizard, secure credential storage, and manual Kitty/Ghostty
+  image validation are planned.
 - Credential rule: Twitch username/token values currently come from
   environment variables or the flat config file; CLI overrides cover channel
   and config path.
-- Remaining near-term work: CI coverage, emoji provider metadata, image
-  decode/cell preparation, default live asset wiring, login/setup, secure
-  credential storage, reconnect hardening, filters, debug logging, release
-  packaging, and manual terminal validation.
+- Remaining near-term work: login/setup, secure credential storage, reconnect
+  hardening, filters, debug logging, release packaging, and manual terminal
+  validation.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.

@@ -130,6 +130,8 @@ func DefaultOptions(width int) Options {
 // produced by this package.
 type ImageSpec struct {
 	Ref         twitch.AssetRef
+	Channel     string
+	ChannelID   string
 	WidthCells  int
 	HeightCells int
 	Fallback    string
@@ -158,8 +160,9 @@ type ImagePreparer interface {
 // identity. URLs are intentionally excluded so credential-bearing request data
 // cannot become part of chat row state.
 type ImageCellKey struct {
-	Kind string
-	ID   string
+	Kind            string
+	ID              string
+	ChannelIdentity string
 }
 
 // ImageCellKeyForRef returns the row-generation key for an asset ref.
@@ -169,10 +172,44 @@ func ImageCellKeyForRef(ref twitch.AssetRef) (ImageCellKey, bool) {
 	if kind == "" || id == "" {
 		return ImageCellKey{}, false
 	}
-	if containsUnsafeImageIdentity(kind) || containsUnsafeImageIdentity(id) {
+	if containsUnsafeImageIdentity(kind) || containsUnsafeImageIdentity(id) ||
+		looksLikeImageIdentityPath(kind) || looksLikeImageIdentityPath(id) {
 		return ImageCellKey{}, false
 	}
 	return ImageCellKey{Kind: kind, ID: id}, true
+}
+
+// ImageCellKeyForRefInChannel returns a prepared-cell key scoped to a safe
+// channel identity when room or channel context is available.
+func ImageCellKeyForRefInChannel(ref twitch.AssetRef, channelID, channel string) (ImageCellKey, bool) {
+	key, ok := ImageCellKeyForRef(ref)
+	if !ok {
+		return ImageCellKey{}, false
+	}
+	identity, scoped, safe := ImageCellChannelIdentity(channelID, channel)
+	if !safe {
+		return ImageCellKey{}, false
+	}
+	if scoped {
+		key.ChannelIdentity = identity
+	}
+	return key, true
+}
+
+// ImageCellChannelIdentity returns the safe render-only channel identity used
+// for prepared image cells. Room IDs are preferred over channel names.
+func ImageCellChannelIdentity(channelID, channel string) (identity string, scoped bool, safe bool) {
+	hasContext := strings.TrimSpace(channelID) != "" || strings.TrimSpace(channel) != ""
+	if id := strings.TrimSpace(channelID); id != "" && safeImageChannelToken(id) {
+		return "room:" + strings.ToLower(id), true, true
+	}
+	if name := normalizeImageChannelName(channel); name != "" && safeImageChannelToken(name) {
+		return "channel:" + name, true, true
+	}
+	if hasContext {
+		return "", false, false
+	}
+	return "", false, true
 }
 
 func containsUnsafeImageIdentity(value string) bool {
@@ -194,6 +231,64 @@ func containsUnsafeImageIdentity(value string) bool {
 	for _, marker := range markers {
 		if strings.Contains(lower, marker) {
 			return true
+		}
+	}
+	return false
+}
+
+func normalizeImageChannelName(channel string) string {
+	channel = strings.TrimSpace(channel)
+	channel = strings.TrimPrefix(channel, "#")
+	return strings.ToLower(channel)
+}
+
+func safeImageChannelToken(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || containsUnsafeImageIdentity(value) || looksLikeImageIdentityPath(value) {
+		return false
+	}
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' {
+			continue
+		}
+		if r >= 'A' && r <= 'Z' {
+			continue
+		}
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r == '_' || r == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func looksLikeImageIdentityPath(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, "~/") || strings.HasPrefix(value, "./") || value == "." || value == ".." {
+		return true
+	}
+	if strings.Contains(value, "\\") {
+		return true
+	}
+	if len(value) >= 3 && value[1] == ':' && ((value[2] == '/') || (value[2] == '\\')) && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) {
+		return true
+	}
+	if strings.HasPrefix(value, "../") || strings.Contains(value, "/../") || strings.HasSuffix(value, "/..") {
+		return true
+	}
+	if strings.Contains(value, "/") {
+		last := value[strings.LastIndex(value, "/")+1:]
+		for _, suffix := range []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".bin", ".tmp"} {
+			if strings.HasSuffix(lower, suffix) || strings.HasSuffix(strings.ToLower(last), suffix) {
+				return true
+			}
 		}
 	}
 	return false
@@ -253,8 +348,8 @@ func Rows(msg twitch.ChatMessage, opts Options) []Row {
 
 	prefix := messagePrefix(msg, opts)
 	content := messageContent(msg, opts)
-	prefix = attachPreparedImageCells(prefix, opts.Assets)
-	content = attachPreparedImageCells(content, opts.Assets)
+	prefix = attachPreparedImageCells(prefix, opts.Assets, msg.ChannelID, msg.Channel)
+	content = attachPreparedImageCells(content, opts.Assets, msg.ChannelID, msg.Channel)
 	rows := wrap(prefix, content, opts.Width)
 	if len(rows) == 0 {
 		return []Row{{Fragments: prefix}}
@@ -760,14 +855,14 @@ func renderFragment(fragment Fragment) string {
 	return style.Render(fragmentFallbackText(fragment))
 }
 
-func attachPreparedImageCells(fragments []Fragment, opts AssetOptions) []Fragment {
+func attachPreparedImageCells(fragments []Fragment, opts AssetOptions, channelID, channel string) []Fragment {
 	if len(fragments) == 0 || len(opts.ImageCells) == 0 {
 		return fragments
 	}
 	out := make([]Fragment, len(fragments))
 	copy(out, fragments)
 	for i := range out {
-		key, ok := ImageCellKeyForRef(out[i].Ref)
+		key, ok := ImageCellKeyForRefInChannel(out[i].Ref, channelID, channel)
 		if !ok {
 			continue
 		}

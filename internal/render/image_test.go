@@ -405,6 +405,8 @@ func TestImageCellKeyForRefRejectsCredentialLikeIdentity(t *testing.T) {
 		{Kind: "avatar", ID: "https://cdn.example/avatar.png?access_token=secret"},
 		{Kind: "oauth:secret", ID: "user-1"},
 		{Kind: "emoji", ID: "client_secret=secret"},
+		{Kind: "emoji", ID: "/home/user/emoji.png"},
+		{Kind: "emoji", ID: `C:\Users\me\emoji.png`},
 	}
 	for _, ref := range unsafeRefs {
 		if key, ok := ImageCellKeyForRef(ref); ok {
@@ -415,6 +417,34 @@ func TestImageCellKeyForRefRejectsCredentialLikeIdentity(t *testing.T) {
 	key, ok := ImageCellKeyForRef(twitch.AssetRef{Kind: "badge", ID: "subscriber/12"})
 	if !ok || key != (ImageCellKey{Kind: "badge", ID: "subscriber/12"}) {
 		t.Fatalf("safe badge key = %#v ok=%v, want subscriber/12 true", key, ok)
+	}
+}
+
+func TestImageCellKeyForRefInChannelUsesSafeChannelIdentity(t *testing.T) {
+	ref := twitch.AssetRef{Kind: "twitch_emote", ID: "25"}
+
+	key, ok := ImageCellKeyForRefInChannel(ref, "141981764", "#Example")
+	if !ok || key != (ImageCellKey{Kind: "twitch_emote", ID: "25", ChannelIdentity: "room:141981764"}) {
+		t.Fatalf("room-scoped key = %#v ok=%v, want safe room identity", key, ok)
+	}
+
+	key, ok = ImageCellKeyForRefInChannel(ref, "", "#Example")
+	if !ok || key != (ImageCellKey{Kind: "twitch_emote", ID: "25", ChannelIdentity: "channel:example"}) {
+		t.Fatalf("channel-scoped key = %#v ok=%v, want safe channel identity", key, ok)
+	}
+
+	for _, tt := range []struct {
+		channelID string
+		channel   string
+	}{
+		{channelID: "https://cdn.example/room?access_token=secret"},
+		{channel: "../cache/channel.png"},
+		{channel: `C:\Users\me\channel`},
+		{channel: "oauth:secret"},
+	} {
+		if key, ok := ImageCellKeyForRefInChannel(ref, tt.channelID, tt.channel); ok {
+			t.Fatalf("unsafe channel context %#v produced key %#v, want rejected", tt, key)
+		}
 	}
 }
 

@@ -164,6 +164,7 @@ func (r *AvatarBatchResolver) putAvatar(ctx context.Context, req AvatarRequest, 
 		ExpiresAt: now.Add(ttl),
 	}
 	if record.Key.ID != "" {
+		record = r.preserveDownloadedAvatar(ctx, record)
 		if err := r.Cache.PutAsset(ctx, record); err != nil {
 			return err
 		}
@@ -171,11 +172,37 @@ func (r *AvatarBatchResolver) putAvatar(ctx context.Context, req AvatarRequest, 
 	loginKey := AvatarCacheKey(AvatarRequest{UserLogin: firstNonEmpty(result.UserLogin, req.UserLogin)})
 	if loginKey.ID != "" && loginKey != record.Key {
 		record.Key = loginKey
+		record = r.preserveDownloadedAvatar(ctx, record)
 		if err := r.Cache.PutAsset(ctx, record); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (r *AvatarBatchResolver) preserveDownloadedAvatar(ctx context.Context, record storage.AssetRecord) storage.AssetRecord {
+	if r == nil || r.Cache == nil || record.Key.ID == "" {
+		return record
+	}
+	existing, ok, err := r.Cache.GetAsset(ctx, record.Key)
+	if err != nil || !ok || strings.TrimSpace(existing.Path) == "" {
+		return record
+	}
+	if strings.TrimSpace(existing.SourceURL) != strings.TrimSpace(record.SourceURL) {
+		return record
+	}
+	record.Path = existing.Path
+	record.PayloadIdentity = existing.PayloadIdentity
+	if record.MediaType == "" {
+		record.MediaType = existing.MediaType
+	}
+	if record.WidthCells <= 0 {
+		record.WidthCells = existing.WidthCells
+	}
+	if record.HeightCells <= 0 {
+		record.HeightCells = existing.HeightCells
+	}
+	return record
 }
 
 func (r *AvatarBatchResolver) now() time.Time {

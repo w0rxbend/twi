@@ -46,6 +46,7 @@ func NormalizeIRCPrivateMessage(message irc.PrivateMessage) Event {
 	chat := normalizeIRCChatMessage(
 		message.ID,
 		message.Channel,
+		message.RoomID,
 		message.Time,
 		message.User,
 		message.Message,
@@ -210,7 +211,7 @@ func NormalizeIRCRawMessage(message irc.RawMessage) Event {
 	}
 }
 
-func normalizeIRCChatMessage(id, channel string, timestamp time.Time, user irc.User, text string, ircEmotes []*irc.Emote, reply *irc.Reply, action bool, tags map[string]string) ChatMessage {
+func normalizeIRCChatMessage(id, channel, channelID string, timestamp time.Time, user irc.User, text string, ircEmotes []*irc.Emote, reply *irc.Reply, action bool, tags map[string]string) ChatMessage {
 	emotes := normalizeIRCEmotes(ircEmotes)
 	messageType := MessageTypeChat
 	if action {
@@ -220,6 +221,7 @@ func normalizeIRCChatMessage(id, channel string, timestamp time.Time, user irc.U
 	return ChatMessage{
 		ID:          id,
 		Channel:     channel,
+		ChannelID:   channelID,
 		Timestamp:   timestamp,
 		AuthorLogin: user.Name,
 		AuthorID:    user.ID,

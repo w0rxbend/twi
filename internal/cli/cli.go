@@ -8,12 +8,14 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/w0rxbend/twi/internal/app"
 	"github.com/w0rxbend/twi/internal/assets"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
@@ -65,25 +67,8 @@ var newLiveChatClient = func(ctx context.Context, cfg config.Config) (app.ChatCl
 	return app.NewLiveChatClient(ctx, transport, 0)
 }
 
-var newLiveAvatarResolver = func(cfg config.Config) app.AvatarResolver {
-	if !strings.EqualFold(strings.TrimSpace(cfg.Features.AvatarMode), "image") {
-		return nil
-	}
-	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
-		return nil
-	}
-	cacheDir, err := storage.DefaultAssetCacheDir()
-	if err != nil {
-		return nil
-	}
-	return &assets.AvatarBatchResolver{
-		Lookup: twitch.NewHelixUsersClient(twitch.HelixUsersClientConfig{
-			HTTPClient: &http.Client{Timeout: 2 * time.Second},
-			ClientID:   cfg.Twitch.ClientID,
-			OAuthToken: cfg.Twitch.OAuthToken,
-		}),
-		Cache: storage.NewDiskAssetCache(cacheDir),
-	}
+var newLiveClientOptions = func(cfg config.Config) app.ClientOptions {
+	return liveClientOptions(cfg, os.Environ(), "")
 }
 
 var runLiveChat = app.RunClientWithOptions
@@ -185,11 +170,127 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "start Twitch IRC chat: %v\n", err)
 		return 1
 	}
-	if err := runLiveChat(stdout, cfg, client, app.ClientOptions{AvatarResolver: newLiveAvatarResolver(cfg)}); err != nil {
+	if err := runLiveChat(stdout, cfg, client, newLiveClientOptions(cfg)); err != nil {
 		fmt.Fprintf(stderr, "live chat: %v\n", err)
 		return 1
 	}
 	return 0
+}
+
+func liveClientOptions(cfg config.Config, environ []string, cacheDir string) app.ClientOptions {
+	decision := app.DecideLiveImageStack(cfg, environ, cacheDir)
+	if !decision.Ready {
+		return app.ClientOptions{}
+	}
+
+	cache := storage.NewDiskAssetCache(decision.CacheDir)
+	helixHTTPClient := &http.Client{Timeout: 2 * time.Second}
+	downloadHTTPClient := &http.Client{Timeout: 4 * time.Second}
+
+	var userLookup assets.AvatarLookup
+	var identityLookup assets.IdentityLookup
+	if decision.Supports(assets.KindAvatar) {
+		userLookup = twitch.NewHelixUsersClient(twitch.HelixUsersClientConfig{
+			HTTPClient: helixHTTPClient,
+			ClientID:   cfg.Twitch.ClientID,
+			OAuthToken: cfg.Twitch.OAuthToken,
+		})
+		identityLookup = liveIdentityLookup{lookup: userLookup}
+	}
+
+	var twitchMetadata assets.MetadataLookup
+	if decision.Supports(assets.KindBadge) || decision.Supports(assets.KindTwitchEmote) {
+		twitchMetadata = &assets.TwitchMetadataResolver{
+			Lookup: twitch.NewHelixChatAssetsClient(twitch.HelixChatAssetsClientConfig{
+				HTTPClient: helixHTTPClient,
+				ClientID:   cfg.Twitch.ClientID,
+				OAuthToken: cfg.Twitch.OAuthToken,
+			}),
+			Cache: cache,
+		}
+	}
+
+	var emojiMetadata assets.MetadataLookup
+	if decision.Supports(assets.KindEmoji) {
+		emojiMetadata = assets.NewEmojiMetadataProvider(assets.EmojiProviderConfig{
+			Provider:    cfg.Features.EmojiProvider,
+			URLTemplate: cfg.Features.EmojiURLTemplate,
+			Cache:       cache,
+		})
+	}
+
+	opts := app.ClientOptions{
+		AssetResolver: &assets.Resolver{
+			Identity: identityLookup,
+			Metadata: liveMetadataLookup{
+				twitch: twitchMetadata,
+				emoji:  emojiMetadata,
+			},
+			Downloader: assets.NewPublicImageDownloader(assets.PublicImageDownloaderOptions{
+				HTTPClient:  downloadHTTPClient,
+				DownloadDir: filepath.Join(decision.CacheDir, "downloads"),
+			}),
+			Cache: cache,
+		},
+		AssetKinds:    decision.SupportedKindSet(),
+		ImagePreparer: render.NewPNGImagePreparer(render.ImagePrepareOptions{PreparedDir: filepath.Join(decision.CacheDir, "prepared")}),
+		ImageRenderer: render.NewKittyRenderer(decision.Capability),
+	}
+	if userLookup != nil {
+		opts.AvatarResolver = &assets.AvatarBatchResolver{
+			Lookup: userLookup,
+			Cache:  cache,
+		}
+	}
+	return opts
+}
+
+type liveIdentityLookup struct {
+	lookup assets.AvatarLookup
+}
+
+func (l liveIdentityLookup) LookupIdentity(ctx context.Context, req assets.IdentityRequest) (assets.Identity, error) {
+	if l.lookup == nil {
+		return assets.Identity{}, nil
+	}
+	users, err := l.lookup.GetUsers(ctx, twitch.UserLookupRequest{
+		UserIDs:    []string{req.UserID},
+		UserLogins: []string{req.UserLogin},
+	})
+	if err != nil || len(users) == 0 {
+		return assets.Identity{}, err
+	}
+	user := users[0]
+	return assets.Identity{
+		UserID:      user.UserID,
+		Login:       user.Login,
+		DisplayName: user.DisplayName,
+		AvatarURL:   user.ProfileImageURL,
+	}, nil
+}
+
+type liveMetadataLookup struct {
+	twitch assets.MetadataLookup
+	emoji  assets.MetadataLookup
+}
+
+func (l liveMetadataLookup) LookupMetadata(ctx context.Context, req assets.MetadataRequest) (assets.Metadata, error) {
+	switch req.Ref.Kind {
+	case assets.KindBadge, assets.KindTwitchEmote:
+		if l.twitch != nil {
+			return l.twitch.LookupMetadata(ctx, req)
+		}
+	case assets.KindEmoji:
+		if l.emoji != nil {
+			return l.emoji.LookupMetadata(ctx, req)
+		}
+	}
+	return assets.Metadata{
+		Ref:         req.Ref,
+		URL:         req.Ref.URL,
+		WidthCells:  0,
+		HeightCells: 0,
+	}, nil
 }
 
 func validateLiveChatConfig(cfg config.Config) error {
