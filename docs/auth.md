@@ -10,7 +10,9 @@ This document describes the authentication model for `twi`. It covers the curren
 - Multi-channel live IRC read/send is partially shipped for configured credentials, including composer sends, selected-message replies, and `/me` actions.
 - Multi-channel UX is partially shipped: the keyboard-first sidebar, command palette, optional mouse controls, and selected-message inspect panel are current behavior.
 - `twi doctor` diagnostics are partially shipped; Twitch OAuth validation is wired into doctor and reports identity, expiry, required IRC scopes, username mismatch, and refresh availability without printing credential values.
-- Later milestones may add secure credential storage, setup wizard handoff, and richer EventSub/API chat support.
+- The internal credential storage boundary is defined, but no CLI command writes
+  saved credentials yet. Later milestones may wire the restrictive file
+  fallback, setup wizard handoff, and richer EventSub/API chat support.
 
 ## MVP Credential Model
 
@@ -103,8 +105,8 @@ The command requests the MVP scopes by default:
 
 The command does not persist credentials yet. A successful login proves the
 OAuth flow and validation path work, but live chat still uses the environment or
-flat config credential values documented above until secure storage is
-implemented.
+flat config credential values documented above until the credential storage
+implementation is wired.
 
 The internal login boundary now lives in `internal/auth`. It defines:
 
@@ -142,10 +144,70 @@ opening, Twitch token/validation errors, missing required scopes, client
 mismatches, context cancellation, and bounded request timeouts with redacted
 actionable errors.
 
-Future token storage should prefer:
+## Credential Storage Boundary
 
-1. OS keychain storage where practical.
-2. Local config file fallback with restrictive file permissions.
+`internal/storage` now defines the credential persistence boundary for future
+login/setup work:
+
+- `CredentialStore` with load, save, and delete methods.
+- `CredentialRecord`, the storage-owned DTO for Twitch identity, client ID,
+  access token, refresh token, token type, scopes, expiry, and update time.
+- `MemoryCredentialStore` and `FailingCredentialStore` fakes for unit tests.
+- A versioned fallback JSON record format for Twitch credentials.
+
+`CredentialRecord` stores token values as `auth.Secret`, so ordinary formatting
+and ordinary JSON encoding remain redacted. The fallback file implementation
+must use `MarshalCredentialFile` and `ParseCredentialFile`; that marshal helper
+is the explicit storage-owned reveal path for access and refresh tokens. Do not
+use it for logs, diagnostics, screenshots, snapshots, or user-facing output.
+
+No OS keychain backend is implemented today. The interface is shaped so one can
+be added later after dependency, platform, and support tradeoffs are explicit,
+but users should not expect keychain behavior from the current binary.
+
+The planned fallback is a separate local credential file under the platform
+config directory, for example:
+
+```text
+$XDG_CONFIG_HOME/twi/credentials.json
+~/.config/twi/credentials.json
+```
+
+It is not the existing flat `config.toml` file. The fallback plan requires:
+
+- credential directories created with `0700` permissions;
+- credential files created with `0600` permissions;
+- rejection of existing credential files or directories whose permissions do
+  not match those exact modes;
+- redacted errors when file data, token values, provider errors, or migration
+  failures are reported.
+
+The fallback JSON format is versioned. Version 1 records only Twitch OAuth
+credential material and safe identity metadata:
+
+```json
+{
+  "version": 1,
+  "twitch": {
+    "user_id": "12345",
+    "login": "your_twitch_login",
+    "display_name": "YourDisplayName",
+    "client_id": "your_twitch_client_id",
+    "access_token": "<stored-access-token>",
+    "refresh_token": "<stored-refresh-token>",
+    "token_type": "bearer",
+    "scopes": ["chat:read", "chat:edit"],
+    "expires_at": "2026-07-03T13:00:00Z",
+    "updated_at": "2026-07-03T12:00:00Z"
+  }
+}
+```
+
+Migration is explicit only. `twi` must not silently copy secrets from
+environment variables or the flat config file into credential storage. A future
+login or setup command may save credentials after a user action, and should then
+tell the user to remove duplicate secrets from shell profiles, `.env`, or
+`config.toml` if they no longer want those sources to take precedence.
 
 Refresh tokens should be used when available and appropriate for the selected OAuth flow.
 

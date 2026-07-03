@@ -9,12 +9,13 @@ Progress as of the initial swarm pass:
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
 - Current status labels: mock chat is ready; multi-channel live IRC read/send,
   multi-channel UX, diagnostics, inline image plumbing, and no-persistence `twi
-  login` are partial; setup wizard, secure credential storage, and manual
-  Kitty/Ghostty image validation are planned.
+  login` are partial; the credential storage boundary is defined; setup wizard
+  wiring, actual credential persistence, and manual Kitty/Ghostty image
+  validation are planned.
 - Credential rule: Twitch username/token values currently come from
   environment variables or the flat config file; CLI overrides cover channel
   and config path.
-- Remaining near-term work: setup, secure credential storage, reconnect
+- Remaining near-term work: setup, credential persistence, reconnect
   hardening, filters, debug logging, release packaging, and manual terminal
   validation.
 
@@ -524,14 +525,14 @@ Owner lane: Auth/platform engineer.
 Goal: Let users validate Twitch OAuth credentials without manually pasting
 tokens into terminal output.
 Context: The CLI now wires `twi login` to a no-persistence browser/local-callback
-flow. Secure storage and setup handoff remain separate follow-up work.
+flow. Credential persistence and setup handoff remain separate follow-up work.
 Files likely touched: `internal/cli`, `internal/config`, `internal/twitch`,
 `docs/auth.md`, `docs/quickstart.md`.
 Implementation notes: The implemented flow requests only required scopes first:
 `chat:read` and `chat:edit`, opens a browser, waits on a localhost callback, and
 does not save or print token values.
 Acceptance criteria: Login validates the resulting token and prints safe next
-steps. Secure storage remains owned by the credential storage tasks.
+steps. Credential persistence remains owned by the credential storage tasks.
 Verification: HTTP fake flow tests; CLI fake callback tests; secret redaction
 search.
 Risks: OAuth UX and Twitch app registration requirements can be confusing.
@@ -539,19 +540,23 @@ Follow-ups: Add account switch/logout.
 
 Task: Add secure credential storage.
 Owner lane: Auth/platform engineer.
-Goal: Store tokens outside plain config where supported, with explicit fallback
-behavior.
-Context: Config files and env vars work, but long-lived tokens deserve safer
-storage.
-Files likely touched: `internal/config`, `internal/cli`, `docs/auth.md`,
-`docs/config.md`.
-Implementation notes: Evaluate OS keychain support against dependency and
-maintenance cost. Keep env/config compatibility.
-Acceptance criteria: `twi login` can save credentials securely on supported
-platforms; unsupported platforms get clear fallback guidance.
-Verification: Interface fake tests; platform-gated manual checks; redaction
-tests.
-Risks: Cross-platform keychain behavior can be brittle in CI and containers.
+Goal: Store tokens through the defined credential boundary without relying on
+plain config for new saves.
+Context: Config files and env vars work, and `internal/storage` now defines
+`CredentialStore`, test fakes, a redacted record DTO, explicit file marshal
+helpers, and a restrictive fallback JSON plan.
+Files likely touched: `internal/storage`, `internal/config`, `internal/cli`,
+`docs/auth.md`, `docs/config.md`.
+Implementation notes: Implement the fallback file with exact `0700` directory
+and `0600` file permissions before advertising saved login credentials. Keep
+env/config compatibility. Do not claim OS keychain support unless a backend is
+actually implemented and platform behavior is documented.
+Acceptance criteria: `twi login` can save credentials through the boundary;
+fallback files are never group/world-accessible; config output, doctor, and
+errors stay redacted.
+Verification: Interface fake tests; fallback permission tests; redaction tests.
+Risks: Cross-platform keychain behavior can be brittle in CI and containers if
+added later.
 Follow-ups: Config migration helper.
 
 Task: Add first-run setup wizard.

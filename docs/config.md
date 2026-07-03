@@ -16,7 +16,10 @@ This document describes the configuration model for `twi`. The implemented parse
   secret values.
 - Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
 - Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned.
-- `twi login` can run the no-persistence OAuth browser/callback flow. Setup wizard and secure credential storage are planned.
+- `twi login` can run the no-persistence OAuth browser/callback flow. The
+  internal credential storage boundary and restrictive file fallback plan are
+  defined, but no command writes stored credentials yet. Setup wizard wiring is
+  planned.
 - Nested TOML tables are not implemented yet; keep config files flat.
 
 ## Precedence
@@ -50,6 +53,21 @@ $XDG_CACHE_HOME/twi
 ```
 
 Cache contents should include non-secret metadata and downloaded assets only, such as avatar, emote, badge, and emoji data.
+
+The planned credential fallback path is a separate private file in the platform
+config directory:
+
+```text
+$XDG_CONFIG_HOME/twi/credentials.json
+~/.config/twi/credentials.json
+```
+
+This fallback is not the flat `config.toml` file. When it is implemented, `twi`
+must create the containing directory with `0700` permissions and the credential
+file with `0600` permissions, and it must reject credential files or directories
+whose permissions do not match those exact modes. No OS keychain backend is
+implemented today; the storage interface only leaves room for one after platform
+support is designed and documented.
 
 ## Environment Variables
 
@@ -141,6 +159,9 @@ animation_mode = "fast"
 ```
 
 Do not paste a real token into shared docs, commits, logs, or support issues.
+If you keep credentials in this flat config file before the credential storage
+fallback is wired, keep the file private to your user account, for example with
+`chmod 600`. `twi` does not yet migrate values out of `config.toml`.
 
 ## CLI Commands And Flags
 
@@ -155,14 +176,15 @@ twi doctor
 ```
 
 `twi login` is implemented as a no-persistence browser/local-callback OAuth
-flow with a `--dry-run` explanation path. Setup wizard, secure credential
-storage, and manual Kitty/Ghostty validation are still planned. Twitch IRC chat
-is current when username, OAuth token, and at least one channel are configured.
-Live image startup is current for enabled asset kinds when config, credentials,
-cache writability, and terminal capability allow it. Multi-channel sidebar,
-command palette, selected-message inspect, and optional mouse controls are
-current app behavior. Future flags for auth and mode settings should follow the
-precedence rules above.
+flow with a `--dry-run` explanation path. Credential storage has an internal
+boundary and restrictive fallback-file plan, but login/setup do not save
+credentials yet. Setup wizard wiring and manual Kitty/Ghostty validation are
+still planned. Twitch IRC chat is current when username, OAuth token, and at
+least one channel are configured. Live image startup is current for enabled
+asset kinds when config, credentials, cache writability, and terminal capability
+allow it. Multi-channel sidebar, command palette, selected-message inspect, and
+optional mouse controls are current app behavior. Future flags for auth and mode
+settings should follow the precedence rules above.
 
 ## Redacted Config Output
 
@@ -228,7 +250,8 @@ Current behavior:
 Future target:
 
 - Interactive setup wizard.
-- Secure token storage.
+- Credential storage implementation using the restrictive file fallback, with
+  any OS keychain backend added only after explicit platform support decisions.
 - Full terminal image mode controls.
 - Cache sizing and pruning configuration.
 - Persisting refreshed tokens safely after OAuth refresh succeeds.
