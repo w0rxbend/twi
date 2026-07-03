@@ -65,6 +65,26 @@ If refresh fails, the user-facing error remains redacted and tells you to verify
 
 `twi login` should eventually provide an interactive setup flow. The preferred path is an OAuth device-code flow if Twitch supports the required scopes for this application. If not, the fallback is a local callback flow.
 
+The internal login boundary now lives in `internal/auth`. It defines:
+
+- `LoginFlow`, with separate `BeginLogin` and `CompleteLogin` methods so CLI,
+  storage, Twitch HTTP adapters, and future UI code do not depend on each
+  other.
+- `LoginRequest`, `LoginChallenge`, `LoginCallback`, `LoginResult`, and
+  `TokenSet` request/response types.
+- `ScopeChatRead`, `ScopeChatEdit`, and helpers for the default chat read/send
+  scope set.
+- `Secret` and `Redactor` contracts. Token values, refresh tokens, OAuth state,
+  callback codes, authorization URLs, and client secrets are redacted by default
+  when formatted; adapters must deliberately reveal them only for OAuth HTTP
+  requests or test assertions.
+- `FakeLoginFlow` for unit tests.
+
+This boundary does not implement OAuth HTTP, wire the `twi login` command, or
+persist tokens. Those remain later tasks after the login redaction checkpoint.
+Any completed login returns tokens only through typed results, leaving storage
+decisions to the separate credential storage boundary.
+
 Future token storage should prefer:
 
 1. OS keychain storage where practical.

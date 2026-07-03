@@ -4,16 +4,18 @@ import (
 	"context"
 	"strings"
 	"time"
+
+	"github.com/w0rxbend/twi/internal/auth"
 )
 
 const (
 	// ScopeChatRead is required by Twitch IRC to read chat.
-	ScopeChatRead TokenScope = "chat:read"
+	ScopeChatRead TokenScope = auth.ScopeChatRead
 	// ScopeChatEdit is required by Twitch IRC to send chat messages.
-	ScopeChatEdit TokenScope = "chat:edit"
+	ScopeChatEdit TokenScope = auth.ScopeChatEdit
 )
 
-var requiredIRCScopes = []TokenScope{ScopeChatRead, ScopeChatEdit}
+var requiredIRCScopes = auth.RequiredChatScopes()
 
 // TokenValidator validates a Twitch OAuth token without exposing token
 // contents through the result.
@@ -65,7 +67,7 @@ const (
 )
 
 // TokenScope is a Twitch OAuth scope value.
-type TokenScope string
+type TokenScope = auth.Scope
 
 // TokenIdentity is the Twitch user identity associated with a validated token.
 type TokenIdentity struct {
@@ -104,27 +106,10 @@ func MissingRequiredIRCScopes(scopes []TokenScope) []TokenScope {
 
 // MissingScopes returns required scopes that are not present in got.
 func MissingScopes(got, required []TokenScope) []TokenScope {
-	have := make(map[TokenScope]bool, len(got))
-	for _, scope := range got {
-		have[scope] = true
-	}
-	missing := make([]TokenScope, 0, len(required))
-	for _, scope := range required {
-		if !have[scope] {
-			missing = append(missing, scope)
-		}
-	}
-	return missing
+	return auth.MissingScopes(got, required)
 }
 
 // TokenScopes converts non-empty string values into TokenScope values.
 func TokenScopes(values ...string) []TokenScope {
-	scopes := make([]TokenScope, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			scopes = append(scopes, TokenScope(value))
-		}
-	}
-	return scopes
+	return auth.Scopes(values...)
 }
