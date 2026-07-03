@@ -227,9 +227,15 @@ func validateLoginConfig(request auth.LoginRequest) error {
 }
 
 func printLoginDryRun(stdout io.Writer, cfg config.Config, redirectURI string, timeout time.Duration) {
+	redactor := auth.NewRedactor(
+		auth.NewSecret(cfg.Twitch.OAuthToken),
+		auth.NewSecret(cfg.Twitch.RefreshToken),
+		auth.NewSecret(cfg.Twitch.ClientSecret),
+	)
+
 	fmt.Fprintln(stdout, "Twitch OAuth login dry run")
 	fmt.Fprintf(stdout, "Requested scopes: %s\n", strings.Join(auth.ScopeValues(auth.RequiredChatScopes()), ", "))
-	fmt.Fprintf(stdout, "Redirect URI: %s\n", redirectURI)
+	fmt.Fprintf(stdout, "Redirect URI: %s\n", redactor.Redact(redirectURI))
 	fmt.Fprintf(stdout, "Timeout: %s\n", timeout)
 	fmt.Fprintf(stdout, "Client ID: %s\n", presentMissing(cfg.Twitch.ClientID))
 	fmt.Fprintf(stdout, "Client secret: %s\n", presentMissing(cfg.Twitch.ClientSecret))

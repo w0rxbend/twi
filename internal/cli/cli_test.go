@@ -64,17 +64,31 @@ func TestLoginDryRunExplainsFlowAndRedactsSecrets(t *testing.T) {
 	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "refresh-secret")
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml", "--dry-run"}, &stdout, &stderr)
+	code := Run([]string{
+		"login",
+		"--config", t.TempDir() + "/missing.toml",
+		"--redirect-uri", "http://127.0.0.1:17643/oauth/twitch/callback?state=state-secret&client_secret=client-secret&code=callback-code",
+		"--dry-run",
+	}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
-	for _, want := range []string{"dry run", "chat:read", "chat:edit", "Client ID: present", "Client secret: present", "not saved or printed", "TWI_TWITCH_OAUTH_TOKEN"} {
+	for _, want := range []string{
+		"dry run",
+		"chat:read",
+		"chat:edit",
+		"Redirect URI: http://127.0.0.1:17643/oauth/twitch/callback?state=<redacted>&client_secret=<redacted>&code=<redacted>",
+		"Client ID: present",
+		"Client secret: present",
+		"not saved or printed",
+		"TWI_TWITCH_OAUTH_TOKEN",
+	} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("dry-run output missing %q: %q", want, stdout.String())
 		}
 	}
-	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret", "oauth:access-secret", "access-secret", "refresh-secret")
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret", "oauth:access-secret", "access-secret", "refresh-secret", "state-secret", "callback-code")
 }
 
 func TestLoginCompletesFakeFlowWithoutPrintingOrPersistingTokens(t *testing.T) {
