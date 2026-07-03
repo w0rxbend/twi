@@ -77,7 +77,7 @@ func TestSetupNonInteractiveWritesConfigAndRunsLoginDryRunWithoutSecrets(t *test
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:setup-access-secret")
 	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "setup-refresh-secret")
-	path := filepath.Join(t.TempDir(), "config.toml")
+	path := filepath.Join(t.TempDir(), "config.toml?state=setup-path-secret")
 
 	var stdout, stderr bytes.Buffer
 	code := Run([]string{
@@ -102,7 +102,7 @@ func TestSetupNonInteractiveWritesConfigAndRunsLoginDryRunWithoutSecrets(t *test
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Updated non-secret config") || !strings.Contains(stdout.String(), "Twitch OAuth login dry run") {
+	if !strings.Contains(stdout.String(), "Updated non-secret config: [redacted]") || !strings.Contains(stdout.String(), "Twitch OAuth login dry run") {
 		t.Fatalf("setup output missing config update or login dry run:\n%s", stdout.String())
 	}
 	data, err := os.ReadFile(path)
@@ -128,7 +128,7 @@ func TestSetupNonInteractiveWritesConfigAndRunsLoginDryRunWithoutSecrets(t *test
 		}
 	}
 	assertOutputDoesNotContain(t, stdout.String()+stderr.String()+configOutput,
-		"client-secret", "setup-access-secret", "setup-refresh-secret", "oauth:setup-access-secret", "twitch_client_secret", "twitch_oauth_token", "twitch_refresh_token")
+		"client-secret", "setup-access-secret", "setup-refresh-secret", "setup-path-secret", "oauth:setup-access-secret", "twitch_client_secret", "twitch_oauth_token", "twitch_refresh_token")
 }
 
 func TestSetupRejectsUnsupportedAnimationMode(t *testing.T) {
@@ -966,7 +966,8 @@ func TestConfigShowRedactsSecrets(t *testing.T) {
 	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
 
 	var stdout, stderr bytes.Buffer
-	code := Run([]string{"config", "show", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+	cfgPath := filepath.Join(t.TempDir(), "missing.toml?state=config-path-secret&code=config-code-secret")
+	code := Run([]string{"config", "show", "--config", cfgPath}, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
@@ -1009,7 +1010,7 @@ func TestConfigShowLoadsStoredCredentialsAndRedactsTokens(t *testing.T) {
 			t.Fatalf("config output missing %q:\n%s", want, stdout.String())
 		}
 	}
-	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "stored-access-token", "stored-refresh-secret")
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "stored-access-token", "stored-refresh-secret", "config-path-secret", "config-code-secret")
 }
 
 func TestDoctorDoesNotPrintSecrets(t *testing.T) {
@@ -1059,7 +1060,7 @@ func TestDoctorDoesNotPrintSecrets(t *testing.T) {
 
 func TestDoctorLoadsStoredCredentialsWithoutPrintingTokens(t *testing.T) {
 	clearTwitchCredentialEnv(t)
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(t.TempDir(), "state=credential-path-secret"))
 	writeStoredCredentialFixture(t, storage.CredentialRecord{
 		UserID:       "42",
 		Login:        "viewer",
@@ -1116,7 +1117,7 @@ func TestDoctorLoadsStoredCredentialsWithoutPrintingTokens(t *testing.T) {
 	if requests[0].Username != "viewer" || requests[0].OAuthToken != "oauth:stored-access-token" || requests[0].RefreshToken != "stored-refresh-secret" || requests[0].ClientID != "client-id" {
 		t.Fatalf("validator request = %#v, want stored credentials", requests[0])
 	}
-	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "stored-access-token", "stored-refresh-secret")
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "stored-access-token", "stored-refresh-secret", "credential-path-secret")
 }
 
 func TestDoctorEnvCredentialsTakePrecedenceOverStoredCredentials(t *testing.T) {

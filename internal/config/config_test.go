@@ -108,20 +108,21 @@ func TestLoadEmojiProviderConfigAndRedactsUnsafeTemplate(t *testing.T) {
 
 func TestRedactedStringDoesNotLeakSecrets(t *testing.T) {
 	cfg := Default()
+	cfg.Path = filepath.Join(t.TempDir(), "config.toml?state=path-state-secret&code=path-code-secret")
 	cfg.Twitch.OAuthToken = "oauth:secret"
 	cfg.Twitch.RefreshToken = "refresh-secret"
 	cfg.Twitch.ClientSecret = "client-secret"
-	cfg.Features.EmojiURLTemplate = "https://cdn.example/{id}.png?client_secret=secret"
+	cfg.Features.EmojiURLTemplate = "https://cdn.example/{id}.png?client_secret=secret&authorization_code=auth-code-secret&state=state-secret&code=code-secret"
 
 	output := cfg.RedactedString()
 
-	for _, secret := range []string{"oauth:secret", "refresh-secret", "client-secret", "client_secret=secret"} {
+	for _, secret := range []string{"oauth:secret", "refresh-secret", "client-secret", "client_secret=secret", "auth-code-secret", "state-secret", "code-secret", "path-state-secret", "path-code-secret"} {
 		if strings.Contains(output, secret) {
 			t.Fatalf("redacted output leaked %q: %s", secret, output)
 		}
 	}
-	if strings.Count(output, redacted) != 4 {
-		t.Fatalf("redacted output = %q, want four redactions", output)
+	if strings.Count(output, redacted) != 5 {
+		t.Fatalf("redacted output = %q, want five redactions", output)
 	}
 }
 

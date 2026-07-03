@@ -104,7 +104,7 @@ func runLogin(args []string, stdout, stderr io.Writer) int {
 
 	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
 	if err != nil {
-		fmt.Fprintf(stderr, "load config: %v\n", err)
+		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
 	}
 

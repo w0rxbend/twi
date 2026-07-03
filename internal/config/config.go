@@ -252,7 +252,7 @@ func writeFilePrivate(path string, data []byte) error {
 
 func (c Config) RedactedString() string {
 	lines := []string{
-		"path = " + quote(c.Path),
+		"path = " + quote(RedactDisplayValue(c.Path)),
 		"twitch_username = " + quote(c.Twitch.Username),
 		"twitch_oauth_token = " + quote(redact(c.Twitch.OAuthToken)),
 		"twitch_refresh_token = " + quote(redact(c.Twitch.RefreshToken)),
@@ -277,6 +277,12 @@ func redact(value string) string {
 		return ""
 	}
 	return redacted
+}
+
+// RedactDisplayValue returns a safe display representation for user-controlled
+// non-secret fields that may still contain credential-shaped query values.
+func RedactDisplayValue(value string) string {
+	return redactUnsafe(value)
 }
 
 func redactUnsafe(value string) string {
@@ -477,10 +483,37 @@ func containsSecretMarker(value string) bool {
 	markers := []string{
 		"oauth:",
 		"oauth_token=",
+		"oauth-token=",
+		"oauth_token:",
+		"oauth-token:",
 		"access_token=",
+		"access-token=",
+		"access_token:",
+		"access-token:",
 		"refresh_token=",
+		"refresh-token=",
+		"refresh_token:",
+		"refresh-token:",
 		"client_secret=",
 		"client-secret=",
+		"client_secret:",
+		"client-secret:",
+		"authorization_code=",
+		"authorization-code=",
+		"authorization_code:",
+		"authorization-code:",
+		"code_verifier=",
+		"code-verifier=",
+		"code_verifier:",
+		"code-verifier:",
+		"code_challenge=",
+		"code-challenge=",
+		"code_challenge:",
+		"code-challenge:",
+		"state=",
+		"state:",
+		"code=",
+		"code:",
 		"authorization=",
 		"authorization: bearer",
 		"bearer ",

@@ -25,7 +25,7 @@ const (
 
 var oauthPattern = regexp.MustCompile(`(?i)oauth:[^\s]+`)
 var bearerPattern = regexp.MustCompile(`(?i)(bearer\s+)[^\s"'&?]+`)
-var credentialPairPattern = regexp.MustCompile(`(?i)((?:access[_-]token|oauth[_-]token|refresh[_-]token|client[_-]secret|authorization_code|code)(?:["']?\s*[:=]\s*["']?))[^"'\s&?]+`)
+var credentialPairPattern = regexp.MustCompile(`(?i)((?:access[_-]token|oauth[_-]token|refresh[_-]token|client[_-]secret|authorization_code|code_verifier|code_challenge|state|code)(?:["']?\s*[:=]\s*["']?))[^"'\s&?]+`)
 
 type DoctorStatus string
 
@@ -107,19 +107,20 @@ func configPathCheck(path string, loadErr error) DoctorCheck {
 	if strings.TrimSpace(path) == "" {
 		return warnCheck("config file", "path unavailable")
 	}
+	displayPath := config.RedactDisplayValue(path)
 	if loadErr != nil {
-		return warnCheck("config file", fmt.Sprintf("%s (load failed: %v; using env/defaults)", path, loadErr))
+		return warnCheck("config file", fmt.Sprintf("%s (load failed: %s; using env/defaults)", displayPath, config.RedactDisplayValue(loadErr.Error())))
 	}
 	err := storage.CheckReadableFile(path)
 	switch {
 	case err == nil:
-		return okCheck("config file", fmt.Sprintf("%s (readable)", path))
+		return okCheck("config file", fmt.Sprintf("%s (readable)", displayPath))
 	case errors.Is(err, storage.ErrPathIsDirectory):
-		return warnCheck("config file", fmt.Sprintf("%s is a directory", path))
+		return warnCheck("config file", fmt.Sprintf("%s is a directory", displayPath))
 	case errors.Is(err, os.ErrNotExist):
-		return warnCheck("config file", fmt.Sprintf("%s (not found; using env/defaults)", path))
+		return warnCheck("config file", fmt.Sprintf("%s (not found; using env/defaults)", displayPath))
 	default:
-		return warnCheck("config file", fmt.Sprintf("%s (%v)", path, err))
+		return warnCheck("config file", fmt.Sprintf("%s (%s)", displayPath, config.RedactDisplayValue(err.Error())))
 	}
 }
 

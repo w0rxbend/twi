@@ -148,15 +148,16 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if err := validateAndNormalizeSetupConfig(&cfg); err != nil {
-		fmt.Fprintf(stderr, "setup config: %v\n", err)
+		fmt.Fprintf(stderr, "setup config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 2
 	}
 
 	if err := config.WriteNonSecretFile(cfg.Path, cfg); err != nil {
-		fmt.Fprintf(stderr, "write config: %v\n", err)
+		fmt.Fprintf(stderr, "write config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
 	}
-	fmt.Fprintf(stdout, "Updated non-secret config: %s\n", cfg.Path)
+	displayPath := config.RedactDisplayValue(cfg.Path)
+	fmt.Fprintf(stdout, "Updated non-secret config: %s\n", displayPath)
 	fmt.Fprintln(stdout, "Credential values stay outside config setup. Use `twi login` to save tokens privately.")
 
 	switch action {
@@ -167,7 +168,7 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "Starting login dry run.")
 		return runLogin([]string{"--config", cfg.Path, "--dry-run"}, stdout, stderr)
 	default:
-		fmt.Fprintf(stdout, "Next: run `twi login --config %s` when your Twitch app client ID and client secret are ready.\n", cfg.Path)
+		fmt.Fprintf(stdout, "Next: run `twi login --config %s` when your Twitch app client ID and client secret are ready.\n", displayPath)
 		return 0
 	}
 }

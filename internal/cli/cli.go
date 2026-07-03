@@ -153,7 +153,7 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 	}
 	cfg, err := config.Load(os.Environ(), overrides)
 	if err != nil {
-		fmt.Fprintf(stderr, "load config: %v\n", err)
+		fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
 		return 1
 	}
 	if len(channels) > 0 {
@@ -170,7 +170,7 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 
 	status, err := applyStoredCredentials(context.Background(), &cfg)
 	if err != nil {
-		fmt.Fprintf(stderr, "load credentials: %v\n", status.Err)
+		fmt.Fprintf(stderr, "load credentials: %s\n", config.RedactDisplayValue(status.Err.Error()))
 		return 1
 	}
 	if len(cfg.DefaultChannels) == 0 {
@@ -334,10 +334,10 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 	case "path":
 		path, err := config.DefaultPath()
 		if err != nil {
-			fmt.Fprintf(stderr, "config path: %v\n", err)
+			fmt.Fprintf(stderr, "config path: %s\n", config.RedactDisplayValue(err.Error()))
 			return 1
 		}
-		fmt.Fprintln(stdout, path)
+		fmt.Fprintln(stdout, config.RedactDisplayValue(path))
 		return 0
 	case "show":
 		fs := flag.NewFlagSet("config show", flag.ContinueOnError)
@@ -349,7 +349,7 @@ func runConfig(args []string, stdout, stderr io.Writer) int {
 		}
 		cfg, _, err := loadConfigWithStoredCredentials(context.Background(), os.Environ(), config.Overrides{ConfigPath: cfgPath})
 		if err != nil {
-			fmt.Fprintf(stderr, "load config: %v\n", err)
+			fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
 			return 1
 		}
 		fmt.Fprint(stdout, cfg.RedactedString())
@@ -375,7 +375,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	if loadErr != nil {
 		fallback, err := config.LoadEnvOnly(environ, overrides)
 		if err != nil {
-			fmt.Fprintf(stderr, "load config: %v\n", err)
+			fmt.Fprintf(stderr, "load config: %s\n", config.RedactDisplayValue(err.Error()))
 			return 1
 		}
 		cfg = fallback
@@ -469,24 +469,25 @@ func credentialFileDoctorCheck(status credentialLoadStatus) app.DoctorCheck {
 	if path == "" {
 		path = "credential file"
 	}
+	displayPath := config.RedactDisplayValue(path)
 	if status.Err != nil {
 		return app.DoctorCheck{
 			Name:   "credential file",
 			Status: app.DoctorStatusWarn,
-			Detail: fmt.Sprintf("%s load failed: %v; using env/config/defaults", path, status.Err),
+			Detail: fmt.Sprintf("%s load failed: %s; using env/config/defaults", displayPath, config.RedactDisplayValue(status.Err.Error())),
 		}
 	}
 	if status.Present {
 		return app.DoctorCheck{
 			Name:   "credential file",
 			Status: app.DoctorStatusOK,
-			Detail: path + " loaded",
+			Detail: displayPath + " loaded",
 		}
 	}
 	return app.DoctorCheck{
 		Name:   "credential file",
 		Status: app.DoctorStatusWarn,
-		Detail: path + " not found; run `twi login` after configuring a Twitch app client",
+		Detail: displayPath + " not found; run `twi login` after configuring a Twitch app client",
 	}
 }
 
