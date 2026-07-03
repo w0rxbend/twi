@@ -20,6 +20,7 @@ type channelState struct {
 	status         ConnectionState
 	messages       []twitch.ChatMessage
 	scrollOffset   int
+	messageFilters messageFilterSet
 	revealQueue    *animation.Queue
 	activeOrder    []string
 	activeMessages map[string]twitch.ChatMessage

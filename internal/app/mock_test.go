@@ -3115,6 +3115,249 @@ func TestCommandPaletteAndKeyboardShortcutsClearAndReconnect(t *testing.T) {
 	}
 }
 
+func TestMockShellKeyboardMessageFiltersPreserveChannelState(t *testing.T) {
+	cfg := config.Default()
+	cfg.Twitch.Username = "twi_bot"
+	model := newMockShellModel("example", cfg)
+	state := model.activeChannelState()
+	state.messages = filterTestMessages("example")
+	state.unread = 4
+	state.composerText = "draft text"
+	state.replyTo = replyContextFromMessage(state.messages[0])
+	beforeReply := *state.replyTo
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("mention filter toggle returned command %#v, want nil without asset services", cmd)
+	}
+	if !model.activeChannelState().messageFilters.enabled(messageFilterMentions) {
+		t.Fatal("mention filter is not active after keyboard toggle")
+	}
+	if got, want := len(model.activeChannelState().messages), 5; got != want {
+		t.Fatalf("message history length = %d, want %d", got, want)
+	}
+	if got, want := model.activeChannelState().unread, 4; got != want {
+		t.Fatalf("unread count = %d, want preserved %d", got, want)
+	}
+	if got, want := model.activeChannelState().composerText, "draft text"; got != want {
+		t.Fatalf("composer draft = %q, want %q", got, want)
+	}
+	if model.activeChannelState().replyTo == nil || *model.activeChannelState().replyTo != beforeReply {
+		t.Fatalf("reply selection = %#v, want preserved %#v", model.activeChannelState().replyTo, beforeReply)
+	}
+	if selected, ok := model.selectedInspectMessage(); !ok || selected.ID != "ordinary-1" {
+		t.Fatalf("selected inspect message = %#v, %v; want hidden ordinary selection preserved", selected, ok)
+	}
+
+	chatRows := strings.Join(model.chatRows(model.layout()), "\n")
+	if !strings.Contains(chatRows, "hello @twi_bot") {
+		t.Fatalf("mention-filtered chat missing mention:\n%s", chatRows)
+	}
+	for _, hidden := range []string{"ordinary viewer chatter", "vip update", "slow mode enabled", "connection failed"} {
+		if strings.Contains(chatRows, hidden) {
+			t.Fatalf("mention-filtered chat still contains %q:\n%s", hidden, chatRows)
+		}
+	}
+
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("mention filter toggle-off returned command %#v, want nil without asset services", cmd)
+	}
+	if model.activeChannelState().messageFilters.active() {
+		t.Fatalf("filters after toggle-off = %q, want none", model.activeChannelState().messageFilters.summary())
+	}
+	if chatRows := strings.Join(model.chatRows(model.layout()), "\n"); !strings.Contains(chatRows, "ordinary viewer chatter") || !strings.Contains(chatRows, "hello @twi_bot") {
+		t.Fatalf("unfiltered chat missing restored history:\n%s", chatRows)
+	}
+}
+
+func TestCommandPaletteTogglesAndResetsMessageFilters(t *testing.T) {
+	model := newMockShellModel("example", config.Default())
+	model.activeChannelState().messages = filterTestMessages("example")
+	model.activeChannelState().composerText = "draft"
+	model.activeChannelState().replyTo = replyContextFromMessage(model.activeChannelState().messages[0])
+	beforeReply := *model.activeChannelState().replyTo
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("roles")})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("palette role filter returned command %#v, want nil without asset services", cmd)
+	}
+	if !model.activeChannelState().messageFilters.enabled(messageFilterRoles) {
+		t.Fatal("role filter is not active after palette command")
+	}
+	chatRows := strings.Join(model.chatRows(model.layout()), "\n")
+	if !strings.Contains(chatRows, "vip update") {
+		t.Fatalf("role-filtered chat missing role message:\n%s", chatRows)
+	}
+	for _, hidden := range []string{"ordinary viewer chatter", "hello @twi_bot", "slow mode enabled", "connection failed"} {
+		if strings.Contains(chatRows, hidden) {
+			t.Fatalf("role-filtered chat still contains %q:\n%s", hidden, chatRows)
+		}
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("reset filters")})
+	model = updated.(mockShellModel)
+	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("palette reset filters returned command %#v, want nil without asset services", cmd)
+	}
+	if model.activeChannelState().messageFilters.active() {
+		t.Fatalf("filters after reset = %q, want none", model.activeChannelState().messageFilters.summary())
+	}
+	if got, want := model.activeChannelState().composerText, "draft"; got != want {
+		t.Fatalf("composer draft after reset = %q, want %q", got, want)
+	}
+	if model.activeChannelState().replyTo == nil || *model.activeChannelState().replyTo != beforeReply {
+		t.Fatalf("reply selection after reset = %#v, want %#v", model.activeChannelState().replyTo, beforeReply)
+	}
+	chatRows = strings.Join(model.chatRows(model.layout()), "\n")
+	for _, want := range []string{"ordinary viewer chatter", "vip update", "slow mode enabled", "connection failed"} {
+		if !strings.Contains(chatRows, want) {
+			t.Fatalf("reset chat missing %q:\n%s", want, chatRows)
+		}
+	}
+}
+
+func TestMessageFiltersArePerChannelAcrossSwitching(t *testing.T) {
+	cfg := config.Default()
+	cfg.Twitch.Username = "twi_bot"
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	model := newMockShellModel("alpha", cfg)
+	alpha := model.channels.ensure("alpha")
+	beta := model.channels.ensure("beta")
+	alpha.messages = filterTestMessages("alpha")
+	beta.messages = filterTestMessages("beta")
+	beta.messages[0].Text = "beta ordinary chatter"
+	beta.messages[1].Text = "beta hello @twi_bot"
+	beta.messages[1].Fragments = []twitch.MessageFragment{{Type: twitch.FragmentMention, Text: "@twi_bot"}}
+	beta.messages[2].Text = "beta vip update"
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	model = updated.(mockShellModel)
+	if !alpha.messageFilters.enabled(messageFilterMentions) {
+		t.Fatal("alpha mention filter is not active")
+	}
+	if beta.messageFilters.active() {
+		t.Fatalf("beta filters = %q, want none before switching", beta.messageFilters.summary())
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	model = updated.(mockShellModel)
+	if got, want := model.activeChannelName(), "beta"; got != want {
+		t.Fatalf("active channel = %q, want %q", got, want)
+	}
+	if model.activeChannelState().messageFilters.active() {
+		t.Fatalf("beta filters after switch = %q, want none", model.activeChannelState().messageFilters.summary())
+	}
+	if view := model.View(); !strings.Contains(view, "beta ordinary chatter") || !strings.Contains(view, "beta vip update") {
+		t.Fatalf("unfiltered beta view missing messages:\n%s", view)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	model = updated.(mockShellModel)
+	if !beta.messageFilters.enabled(messageFilterRoles) {
+		t.Fatal("beta role filter is not active")
+	}
+	if view := model.View(); !strings.Contains(view, "beta vip update") || strings.Contains(view, "beta ordinary chatter") {
+		t.Fatalf("role-filtered beta view mismatch:\n%s", view)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	model = updated.(mockShellModel)
+	if got, want := model.activeChannelName(), "alpha"; got != want {
+		t.Fatalf("active channel = %q, want %q", got, want)
+	}
+	if !model.activeChannelState().messageFilters.enabled(messageFilterMentions) {
+		t.Fatalf("alpha filters after return = %q, want mentions", model.activeChannelState().messageFilters.summary())
+	}
+	if view := model.View(); !strings.Contains(view, "hello @twi_bot") || strings.Contains(view, "ordinary viewer chatter") {
+		t.Fatalf("mention-filtered alpha view mismatch:\n%s", view)
+	}
+
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'0'}})
+	model = updated.(mockShellModel)
+	if model.activeChannelState().messageFilters.active() {
+		t.Fatalf("alpha filters after reset = %q, want none", model.activeChannelState().messageFilters.summary())
+	}
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{']'}})
+	model = updated.(mockShellModel)
+	if !model.activeChannelState().messageFilters.enabled(messageFilterRoles) {
+		t.Fatalf("beta filters after alpha reset = %q, want roles still active", model.activeChannelState().messageFilters.summary())
+	}
+}
+
+func TestMessageFiltersAllowKeyboardSelectionOfActiveReveal(t *testing.T) {
+	cfg := config.Default()
+	cfg.Twitch.Username = "twi_bot"
+	model := newMockShellModel("example", cfg)
+	state := model.activeChannelState()
+	state.messages = []twitch.ChatMessage{filterTestMessages("example")[0]}
+	state.messageFilters.toggle(messageFilterMentions)
+
+	revealing := filterTestMessages("example")[1]
+	revealing.ID = "active-mention"
+	if cmd := model.enqueueMessage(revealing); cmd == nil {
+		t.Fatal("enqueueMessage returned nil, want scheduled reveal for active mention")
+	}
+	if len(state.activeMessages) == 0 {
+		t.Fatal("active reveal message was not queued")
+	}
+	if rows := strings.Join(model.chatRows(model.layout()), "\n"); strings.Contains(rows, "ordinary viewer chatter") {
+		t.Fatalf("filtered active reveal rows include hidden static message:\n%s", rows)
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("reply shortcut returned command %#v, want nil", cmd)
+	}
+	if model.activeChannelState().replyTo == nil || model.activeChannelState().replyTo.MessageID != "active-mention" {
+		t.Fatalf("replyTo after selecting active reveal = %#v, want active-mention", model.activeChannelState().replyTo)
+	}
+	if got, want := model.focus, mockFocusComposer; got != want {
+		t.Fatalf("focus after reply shortcut = %v, want %v", got, want)
+	}
+}
+
+func TestMessageFiltersKeepNarrowAndWideLayoutsCoherent(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		width  int
+		height int
+	}{
+		{name: "narrow", width: 36, height: 12},
+		{name: "wide", width: 120, height: 24},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			model := newMockShellModel("example", config.Default())
+			model.activeChannelState().messages = filterTestMessages("example")
+			model.activeChannelState().messageFilters.toggle(messageFilterMentions)
+
+			updated, _ := model.Update(tea.WindowSizeMsg{Width: tt.width, Height: tt.height})
+			view := updated.View()
+
+			if got, want := lineCount(view), tt.height; got != want {
+				t.Fatalf("filtered view line count = %d, want %d:\n%s", got, want, view)
+			}
+			for i, line := range strings.Split(strings.TrimSuffix(view, "\n"), "\n") {
+				if got := lipglossWidth(line); got > tt.width {
+					t.Fatalf("filtered line %d width = %d, want <= %d:\n%s", i+1, got, tt.width, view)
+				}
+			}
+		})
+	}
+}
+
 func TestReconnectPreservesChannelStateAndReportsFailureAndRepeatedRequests(t *testing.T) {
 	cfg := config.Default()
 	cfg.Features.AnimationMode = "off"
@@ -3374,6 +3617,59 @@ func numberedMockMessages(channel string, count int) []twitch.ChatMessage {
 		})
 	}
 	return messages
+}
+
+func filterTestMessages(channel string) []twitch.ChatMessage {
+	startedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
+	return []twitch.ChatMessage{
+		{
+			ID:          "ordinary-1",
+			Channel:     channel,
+			Timestamp:   startedAt,
+			AuthorLogin: "viewer",
+			DisplayName: "viewer",
+			Text:        "ordinary viewer chatter",
+			Type:        twitch.MessageTypeChat,
+		},
+		{
+			ID:          "mention-1",
+			Channel:     channel,
+			Timestamp:   startedAt.Add(time.Second),
+			AuthorLogin: "viewer",
+			DisplayName: "viewer",
+			Text:        "hello @twi_bot",
+			Fragments: []twitch.MessageFragment{
+				{Type: twitch.FragmentText, Text: "hello "},
+				{Type: twitch.FragmentMention, Text: "@twi_bot"},
+			},
+			Type: twitch.MessageTypeChat,
+		},
+		{
+			ID:          "role-1",
+			Channel:     channel,
+			Timestamp:   startedAt.Add(2 * time.Second),
+			AuthorLogin: "vip_guest",
+			DisplayName: "vip_guest",
+			Badges:      []twitch.Badge{{SetID: "vip", ID: "1"}},
+			Text:        "vip update",
+			Type:        twitch.MessageTypeChat,
+		},
+		{
+			ID:        "notice-1",
+			Channel:   channel,
+			Timestamp: startedAt.Add(3 * time.Second),
+			Text:      "slow mode enabled",
+			Type:      twitch.MessageTypeNotice,
+		},
+		{
+			ID:        "error-1",
+			Channel:   channel,
+			Timestamp: startedAt.Add(4 * time.Second),
+			Text:      "connection failed",
+			Type:      twitch.MessageTypeSystem,
+			RawTags:   map[string]string{"level": "error"},
+		},
+	}
 }
 
 func messagesContainText(messages []twitch.ChatMessage, text string) bool {

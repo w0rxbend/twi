@@ -58,6 +58,7 @@ type fdWriter interface {
 
 type mockShellModel struct {
 	channels              *channelStateSet
+	mentionLogin          string
 	animationMode         string
 	mouseEnabled          bool
 	imageMode             string
@@ -151,6 +152,11 @@ type mockShellLayout struct {
 	composerContentHeight int
 	composerFramed        bool
 	helpHeight            int
+}
+
+type chatRowBlock struct {
+	message twitch.ChatMessage
+	rows    []render.Row
 }
 
 type mockIncomingMessageMsg struct {
@@ -308,6 +314,7 @@ func newMockShellModelWithClockAndCapability(channel string, cfg config.Config, 
 	}
 	return mockShellModel{
 		channels:        channels,
+		mentionLogin:    cfg.Twitch.Username,
 		animationMode:   string(animationConfig.Mode),
 		mouseEnabled:    cfg.Features.EnableMouse,
 		imageMode:       capability.Mode,
@@ -347,6 +354,7 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 	}
 	return mockShellModel{
 		channels:              channels,
+		mentionLogin:          cfg.Twitch.Username,
 		animationMode:         string(animationConfig.Mode),
 		mouseEnabled:          cfg.Features.EnableMouse,
 		imageMode:             capability.Mode,
@@ -524,6 +532,14 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return m, nil
 			}
+			if m.focus == mockFocusChat && len(msg.Runes) == 1 {
+				if filter, ok := messageFilterForShortcutRune(msg.Runes[0]); ok {
+					return m, m.toggleActiveMessageFilter(filter)
+				}
+				if msg.Runes[0] == '0' {
+					return m, m.resetActiveMessageFilters()
+				}
+			}
 			if m.focus == mockFocusChat && len(msg.Runes) == 1 && msg.Runes[0] == 'q' {
 				return m, tea.Quit
 			}
@@ -685,6 +701,9 @@ func (m mockShellModel) statusLine(width int) string {
 	if totalUnread := m.channels.totalUnread(); totalUnread > 0 && width >= 34 {
 		left += fmt.Sprintf(" | unread=%d", totalUnread)
 	}
+	if summary := active.messageFilters.summary(); summary != "" && width >= 46 {
+		left += " | filter=" + summary
+	}
 	right := ""
 	if width >= 64 {
 		right = fmt.Sprintf(" focus=%s animation=%s images=%s", m.focusName(), m.animationMode, m.imageMode)
@@ -756,6 +775,9 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 		if state.unread > 0 {
 			line += fmt.Sprintf(" %d", state.unread)
 		}
+		if state.messageFilters.active() {
+			line += " f"
+		}
 		lines = append(lines, fitLine(line, contentWidth))
 	}
 	for len(lines) < layout.sidebarContentHeight {
@@ -793,20 +815,84 @@ func channelStatusIndicator(status ConnectionStatus) string {
 func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 	active := m.activeChannelState()
 	rowWidth := m.chatRowWidth(layout)
+	blocks := m.visibleChatRowBlocks(layout)
 
-	rows := make([]string, 0, len(active.messages))
-	for _, msg := range active.messages {
-		for _, row := range render.Rows(msg, m.renderOptions(rowWidth)) {
+	rows := make([]string, 0, chatRowBlockCount(blocks))
+	for _, block := range blocks {
+		if len(block.rows) == 0 {
+			rows = append(rows, fitLine("", rowWidth))
+			continue
+		}
+		for _, row := range block.rows {
 			rows = append(rows, terminalRowString(row, rowWidth))
 		}
+	}
+	if len(rows) == 0 && active.messageFilters.active() {
+		rows = append(rows, m.emptyFilterRow(rowWidth))
+	}
+	return rows
+}
+
+func (m mockShellModel) visibleChatRowBlocks(layout mockShellLayout) []chatRowBlock {
+	active := m.activeChannelState()
+	rowWidth := m.chatRowWidth(layout)
+	options := m.renderOptions(rowWidth)
+
+	blocks := make([]chatRowBlock, 0, len(active.messages)+len(active.activeOrder))
+	for _, message := range active.messages {
+		if !m.messageVisibleForState(active, message) {
+			continue
+		}
+		blocks = append(blocks, chatRowBlock{
+			message: message,
+			rows:    render.Rows(message, options),
+		})
 	}
 	frames := active.revealQueue.Frames()
 	for _, id := range active.activeOrder {
-		for _, row := range frames[id] {
-			rows = append(rows, terminalRowString(row, rowWidth))
+		message, ok := active.activeMessages[id]
+		if !ok || !m.messageVisibleForState(active, message) {
+			continue
 		}
+		blocks = append(blocks, chatRowBlock{
+			message: message,
+			rows:    frames[id],
+		})
 	}
-	return rows
+	return blocks
+}
+
+func (m mockShellModel) messageVisibleForState(state *channelState, message twitch.ChatMessage) bool {
+	if state == nil {
+		return true
+	}
+	return state.messageFilters.matches(message, m.mentionLogin)
+}
+
+func chatRowBlockCount(blocks []chatRowBlock) int {
+	total := 0
+	for _, block := range blocks {
+		total += chatRowBlockRowCount(block)
+	}
+	return total
+}
+
+func chatRowBlockRowCount(block chatRowBlock) int {
+	if len(block.rows) == 0 {
+		return 1
+	}
+	return len(block.rows)
+}
+
+func (m mockShellModel) emptyFilterRow(width int) string {
+	active := m.activeChannelState()
+	summary := active.messageFilters.summary()
+	hidden := len(active.messages) + len(active.activeOrder)
+	detail := "no messages yet"
+	if hidden > 0 {
+		detail = fmt.Sprintf("no matching messages (%d hidden)", hidden)
+	}
+	return fitLine(" filter: "+summary+" - "+detail, width)
 }
 
 func (m mockShellModel) composerView(layout mockShellLayout) string {
@@ -1085,6 +1171,31 @@ func (m *mockShellModel) cycleFocus() {
 	m.focus = mockFocusChat
 }
 
+func messageFilterForShortcutRune(r rune) (messageFilter, bool) {
+	for _, def := range messageFilterDefinitions {
+		if def.shortcut == string(r) {
+			return def.filter, true
+		}
+	}
+	return 0, false
+}
+
+func (m *mockShellModel) toggleActiveMessageFilter(filter messageFilter) tea.Cmd {
+	m.activeChannelState().messageFilters.toggle(filter)
+	m.clampScroll()
+	return m.asyncAssetCommand()
+}
+
+func (m *mockShellModel) resetActiveMessageFilters() tea.Cmd {
+	state := m.activeChannelState()
+	if !state.messageFilters.active() {
+		return nil
+	}
+	state.messageFilters.reset()
+	m.clampScroll()
+	return m.asyncAssetCommand()
+}
+
 func (m *mockShellModel) scrollBy(delta int) {
 	if delta == 0 {
 		delta = 1
@@ -1205,22 +1316,8 @@ func (m mockShellModel) messageAtMouse(event tea.MouseEvent, layout mockShellLay
 
 func (m mockShellModel) messageAtVisibleChatRow(layout mockShellLayout, contentRow int) (twitch.ChatMessage, bool) {
 	active := m.activeChannelState()
-	rowWidth := m.chatRowWidth(layout)
-
-	rowCounts := make([]int, 0, len(active.messages))
-	totalRows := 0
-	for _, message := range active.messages {
-		count := len(render.Rows(message, m.renderOptions(rowWidth)))
-		if count <= 0 {
-			count = 1
-		}
-		rowCounts = append(rowCounts, count)
-		totalRows += count
-	}
-	frames := active.revealQueue.Frames()
-	for _, id := range active.activeOrder {
-		totalRows += len(frames[id])
-	}
+	blocks := m.visibleChatRowBlocks(layout)
+	totalRows := chatRowBlockCount(blocks)
 
 	start := totalRows - layout.chatContentHeight - active.scrollOffset
 	if start < 0 {
@@ -1232,20 +1329,10 @@ func (m mockShellModel) messageAtVisibleChatRow(layout mockShellLayout, contentR
 	}
 
 	cursor := 0
-	for i, message := range active.messages {
-		next := cursor + rowCounts[i]
+	for _, block := range blocks {
+		next := cursor + chatRowBlockRowCount(block)
 		if target >= cursor && target < next {
-			return selectableMessage(message)
-		}
-		cursor = next
-	}
-	for _, id := range active.activeOrder {
-		rows := frames[id]
-		next := cursor + len(rows)
-		if target >= cursor && target < next {
-			if message, ok := active.activeMessages[id]; ok {
-				return selectableMessage(message)
-			}
+			return selectableMessage(block.message)
 		}
 		cursor = next
 	}
@@ -1383,8 +1470,11 @@ func (m *mockShellModel) appendStaticMessageReplacingRows(message twitch.ChatMes
 		state = m.activeChannelState()
 	}
 	rowCount := 0
-	if preserveScrolledView {
+	if preserveScrolledView && m.messageVisibleForState(state, message) {
 		rowCount = m.staticMessageRowCount(message) - replacedRows
+		if rowCount < 0 {
+			rowCount = 0
+		}
 	}
 	if message.Channel == "" {
 		message.Channel = state.name
@@ -1513,22 +1603,8 @@ func (m mockShellModel) visibleAvatarMessages() []twitch.ChatMessage {
 	if layout.chatContentHeight <= 0 {
 		return nil
 	}
-	rowWidth := m.chatRowWidth(layout)
-
-	rowCounts := make([]int, 0, len(active.messages))
-	totalRows := 0
-	for _, message := range active.messages {
-		count := len(render.Rows(message, m.renderOptions(rowWidth)))
-		if count <= 0 {
-			count = 1
-		}
-		rowCounts = append(rowCounts, count)
-		totalRows += count
-	}
-	frames := active.revealQueue.Frames()
-	for _, id := range active.activeOrder {
-		totalRows += len(frames[id])
-	}
+	blocks := m.visibleChatRowBlocks(layout)
+	totalRows := chatRowBlockCount(blocks)
 
 	start := totalRows - layout.chatContentHeight - active.scrollOffset
 	if start < 0 {
@@ -1537,20 +1613,10 @@ func (m mockShellModel) visibleAvatarMessages() []twitch.ChatMessage {
 	end := start + layout.chatContentHeight
 	messages := make([]twitch.ChatMessage, 0, layout.chatContentHeight)
 	cursor := 0
-	for i, message := range active.messages {
-		next := cursor + rowCounts[i]
+	for _, block := range blocks {
+		next := cursor + chatRowBlockRowCount(block)
 		if rangesOverlap(cursor, next, start, end) {
-			messages = append(messages, message)
-		}
-		cursor = next
-	}
-	for _, id := range active.activeOrder {
-		rows := frames[id]
-		next := cursor + len(rows)
-		if rangesOverlap(cursor, next, start, end) {
-			if message, ok := active.activeMessages[id]; ok {
-				messages = append(messages, message)
-			}
+			messages = append(messages, block.message)
 		}
 		cursor = next
 	}
@@ -2496,11 +2562,18 @@ func (m *mockShellModel) startReplyMode() {
 
 func (m mockShellModel) replyableMessages() []twitch.ChatMessage {
 	active := m.activeChannelState()
-	messages := make([]twitch.ChatMessage, 0, len(active.messages))
+	messages := make([]twitch.ChatMessage, 0, len(active.messages)+len(active.activeOrder))
 	for _, message := range active.messages {
-		if strings.TrimSpace(message.ID) != "" {
+		if strings.TrimSpace(message.ID) != "" && m.messageVisibleForState(active, message) {
 			messages = append(messages, message)
 		}
+	}
+	for _, id := range active.activeOrder {
+		message, ok := active.activeMessages[id]
+		if !ok || strings.TrimSpace(message.ID) == "" || !m.messageVisibleForState(active, message) {
+			continue
+		}
+		messages = append(messages, message)
 	}
 	return messages
 }
@@ -2570,7 +2643,7 @@ func (m mockShellModel) helpLines(width, height int) []string {
 		if width < 38 {
 			return []string{" ctrl+p palette | tab focus"}
 		}
-		line := " ctrl+p | tab | [] | ? | pg | r | i | ctrl+l clear | ctrl+r reconn | q quit/ctrl+c quit"
+		line := " ctrl+p | tab | [] | filt 1-4/0 | ? | pg | r/i | ^l | ^r | q quit/ctrl+c quit"
 		if width >= 112 {
 			line += " | " + source
 		}
@@ -2579,8 +2652,8 @@ func (m mockShellModel) helpLines(width, height int) []string {
 
 	lines := []string{
 		" tab focus: chat/composer",
-		" ctrl+p: commands | [/]: switch channel | up/down: select message | r: reply | i: inspect",
-		" pgup/pgdn: scroll | ctrl+l: clear | ctrl+r: reconnect | ?: compact help | q: quit | " + source,
+		" ctrl+p: commands | [/]: switch channel | 1-4 filters, 0 reset | up/down: select message",
+		" r: reply | i: inspect | pgup/pgdn: scroll | ctrl+l: clear | ctrl+r: reconnect | ?: compact help | q: quit | " + source,
 	}
 	if width < 38 {
 		lines = []string{

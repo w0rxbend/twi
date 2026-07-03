@@ -12,13 +12,13 @@ Progress as of the initial swarm pass:
   Unix-only restrictive credential-file persistence are partial; setup can write
   non-secret config and hand off to login; refresh-token persistence after IRC
   reconnect and manual Kitty/Ghostty image validation are planned. Active live
-  IRC reconnect restart is implemented.
+  IRC reconnect restart and per-channel local filters are implemented.
 - Credential rule: Twitch username/token values currently come from
   environment variables, the flat config file, or on supported Unix builds the
   private credential file; environment and flat config values take precedence
   over saved credentials, and CLI overrides cover channel and config path.
-- Remaining near-term work: filters, debug logging, release packaging, and
-  manual terminal validation.
+- Remaining near-term work: debug logging, release packaging, and manual
+  terminal validation.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -506,7 +506,8 @@ raw tag diagnostics with credential-shaped values redacted before display.
 Composer text, selected reply context, and scroll offset are preserved while
 the panel opens and closes. T028 adds `ctrl+p` command palette modal state for
 common chat actions, help/inspect toggles, focus, reply mode, scrolling,
-channel switching, active-channel local clear, reconnect requests, and quit.
+local message filters, channel switching, active-channel local clear,
+reconnect requests, and quit.
 Palette filtering owns typed input while open, closes deterministically on
 `enter` or `esc`, and preserves drafts, reply context, and selected messages
 unless the executed command intentionally changes that workflow.

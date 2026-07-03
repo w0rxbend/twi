@@ -532,6 +532,7 @@ func messageFromNotice(notice twitch.Notice) twitch.ChatMessage {
 		Timestamp: time.Now(),
 		Text:      text,
 		Type:      twitch.MessageTypeNotice,
+		RawTags:   notice.RawTags,
 	}
 }
 

@@ -47,6 +47,8 @@ docker compose run --rm mock
 | `?` | Expand or collapse help. |
 | `pgup` / `pgdown` | Scroll chat history. |
 | `up` / `down` | Select a message. |
+| `1` / `2` / `3` / `4` | Toggle local filters for mentions, broadcaster/mod/VIP messages, notices, and errors from chat focus. |
+| `0` | Reset active-channel message filters. |
 | `r` | Reply to the selected message. |
 | `i` | Open or close the selected-message inspect panel. |
 | `ctrl+l` | Clear the active channel's local chat history. |

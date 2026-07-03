@@ -34,6 +34,8 @@ const (
 	commandPaletteNext          commandPaletteAction = "next_channel"
 	commandPaletteSwitch        commandPaletteAction = "switch_channel"
 	commandPaletteReconnect     commandPaletteAction = "reconnect"
+	commandPaletteToggleFilter  commandPaletteAction = "toggle_filter"
+	commandPaletteResetFilters  commandPaletteAction = "reset_filters"
 	commandPaletteClearLocal    commandPaletteAction = "clear_local"
 	commandPaletteQuit          commandPaletteAction = "quit"
 )
@@ -44,6 +46,7 @@ type commandPaletteCommand struct {
 	shortcut string
 	keywords []string
 	channel  string
+	filter   messageFilter
 }
 
 type reconnectingChatClient interface {
@@ -169,6 +172,10 @@ func (m mockShellModel) executeCommandPaletteCommand(command commandPaletteComma
 		return m, m.switchChannel(command.channel)
 	case commandPaletteReconnect:
 		return m, m.requestReconnect()
+	case commandPaletteToggleFilter:
+		return m, m.toggleActiveMessageFilter(command.filter)
+	case commandPaletteResetFilters:
+		return m, m.resetActiveMessageFilters()
 	case commandPaletteClearLocal:
 		m.clearLocalChat()
 	case commandPaletteQuit:
@@ -221,10 +228,29 @@ func (m mockShellModel) commandPaletteCommands() []commandPaletteCommand {
 		{action: commandPaletteNext, title: "Next channel", shortcut: "]", keywords: []string{"channel", "switch"}},
 		{action: commandPalettePrevious, title: "Previous channel", shortcut: "[", keywords: []string{"channel", "switch"}},
 		{action: commandPaletteReconnect, title: "Reconnect chat", shortcut: "ctrl+r", keywords: []string{"connection", "irc", "retry"}},
+		{action: commandPaletteResetFilters, title: "Reset message filters", shortcut: "0", keywords: []string{"filter", "filters", "all", "reset", "clear"}},
 		{action: commandPaletteClearLocal, title: "Clear local chat", shortcut: "ctrl+l", keywords: []string{"history", "messages", "local"}},
 		{action: commandPalettePageUp, title: "Scroll page up", shortcut: "pgup", keywords: []string{"scroll", "history"}},
 		{action: commandPalettePageDown, title: "Scroll page down", shortcut: "pgdn", keywords: []string{"scroll", "latest"}},
 		{action: commandPaletteQuit, title: "Quit", shortcut: "q / ctrl+c", keywords: []string{"exit"}},
+	}
+
+	active := m.activeChannelState()
+	for _, def := range messageFilterDefinitions {
+		title := "Filter " + def.label
+		shortcut := def.shortcut
+		if active.messageFilters.enabled(def.filter) {
+			title = "Stop filtering " + def.label
+			shortcut += " active"
+		}
+		keywords := append([]string{"filter", "filters", "messages", "local"}, def.keywords...)
+		commands = append(commands, commandPaletteCommand{
+			action:   commandPaletteToggleFilter,
+			title:    title,
+			shortcut: shortcut,
+			keywords: keywords,
+			filter:   def.filter,
+		})
 	}
 
 	for _, channel := range m.channels.channelNames() {
