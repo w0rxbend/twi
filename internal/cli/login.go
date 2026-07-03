@@ -1,0 +1,430 @@
+package cli
+
+import (
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/w0rxbend/twi/internal/auth"
+	"github.com/w0rxbend/twi/internal/config"
+)
+
+const (
+	defaultLoginRedirectURI = "http://127.0.0.1:17643/oauth/twitch/callback"
+	defaultLoginTimeout     = 5 * time.Minute
+)
+
+const loginUsage = `Usage:
+  twi login [--config path] [--redirect-uri url] [--timeout duration] [--dry-run]
+
+Starts Twitch OAuth login for the MVP IRC chat scopes:
+  chat:read  read Twitch IRC chat
+  chat:edit  send Twitch IRC chat
+
+Required for a real login:
+  TWI_TWITCH_CLIENT_ID or TWITCH_CLIENT_ID
+  TWI_TWITCH_CLIENT_SECRET or TWITCH_CLIENT_SECRET
+
+Behavior:
+  twi opens a browser, listens for the localhost OAuth callback, validates the
+  returned token with Twitch, and prints only identity/scope status. Access
+  tokens, refresh tokens, callback codes, OAuth state, authorization URLs, and
+  client secrets are not printed or saved. Until credential storage lands, keep
+  using TWI_TWITCH_USERNAME plus TWI_TWITCH_OAUTH_TOKEN/TWITCH_ACCESS_TOKEN or
+  the flat config file for live chat credentials.
+
+Flags:
+`
+
+type loginCallbackWaiter interface {
+	Wait(context.Context, auth.Secret) (auth.LoginCallback, error)
+	Close() error
+}
+
+var newLoginFlow = func() auth.LoginFlow {
+	return auth.NewTwitchOAuthLoginFlow(auth.TwitchOAuthLoginFlowConfig{})
+}
+
+var newLoginContext = func(timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), timeout)
+}
+
+var newLoginCallbackWaiter = func(redirectURI string) (loginCallbackWaiter, error) {
+	return newLocalLoginCallbackWaiter(redirectURI)
+}
+
+var openLoginBrowser = openBrowser
+
+func runLogin(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("login", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	var cfgPath string
+	var redirectURI string
+	var timeout time.Duration
+	var dryRun bool
+	fs.StringVar(&cfgPath, "config", "", "config file path")
+	fs.StringVar(&redirectURI, "redirect-uri", defaultLoginRedirectURI, "localhost OAuth callback URL registered for the Twitch app")
+	fs.DurationVar(&timeout, "timeout", defaultLoginTimeout, "maximum time to wait for browser authorization and callback")
+	fs.BoolVar(&dryRun, "dry-run", false, "explain login requirements without opening a browser, listening for a callback, or contacting Twitch")
+	fs.Usage = func() {
+		fmt.Fprint(stderr, loginUsage)
+		fs.PrintDefaults()
+	}
+
+	if hasHelpArg(args) {
+		fmt.Fprint(stdout, loginUsage)
+		fs.SetOutput(stdout)
+		fs.PrintDefaults()
+		return 0
+	}
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if fs.NArg() != 0 {
+		fmt.Fprintf(stderr, "unexpected login argument %q\n\n", fs.Arg(0))
+		fs.Usage()
+		return 2
+	}
+	if timeout <= 0 {
+		fmt.Fprintln(stderr, "login timeout must be greater than zero")
+		return 2
+	}
+
+	cfg, err := config.Load(os.Environ(), config.Overrides{ConfigPath: cfgPath})
+	if err != nil {
+		fmt.Fprintf(stderr, "load config: %v\n", err)
+		return 1
+	}
+
+	if dryRun {
+		printLoginDryRun(stdout, cfg, redirectURI, timeout)
+		return 0
+	}
+
+	request := auth.LoginRequest{
+		ClientID:     strings.TrimSpace(cfg.Twitch.ClientID),
+		ClientSecret: auth.NewSecret(cfg.Twitch.ClientSecret),
+		RedirectURI:  strings.TrimSpace(redirectURI),
+		Scopes:       auth.RequiredChatScopes(),
+	}
+	baseRedactor := auth.NewRedactor(
+		auth.NewSecret(cfg.Twitch.OAuthToken),
+		auth.NewSecret(cfg.Twitch.RefreshToken),
+		auth.NewSecret(cfg.Twitch.ClientSecret),
+	)
+	if err := validateLoginConfig(request); err != nil {
+		fmt.Fprintln(stderr, baseRedactor.Redact(err.Error()))
+		return 2
+	}
+
+	waiter, err := newLoginCallbackWaiter(request.RedirectURI)
+	if err != nil {
+		fmt.Fprintf(stderr, "login callback unavailable: %s\n", baseRedactor.Redact(err.Error()))
+		return 2
+	}
+	defer waiter.Close()
+
+	ctx, cancel := newLoginContext(timeout)
+	defer cancel()
+
+	flow := newLoginFlow()
+	challenge, err := flow.BeginLogin(ctx, request)
+	if err != nil {
+		printLoginError(stderr, "start login", err, baseRedactor)
+		return 1
+	}
+
+	challengeRedactor := auth.NewRedactor(
+		auth.NewSecret(cfg.Twitch.OAuthToken),
+		auth.NewSecret(cfg.Twitch.RefreshToken),
+		auth.NewSecret(cfg.Twitch.ClientSecret),
+		challenge.AuthorizationURL,
+		challenge.State,
+	)
+
+	fmt.Fprintf(stdout, "Starting Twitch OAuth login for scopes: %s\n", strings.Join(auth.ScopeValues(challenge.Scopes), ", "))
+	fmt.Fprintln(stdout, "A browser window will open. Approve the requested scopes, then return to this terminal.")
+	fmt.Fprintln(stdout, "Tokens will be validated but not saved or printed.")
+
+	if err := openLoginBrowser(ctx, challenge.AuthorizationURL.Reveal()); err != nil {
+		printLoginError(stderr, "open browser", err, challengeRedactor)
+		return 1
+	}
+
+	callback, err := waiter.Wait(ctx, challenge.State)
+	if err != nil {
+		printLoginError(stderr, "wait for OAuth callback", err, challengeRedactor)
+		return 1
+	}
+
+	callbackRedactor := auth.NewRedactor(
+		auth.NewSecret(cfg.Twitch.OAuthToken),
+		auth.NewSecret(cfg.Twitch.RefreshToken),
+		auth.NewSecret(cfg.Twitch.ClientSecret),
+		challenge.AuthorizationURL,
+		challenge.State,
+		callback.Code,
+		callback.State,
+		callback.ExpectedState,
+	)
+	result, err := flow.CompleteLogin(ctx, callback)
+	if err != nil {
+		printLoginError(stderr, "complete login", err, callbackRedactor)
+		return 1
+	}
+
+	resultRedactor := auth.NewRedactor(
+		auth.NewSecret(cfg.Twitch.OAuthToken),
+		auth.NewSecret(cfg.Twitch.RefreshToken),
+		auth.NewSecret(cfg.Twitch.ClientSecret),
+		challenge.AuthorizationURL,
+		challenge.State,
+		callback.Code,
+		callback.State,
+		callback.ExpectedState,
+		result.Tokens.AccessToken,
+		result.Tokens.RefreshToken,
+	)
+	printLoginSuccess(stdout, result, resultRedactor)
+	return 0
+}
+
+func hasHelpArg(args []string) bool {
+	for _, arg := range args {
+		if arg == "-h" || arg == "--help" || arg == "help" {
+			return true
+		}
+	}
+	return false
+}
+
+func validateLoginConfig(request auth.LoginRequest) error {
+	var missing []string
+	if strings.TrimSpace(request.ClientID) == "" {
+		missing = append(missing, "TWI_TWITCH_CLIENT_ID or TWITCH_CLIENT_ID")
+	}
+	if !request.ClientSecret.Present() {
+		missing = append(missing, "TWI_TWITCH_CLIENT_SECRET or TWITCH_CLIENT_SECRET")
+	}
+	if strings.TrimSpace(request.RedirectURI) == "" {
+		missing = append(missing, "--redirect-uri")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("login requires %s; existing env/config token credentials still work for `twi chat` until login storage is implemented", strings.Join(missing, " and "))
+	}
+	return nil
+}
+
+func printLoginDryRun(stdout io.Writer, cfg config.Config, redirectURI string, timeout time.Duration) {
+	fmt.Fprintln(stdout, "Twitch OAuth login dry run")
+	fmt.Fprintf(stdout, "Requested scopes: %s\n", strings.Join(auth.ScopeValues(auth.RequiredChatScopes()), ", "))
+	fmt.Fprintf(stdout, "Redirect URI: %s\n", redirectURI)
+	fmt.Fprintf(stdout, "Timeout: %s\n", timeout)
+	fmt.Fprintf(stdout, "Client ID: %s\n", presentMissing(cfg.Twitch.ClientID))
+	fmt.Fprintf(stdout, "Client secret: %s\n", presentMissing(cfg.Twitch.ClientSecret))
+	fmt.Fprintln(stdout, "Real login opens a browser and waits for a localhost callback.")
+	fmt.Fprintln(stdout, "Tokens are validated but not saved or printed yet.")
+	fmt.Fprintln(stdout, "For live chat today, keep using TWI_TWITCH_USERNAME plus TWI_TWITCH_OAUTH_TOKEN/TWITCH_ACCESS_TOKEN or the flat config file.")
+}
+
+func presentMissing(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "missing"
+	}
+	return "present"
+}
+
+func printLoginSuccess(stdout io.Writer, result auth.LoginResult, redactor auth.Redactor) {
+	login := strings.TrimSpace(result.Identity.Login)
+	if login == "" {
+		login = strings.TrimSpace(result.Identity.DisplayName)
+	}
+	if login == "" {
+		login = "unknown"
+	}
+	fmt.Fprintf(stdout, "Login succeeded for Twitch user: %s\n", redactor.Redact(login))
+	fmt.Fprintf(stdout, "Granted scopes: %s\n", strings.Join(auth.ScopeValues(result.Scopes), ", "))
+	if result.Tokens.RefreshAvailable() {
+		fmt.Fprintln(stdout, "Refresh token: received")
+	} else {
+		fmt.Fprintln(stdout, "Refresh token: not returned")
+	}
+	fmt.Fprintln(stdout, "Credential storage is not implemented yet; tokens were not saved or printed.")
+	fmt.Fprintln(stdout, "Continue using environment variables or the flat config file for live chat credentials.")
+}
+
+func printLoginError(stderr io.Writer, action string, err error, redactor auth.Redactor) {
+	switch {
+	case errors.Is(err, context.Canceled):
+		fmt.Fprintf(stderr, "%s: login canceled\n", action)
+	case errors.Is(err, context.DeadlineExceeded):
+		fmt.Fprintf(stderr, "%s: login timed out\n", action)
+	default:
+		fmt.Fprintf(stderr, "%s: %s\n", action, redactor.Redact(err.Error()))
+	}
+}
+
+type localLoginCallbackWaiter struct {
+	server *http.Server
+	done   chan string
+	errs   chan error
+
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func newLocalLoginCallbackWaiter(rawRedirectURI string) (*localLoginCallbackWaiter, error) {
+	parsed, err := validateLocalLoginRedirectURI(rawRedirectURI)
+	if err != nil {
+		return nil, err
+	}
+
+	listener, err := net.Listen("tcp", net.JoinHostPort(parsed.Hostname(), parsed.Port()))
+	if err != nil {
+		return nil, fmt.Errorf("listen on OAuth callback address: %w", err)
+	}
+
+	waiter := &localLoginCallbackWaiter{
+		done: make(chan string, 1),
+		errs: make(chan error, 1),
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(parsed.EscapedPath(), func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if r.URL == nil || r.URL.EscapedPath() != parsed.EscapedPath() {
+			http.NotFound(w, r)
+			return
+		}
+
+		rawCallbackURL := "http://" + r.Host + r.URL.RequestURI()
+		select {
+		case waiter.done <- rawCallbackURL:
+			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			fmt.Fprintln(w, "twi received the Twitch login callback. You can return to the terminal.")
+		default:
+			http.Error(w, "callback already received", http.StatusConflict)
+		}
+	})
+
+	waiter.server = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		if err := waiter.server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			select {
+			case waiter.errs <- err:
+			default:
+			}
+		}
+	}()
+	return waiter, nil
+}
+
+func (w *localLoginCallbackWaiter) Wait(ctx context.Context, expectedState auth.Secret) (auth.LoginCallback, error) {
+	select {
+	case rawCallbackURL := <-w.done:
+		request, err := http.NewRequest(http.MethodGet, rawCallbackURL, nil)
+		if err != nil {
+			return auth.LoginCallback{}, fmt.Errorf("parse OAuth callback: %w", err)
+		}
+		return auth.LoginCallbackFromRequest(request, expectedState), nil
+	case err := <-w.errs:
+		return auth.LoginCallback{}, err
+	case <-ctx.Done():
+		return auth.LoginCallback{}, ctx.Err()
+	}
+}
+
+func (w *localLoginCallbackWaiter) Close() error {
+	w.closeOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		w.closeErr = w.server.Shutdown(ctx)
+	})
+	return w.closeErr
+}
+
+func validateLocalLoginRedirectURI(rawRedirectURI string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(rawRedirectURI))
+	if err != nil {
+		return nil, fmt.Errorf("parse redirect URI: %w", err)
+	}
+	if parsed.Scheme != "http" {
+		return nil, errors.New("redirect URI must use http with localhost or 127.0.0.1")
+	}
+	if parsed.User != nil {
+		return nil, errors.New("redirect URI must not include user info")
+	}
+	host := strings.ToLower(strings.Trim(parsed.Hostname(), "[]"))
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		return nil, errors.New("redirect URI host must be localhost, 127.0.0.1, or ::1")
+	}
+	if parsed.Port() == "" {
+		return nil, errors.New("redirect URI must include an explicit localhost port")
+	}
+	if strings.TrimSpace(parsed.EscapedPath()) == "" || parsed.EscapedPath() == "/" {
+		return nil, errors.New("redirect URI must include a callback path")
+	}
+	return parsed, nil
+}
+
+func openBrowser(ctx context.Context, targetURL string) error {
+	targetURL = strings.TrimSpace(targetURL)
+	if targetURL == "" {
+		return errors.New("authorization URL is empty")
+	}
+
+	var candidates [][]string
+	if browser := strings.TrimSpace(os.Getenv("BROWSER")); browser != "" {
+		parts := strings.Fields(browser)
+		if len(parts) > 0 {
+			candidates = append(candidates, append(parts, targetURL))
+		}
+	}
+
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = append(candidates, []string{"open", targetURL})
+	case "windows":
+		candidates = append(candidates, []string{"rundll32", "url.dll,FileProtocolHandler", targetURL})
+	default:
+		candidates = append(candidates, []string{"xdg-open", targetURL})
+	}
+
+	var attempted []string
+	for _, candidate := range candidates {
+		if len(candidate) == 0 {
+			continue
+		}
+		path, err := exec.LookPath(candidate[0])
+		if err != nil {
+			attempted = append(attempted, candidate[0])
+			continue
+		}
+		cmd := exec.CommandContext(ctx, path, candidate[1:]...)
+		if err := cmd.Start(); err != nil {
+			return err
+		}
+		go func() {
+			_ = cmd.Wait()
+		}()
+		return nil
+	}
+	if len(attempted) == 0 {
+		return errors.New("automatic browser opening is not supported in this environment")
+	}
+	return fmt.Errorf("automatic browser opening is not supported in this environment; tried %s", strings.Join(attempted, ", "))
+}

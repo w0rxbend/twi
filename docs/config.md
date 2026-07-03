@@ -16,7 +16,7 @@ This document describes the configuration model for `twi`. The implemented parse
   secret values.
 - Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
 - Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned.
-- `twi login`, setup wizard, and secure credential storage are planned.
+- `twi login` can run the no-persistence OAuth browser/callback flow. Setup wizard and secure credential storage are planned.
 - Nested TOML tables are not implemented yet; keep config files flat.
 
 ## Precedence
@@ -61,7 +61,7 @@ Supported variables:
 | `TWI_TWITCH_OAUTH_TOKEN` | Yes | Twitch IRC OAuth token with `chat:read` for live reads and `chat:edit` for composer sends. |
 | `TWI_TWITCH_REFRESH_TOKEN` | Yes | Refresh token used for one in-memory OAuth refresh after live IRC auth failure. |
 | `TWI_TWITCH_CLIENT_ID` | Usually no | Twitch app client ID for Helix/API calls. |
-| `TWI_TWITCH_CLIENT_SECRET` | Yes | Client secret if a future OAuth flow needs it. |
+| `TWI_TWITCH_CLIENT_SECRET` | Yes | Client secret used by `twi login` and in-memory OAuth refresh. |
 | `TWITCH_USERNAME` | No | Dotenv alias for Twitch login. Canonical `TWI_TWITCH_USERNAME` wins if both are set. |
 | `TWITCH_ACCESS_TOKEN` | Yes | Dotenv alias for OAuth token. A missing `oauth:` prefix is added for IRC use. Canonical `TWI_TWITCH_OAUTH_TOKEN` wins if both are set. |
 | `TWITCH_REFRESH_TOKEN` | Yes | Dotenv alias for refresh token. Used for one in-memory OAuth refresh after live IRC auth failure. |
@@ -154,14 +154,15 @@ twi config path
 twi doctor
 ```
 
-`twi login`, setup wizard, secure credential storage, and manual Kitty/Ghostty
-validation are still planned. Twitch IRC chat is current when username, OAuth
-token, and at least one channel are configured. Live image startup is current
-for enabled asset kinds when config, credentials, cache writability, and
-terminal capability allow it. Multi-channel sidebar, command palette,
-selected-message inspect, and optional mouse controls are current app behavior.
-Future flags for auth and mode settings should follow the precedence rules
-above.
+`twi login` is implemented as a no-persistence browser/local-callback OAuth
+flow with a `--dry-run` explanation path. Setup wizard, secure credential
+storage, and manual Kitty/Ghostty validation are still planned. Twitch IRC chat
+is current when username, OAuth token, and at least one channel are configured.
+Live image startup is current for enabled asset kinds when config, credentials,
+cache writability, and terminal capability allow it. Multi-channel sidebar,
+command palette, selected-message inspect, and optional mouse controls are
+current app behavior. Future flags for auth and mode settings should follow the
+precedence rules above.
 
 ## Redacted Config Output
 

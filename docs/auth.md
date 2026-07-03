@@ -1,16 +1,16 @@
 # Authentication
 
-This document describes the authentication model for `twi`. It covers the current environment/config-file credential path for Twitch IRC and the future interactive login flow.
+This document describes the authentication model for `twi`. It covers the current environment/config-file credential path for Twitch IRC and the no-persistence OAuth login command.
 
 ## Current State
 
-- `twi login` is planned, not implemented.
+- `twi login` starts a Twitch authorization-code login through the browser/local-callback flow, validates the returned token, and reports identity/scope status without printing or saving token values.
 - Mock chat is ready and needs no Twitch credentials.
 - The MVP accepts Twitch credentials from environment variables or a local flat config file. CLI flags currently override the config path and channels, not username or token values.
 - Multi-channel live IRC read/send is partially shipped for configured credentials, including composer sends, selected-message replies, and `/me` actions.
 - Multi-channel UX is partially shipped: the keyboard-first sidebar, command palette, optional mouse controls, and selected-message inspect panel are current behavior.
 - `twi doctor` diagnostics are partially shipped; Twitch OAuth validation is wired into doctor and reports identity, expiry, required IRC scopes, username mismatch, and refresh availability without printing credential values.
-- Later milestones may add interactive OAuth, setup wizard, secure credential storage, and richer EventSub/API chat support.
+- Later milestones may add secure credential storage, setup wizard handoff, and richer EventSub/API chat support.
 
 ## MVP Credential Model
 
@@ -63,9 +63,48 @@ If refresh fails, the user-facing error remains redacted and tells you to verify
 
 ## OAuth Login Flow
 
-`twi login` should eventually provide an interactive setup flow. The login
-command is still not wired, but the internal HTTP adapter for Twitch's
-authorization-code flow now exists behind the auth boundary.
+`twi login` provides the current interactive OAuth entry point. It uses Twitch's
+authorization-code flow, opens the authorization prompt in a browser, listens
+for a localhost HTTP callback, exchanges the callback code for tokens, validates
+the returned access token, and prints only safe identity and scope status.
+
+Default command behavior:
+
+```sh
+export TWI_TWITCH_CLIENT_ID="your_twitch_client_id"
+export TWI_TWITCH_CLIENT_SECRET="<your-twitch-client-secret>"
+twi login
+```
+
+The default redirect URI is:
+
+```text
+http://127.0.0.1:17643/oauth/twitch/callback
+```
+
+Register that URI on the Twitch app, or pass `--redirect-uri` with another
+localhost HTTP callback URL. Non-localhost callbacks and non-HTTP callbacks are
+rejected because the CLI listener only supports a local browser callback.
+
+For a credential-free or CI-safe command smoke, use:
+
+```sh
+twi login --dry-run
+```
+
+`--dry-run` explains the scopes, redirect URI, timeout, and client credential
+presence without opening a browser, starting a callback listener, contacting
+Twitch, printing secrets, or writing files.
+
+The command requests the MVP scopes by default:
+
+- `chat:read`
+- `chat:edit`
+
+The command does not persist credentials yet. A successful login proves the
+OAuth flow and validation path work, but live chat still uses the environment or
+flat config credential values documented above until secure storage is
+implemented.
 
 The internal login boundary now lives in `internal/auth`. It defines:
 
@@ -88,9 +127,8 @@ The internal login boundary now lives in `internal/auth`. It defines:
   configured client ID, and returns token material only through typed `Secret`
   fields.
 
-This boundary does not wire the `twi login` command or persist tokens. Those
-remain later tasks after the login redaction checkpoint. Any completed login
-returns tokens only through typed results, leaving storage decisions to the
+The CLI wiring deliberately leaves storage out of scope. Any completed login
+returns tokens only through typed results, leaving persistence decisions to the
 separate credential storage boundary.
 
 The adapter uses the MVP scopes by default:
@@ -99,9 +137,10 @@ The adapter uses the MVP scopes by default:
 - `chat:edit`
 
 It rejects missing, mismatched, expired, or duplicate OAuth state, denied
-authorization callbacks, Twitch token/validation errors, missing required
-scopes, client mismatches, context cancellation, and bounded request timeouts
-with redacted actionable errors.
+authorization callbacks, unsupported callback listeners, unsupported browser
+opening, Twitch token/validation errors, missing required scopes, client
+mismatches, context cancellation, and bounded request timeouts with redacted
+actionable errors.
 
 Future token storage should prefer:
 

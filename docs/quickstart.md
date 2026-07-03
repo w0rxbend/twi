@@ -60,7 +60,7 @@ the primary path.
 
 ## 4. Configure Live Twitch Chat
 
-Live mode is partially shipped: it supports one or more Twitch channels over IRC with read, send, selected-message replies, `/me` actions, keyboard-first channel switching/sidebar state, command palette actions, optional mouse controls, and selected-message inspect diagnostics. Broader two-channel Twitch manual evidence, login/setup, and secure credential storage remain pending.
+Live mode is partially shipped: it supports one or more Twitch channels over IRC with read, send, selected-message replies, `/me` actions, keyboard-first channel switching/sidebar state, command palette actions, optional mouse controls, and selected-message inspect diagnostics. `twi login` can validate an OAuth browser/callback flow without saving tokens; setup and secure credential storage remain pending.
 
 You need:
 
@@ -70,6 +70,17 @@ You need:
 - `chat:edit` scope to send chat.
 
 Username/token credentials currently come from environment variables or the flat config file. CLI flags currently override channels and config path, not username or token values.
+
+To check the login command without browser, network, or credentials:
+
+```sh
+go run ./cmd/twi login --dry-run
+```
+
+For the real OAuth flow, set `TWITCH_CLIENT_ID`/`TWITCH_CLIENT_SECRET` or the
+canonical `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_CLIENT_SECRET` names and register
+`http://127.0.0.1:17643/oauth/twitch/callback` on the Twitch app. The command
+validates returned tokens but does not print or save them yet.
 
 Environment variable setup:
 

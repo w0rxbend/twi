@@ -93,12 +93,12 @@ func (r Redactor) Redact(value string) string {
 		return ""
 	}
 
-	value = oauthTokenPattern.ReplaceAllString(value, RedactedSecret)
-	value = bearerTokenPattern.ReplaceAllString(value, "${1}"+RedactedSecret)
-	value = credentialKeyPattern.ReplaceAllString(value, "${1}"+RedactedSecret)
 	for _, secret := range r.secrets {
 		value = strings.ReplaceAll(value, secret, RedactedSecret)
 	}
+	value = oauthTokenPattern.ReplaceAllString(value, RedactedSecret)
+	value = bearerTokenPattern.ReplaceAllString(value, "${1}"+RedactedSecret)
+	value = credentialKeyPattern.ReplaceAllString(value, "${1}"+RedactedSecret)
 	return value
 }
 

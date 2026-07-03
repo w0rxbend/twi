@@ -8,13 +8,13 @@ Progress as of the initial swarm pass:
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
 - Current status labels: mock chat is ready; multi-channel live IRC read/send,
-  multi-channel UX, diagnostics, and inline image plumbing are partial; `twi
-  login`, setup wizard, secure credential storage, and manual Kitty/Ghostty
-  image validation are planned.
+  multi-channel UX, diagnostics, inline image plumbing, and no-persistence `twi
+  login` are partial; setup wizard, secure credential storage, and manual
+  Kitty/Ghostty image validation are planned.
 - Credential rule: Twitch username/token values currently come from
   environment variables or the flat config file; CLI overrides cover channel
   and config path.
-- Remaining near-term work: login/setup, secure credential storage, reconnect
+- Remaining near-term work: setup, secure credential storage, reconnect
   hardening, filters, debug logging, release packaging, and manual terminal
   validation.
 
@@ -521,18 +521,19 @@ without that capability.
 
 Task: Implement `twi login` OAuth device flow or local callback flow.
 Owner lane: Auth/platform engineer.
-Goal: Let users obtain usable Twitch credentials without manually pasting
-tokens.
-Context: The CLI advertises `twi login`, but it currently returns planned/not
-implemented.
+Goal: Let users validate Twitch OAuth credentials without manually pasting
+tokens into terminal output.
+Context: The CLI now wires `twi login` to a no-persistence browser/local-callback
+flow. Secure storage and setup handoff remain separate follow-up work.
 Files likely touched: `internal/cli`, `internal/config`, `internal/twitch`,
 `docs/auth.md`, `docs/quickstart.md`.
-Implementation notes: Prefer an OAuth flow appropriate for terminal apps.
-Request only required scopes first: `chat:read` and `chat:edit`.
-Acceptance criteria: Login stores or prints next-step configuration safely and
-doctor validates the resulting token.
-Verification: HTTP fake flow tests; manual login with test account; secret
-redaction search.
+Implementation notes: The implemented flow requests only required scopes first:
+`chat:read` and `chat:edit`, opens a browser, waits on a localhost callback, and
+does not save or print token values.
+Acceptance criteria: Login validates the resulting token and prints safe next
+steps. Secure storage remains owned by the credential storage tasks.
+Verification: HTTP fake flow tests; CLI fake callback tests; secret redaction
+search.
 Risks: OAuth UX and Twitch app registration requirements can be confusing.
 Follow-ups: Add account switch/logout.
 

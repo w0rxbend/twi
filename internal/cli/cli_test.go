@@ -3,13 +3,19 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/w0rxbend/twi/internal/app"
 	"github.com/w0rxbend/twi/internal/assets"
+	"github.com/w0rxbend/twi/internal/auth"
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/render"
 	"github.com/w0rxbend/twi/internal/twitch"
@@ -30,6 +36,298 @@ func TestHelp(t *testing.T) {
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestLoginHelp(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+
+	code := Run([]string{"login", "--help"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"twi login", "chat:read", "chat:edit", "not printed or saved", "TWI_TWITCH_CLIENT_ID"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("login help output missing %q: %q", want, stdout.String())
+		}
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+}
+
+func TestLoginDryRunExplainsFlowAndRedactsSecrets(t *testing.T) {
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:access-secret")
+	t.Setenv("TWI_TWITCH_REFRESH_TOKEN", "refresh-secret")
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml", "--dry-run"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"dry run", "chat:read", "chat:edit", "Client ID: present", "Client secret: present", "not saved or printed", "TWI_TWITCH_OAUTH_TOKEN"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("dry-run output missing %q: %q", want, stdout.String())
+		}
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret", "oauth:access-secret", "access-secret", "refresh-secret")
+}
+
+func TestLoginCompletesFakeFlowWithoutPrintingOrPersistingTokens(t *testing.T) {
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+
+	resetLoginTestHooks(t)
+
+	fakeFlow := auth.NewFakeLoginFlow()
+	fakeFlow.QueueBegin(auth.LoginChallenge{
+		AuthorizationURL: auth.NewSecret("https://auth.example/authorize?client_id=client-id&state=state-secret"),
+		State:            auth.NewSecret("state-secret"),
+		Scopes:           auth.RequiredChatScopes(),
+		ExpiresAt:        time.Now().Add(time.Minute),
+	}, nil)
+	fakeFlow.QueueComplete(auth.LoginResult{
+		Identity: auth.Identity{UserID: "42", Login: "viewer"},
+		Tokens: auth.TokenSet{
+			AccessToken:  auth.NewSecret("oauth:access-secret"),
+			RefreshToken: auth.NewSecret("refresh-secret"),
+			Scopes:       auth.RequiredChatScopes(),
+		},
+		Scopes: auth.RequiredChatScopes(),
+	}, nil)
+	newLoginFlow = func() auth.LoginFlow {
+		return fakeFlow
+	}
+
+	waiter := &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
+		Code:  auth.NewSecret("callback-code"),
+		State: auth.NewSecret("state-secret"),
+	}}
+	newLoginCallbackWaiter = func(redirectURI string) (loginCallbackWaiter, error) {
+		if redirectURI != defaultLoginRedirectURI {
+			t.Fatalf("redirect URI = %q, want %q", redirectURI, defaultLoginRedirectURI)
+		}
+		return waiter, nil
+	}
+	var openedURL string
+	openLoginBrowser = func(_ context.Context, targetURL string) error {
+		openedURL = targetURL
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
+	}
+	if openedURL != "https://auth.example/authorize?client_id=client-id&state=state-secret" {
+		t.Fatalf("opened URL = %q, want fake auth URL", openedURL)
+	}
+	if !waiter.closed {
+		t.Fatal("callback waiter was not closed")
+	}
+	requests := fakeFlow.BeginRequests()
+	if len(requests) != 1 {
+		t.Fatalf("begin requests = %d, want 1", len(requests))
+	}
+	if requests[0].ClientID != "client-id" || requests[0].ClientSecret.Reveal() != "client-secret" {
+		t.Fatalf("begin request config = %#v, want configured client", requests[0])
+	}
+	for _, want := range []string{"Starting Twitch OAuth login", "chat:read", "chat:edit", "Login succeeded for Twitch user: viewer", "Refresh token: received", "tokens were not saved or printed"} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("login output missing %q: %q", want, stdout.String())
+		}
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(),
+		"client-secret", "state-secret", "callback-code", "oauth:access-secret", "access-secret", "refresh-secret", "https://auth.example")
+}
+
+func TestLoginCancellationIsClearAndRedacted(t *testing.T) {
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+
+	resetLoginTestHooks(t)
+
+	fakeFlow := auth.NewFakeLoginFlow()
+	newLoginFlow = func() auth.LoginFlow {
+		return fakeFlow
+	}
+	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+		return &fakeLoginCallbackWaiter{}, nil
+	}
+	newLoginContext = func(time.Duration) (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx, func() {}
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "start login: login canceled") {
+		t.Fatalf("stderr missing cancellation: %q", stderr.String())
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret")
+}
+
+func TestLoginUnsupportedCallbackFailsClearly(t *testing.T) {
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml", "--redirect-uri", "https://example.com/callback"}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("Run returned %d, want 2; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	for _, want := range []string{"login callback unavailable", "localhost", "127.0.0.1"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q: %q", want, stderr.String())
+		}
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret")
+}
+
+func TestLoginBrowserFailureRedactsAuthorizationURLAndState(t *testing.T) {
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+
+	resetLoginTestHooks(t)
+
+	fakeFlow := auth.NewFakeLoginFlow()
+	fakeFlow.QueueBegin(auth.LoginChallenge{
+		AuthorizationURL: auth.NewSecret("https://auth.example/authorize?state=state-secret&client_secret=client-secret"),
+		State:            auth.NewSecret("state-secret"),
+		Scopes:           auth.RequiredChatScopes(),
+	}, nil)
+	newLoginFlow = func() auth.LoginFlow {
+		return fakeFlow
+	}
+	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+		return &fakeLoginCallbackWaiter{}, nil
+	}
+	openLoginBrowser = func(context.Context, string) error {
+		return errors.New("cannot open https://auth.example/authorize?state=state-secret&client_secret=client-secret")
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "open browser:") {
+		t.Fatalf("stderr missing browser error: %q", stderr.String())
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "client-secret", "state-secret", "https://auth.example")
+}
+
+func TestLoginOAuthFailureIsRedacted(t *testing.T) {
+	t.Setenv("TWI_TWITCH_CLIENT_ID", "client-id")
+	t.Setenv("TWI_TWITCH_CLIENT_SECRET", "client-secret")
+
+	resetLoginTestHooks(t)
+
+	fakeFlow := auth.NewFakeLoginFlow()
+	fakeFlow.QueueBegin(auth.LoginChallenge{
+		AuthorizationURL: auth.NewSecret("https://auth.example/authorize?state=state-secret"),
+		State:            auth.NewSecret("state-secret"),
+		Scopes:           auth.RequiredChatScopes(),
+	}, nil)
+	fakeFlow.QueueComplete(auth.LoginResult{}, errors.New("provider rejected authorization_code=callback-code state=state-secret access_token=oauth:access-secret refresh_token=refresh-secret client_secret=client-secret"))
+	newLoginFlow = func() auth.LoginFlow {
+		return fakeFlow
+	}
+	newLoginCallbackWaiter = func(string) (loginCallbackWaiter, error) {
+		return &fakeLoginCallbackWaiter{callback: auth.LoginCallback{
+			Code:  auth.NewSecret("callback-code"),
+			State: auth.NewSecret("state-secret"),
+		}}, nil
+	}
+	openLoginBrowser = func(context.Context, string) error {
+		return nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"login", "--config", t.TempDir() + "/missing.toml"}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run returned %d, want 1; stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "complete login:") || !strings.Contains(stderr.String(), auth.RedactedSecret) {
+		t.Fatalf("stderr missing redacted OAuth failure: %q", stderr.String())
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(),
+		"client-secret", "state-secret", "callback-code", "oauth:access-secret", "access-secret", "refresh-secret", "https://auth.example")
+}
+
+func TestLocalLoginCallbackWaiterReceivesCallbackAndHidesSecrets(t *testing.T) {
+	redirectURI := fmt.Sprintf("http://127.0.0.1:%d/oauth/twitch/callback", freeLocalPort(t))
+	waiter, err := newLocalLoginCallbackWaiter(redirectURI)
+	if err != nil {
+		t.Fatalf("newLocalLoginCallbackWaiter returned error: %v", err)
+	}
+	defer waiter.Close()
+
+	client := &http.Client{Timeout: time.Second}
+
+	postResp, err := client.Post(redirectURI+"?code=post-code&state=state-secret", "text/plain", nil)
+	if err != nil {
+		t.Fatalf("POST callback: %v", err)
+	}
+	if postResp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d, want %d", postResp.StatusCode, http.StatusMethodNotAllowed)
+	}
+	_ = postResp.Body.Close()
+
+	wrongPathResp, err := client.Get(strings.Replace(redirectURI, "/oauth/twitch/callback", "/wrong", 1) + "?code=wrong-code&state=state-secret")
+	if err != nil {
+		t.Fatalf("GET wrong path: %v", err)
+	}
+	if wrongPathResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("wrong path status = %d, want %d", wrongPathResp.StatusCode, http.StatusNotFound)
+	}
+	_ = wrongPathResp.Body.Close()
+
+	firstResp, err := client.Get(redirectURI + "?code=callback-code&state=state-secret")
+	if err != nil {
+		t.Fatalf("GET callback: %v", err)
+	}
+	firstBody, err := io.ReadAll(firstResp.Body)
+	_ = firstResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read callback response: %v", err)
+	}
+	if firstResp.StatusCode != http.StatusOK {
+		t.Fatalf("callback status = %d, want %d; body=%q", firstResp.StatusCode, http.StatusOK, string(firstBody))
+	}
+	assertOutputDoesNotContain(t, string(firstBody), "callback-code", "state-secret")
+
+	duplicateResp, err := client.Get(redirectURI + "?code=duplicate-code&state=state-secret")
+	if err != nil {
+		t.Fatalf("GET duplicate callback: %v", err)
+	}
+	if duplicateResp.StatusCode != http.StatusConflict {
+		t.Fatalf("duplicate status = %d, want %d", duplicateResp.StatusCode, http.StatusConflict)
+	}
+	_ = duplicateResp.Body.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	callback, err := waiter.Wait(ctx, auth.NewSecret("state-secret"))
+	if err != nil {
+		t.Fatalf("Wait returned error: %v", err)
+	}
+	if callback.Code.Reveal() != "callback-code" || callback.State.Reveal() != "state-secret" || callback.ExpectedState.Reveal() != "state-secret" {
+		t.Fatalf("callback = %#v, want received code/state with expected state", callback)
 	}
 }
 
@@ -426,4 +724,69 @@ func assetKindNames(kinds map[string]bool) []string {
 		}
 	}
 	return names
+}
+
+type fakeLoginCallbackWaiter struct {
+	callback auth.LoginCallback
+	err      error
+	closed   bool
+}
+
+func (w *fakeLoginCallbackWaiter) Wait(ctx context.Context, expectedState auth.Secret) (auth.LoginCallback, error) {
+	if err := ctx.Err(); err != nil {
+		return auth.LoginCallback{}, err
+	}
+	if w.err != nil {
+		return auth.LoginCallback{}, w.err
+	}
+	callback := w.callback
+	if !callback.ExpectedState.Present() {
+		callback.ExpectedState = expectedState
+	}
+	return callback, nil
+}
+
+func (w *fakeLoginCallbackWaiter) Close() error {
+	w.closed = true
+	return nil
+}
+
+func resetLoginTestHooks(t *testing.T) {
+	t.Helper()
+
+	oldNewLoginFlow := newLoginFlow
+	oldNewLoginContext := newLoginContext
+	oldNewLoginCallbackWaiter := newLoginCallbackWaiter
+	oldOpenLoginBrowser := openLoginBrowser
+	t.Cleanup(func() {
+		newLoginFlow = oldNewLoginFlow
+		newLoginContext = oldNewLoginContext
+		newLoginCallbackWaiter = oldNewLoginCallbackWaiter
+		openLoginBrowser = oldOpenLoginBrowser
+	})
+}
+
+func freeLocalPort(t *testing.T) int {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on ephemeral port: %v", err)
+	}
+	defer listener.Close()
+
+	addr, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener addr = %T, want *net.TCPAddr", listener.Addr())
+	}
+	return addr.Port
+}
+
+func assertOutputDoesNotContain(t *testing.T, output string, values ...string) {
+	t.Helper()
+	for _, value := range values {
+		if strings.Contains(output, value) {
+			t.Fatalf("output leaked %q: %s", value, output)
+		}
+	}
 }

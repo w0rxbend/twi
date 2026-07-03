@@ -27,7 +27,7 @@ Usage:
   twi config show
   twi config path
   twi doctor
-  twi login
+  twi login [--dry-run]
 
 Environment:
   TWI_TWITCH_USERNAME
@@ -112,8 +112,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	case "doctor":
 		return runDoctor(args[1:], stdout, stderr)
 	case "login":
-		fmt.Fprintln(stderr, "twi login is planned but not implemented in this bootstrap slice")
-		return 2
+		return runLogin(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", args[0], usage)
 		return 2

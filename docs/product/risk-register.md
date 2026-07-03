@@ -2,8 +2,9 @@
 
 Status: Risk register aligned with the current MVP. Mock chat is ready;
 multi-channel live IRC read/send, diagnostics, multi-channel UX, and inline
-image plumbing are partial; login/setup, secure credential storage, and manual
-Kitty/Ghostty image validation remain planned.
+image plumbing are partial; login is a no-persistence OAuth command; setup,
+secure credential storage, and manual Kitty/Ghostty image validation remain
+planned.
 
 Credential assumption: Twitch username/token values currently come from
 environment variables or the flat config file. CLI overrides cover channel and
@@ -27,7 +28,7 @@ Likelihood and impact use `Low`, `Medium`, or `High`.
 | RR-012 | Go toolchain drift causes inconsistent builds across agents. | Medium | Medium | Record verified stable version; pin `go` and `toolchain`; keep `GOTOOLCHAIN=auto` compatible; use module tool directives. | QA/release engineer | `go version`; `go env GOTOOLCHAIN`; clean `go mod tidy`; CI/tooling gate. |
 | RR-013 | Twitch Helix/API outages or quota issues break avatars, badges, emotes, or token validation. | Medium | Medium | Treat asset/API data as optional; cache metadata; keep chat read/send usable without assets. | Twitch integration engineer and asset/image engineer | Fake API failure tests; fallback golden snapshots; manual degraded-mode status. |
 | RR-014 | Visual design becomes a debug console or unreadable in small terminals. | Medium | Medium | Define layout snapshots; correct low-contrast username colors; hide sidebar/status details in narrow mode. | Core TUI engineer and rendering engineer | Golden layouts at narrow/normal/wide widths; manual resize check. |
-| RR-015 | Interactive login flow is blocked by Twitch OAuth constraints. | Medium | Medium | Keep MVP token config path; research device-code/local-callback options before implementation; document fallback. | Twitch integration engineer | Auth ADR; manual token setup docs; login task blocked only if MVP token config works. |
+| RR-015 | OAuth login UX is blocked by Twitch app registration or local callback constraints. | Medium | Medium | Keep MVP token config path; support a localhost callback flow with clear dry-run and fallback docs; document redirect URI requirements. | Twitch integration engineer | Login command tests; auth docs; manual token setup docs; redaction checkpoint. |
 
 ## Highest Early Risks
 

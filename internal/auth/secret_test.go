@@ -64,6 +64,7 @@ func TestRedactorRedactsPatternsAndExplicitSecrets(t *testing.T) {
 		NewSecret("refresh-explicit"),
 		NewSecret("client-secret"),
 		NewSecret("state-secret"),
+		NewSecret("https://id.example/authorize?client_id=client-id&state=state-secret"),
 	)
 	text := strings.Join([]string{
 		"oauth:explicit-access",
@@ -75,6 +76,7 @@ func TestRedactorRedactsPatternsAndExplicitSecrets(t *testing.T) {
 		"state=state-secret",
 		"code=callback-code",
 		"code_verifier=verifier-secret",
+		"https://id.example/authorize?client_id=client-id&state=state-secret",
 	}, " ")
 
 	got := redactor.Redact(text)
@@ -88,6 +90,7 @@ func TestRedactorRedactsPatternsAndExplicitSecrets(t *testing.T) {
 		"state-secret",
 		"callback-code",
 		"verifier-secret",
+		"https://id.example",
 	} {
 		if strings.Contains(got, raw) {
 			t.Fatalf("redacted text leaked %q: %s", raw, got)
