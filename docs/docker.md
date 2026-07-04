@@ -56,10 +56,12 @@ wiring is current when config, credentials, cache, and terminal checks allow
 it.
 
 Username/token credentials currently come from environment variables, the flat
-config file, or on supported Unix builds the private credential file. Docker
-examples pass them through environment variables; CLI flags currently override
-channel and config path only. Environment and flat config values take
-precedence over saved credentials.
+config file, or saved credentials on supported platforms. The Linux container
+uses the restrictive Unix credential-file fallback; Windows host binaries use
+native Windows Credential Manager instead. Docker examples pass credentials
+through environment variables; CLI flags currently override channel and config
+path only. Environment and flat config values take precedence over saved
+credentials.
 
 Set credentials in your shell:
 
@@ -145,8 +147,8 @@ docker run --rm \
 The setup command does not write OAuth tokens, refresh tokens, callback codes,
 OAuth state, authorization URLs, or client secrets. Use environment variables,
 the flat config file, or the private credential file created by `twi login` in
-the Linux container for credentials. The container runs as UID/GID `10001`, so bind-mounted config
-directories must be writable by that account.
+the Linux container for credentials. The container runs as UID/GID `10001`, so
+bind-mounted config directories must be writable by that account.
 
 ## Deploy Notes
 

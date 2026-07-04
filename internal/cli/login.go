@@ -43,10 +43,11 @@ Behavior:
   returned token with Twitch, and prints only identity/scope status. Access
   tokens, refresh tokens, callback codes, OAuth state, authorization URLs, and
   client secrets are not printed. Successful logins save tokens through the
-  private credential store on supported Unix builds; on non-Unix builds the
-  credential-file fallback is disabled, so use environment variables or a
-  private flat config file. Environment variables and flat config credentials
-  still take precedence when present.
+  private credential store on supported platforms. Unix builds use the
+  restrictive credential-file fallback; Windows builds use native Windows
+  Credential Manager. Other non-Unix builds keep saved credentials disabled, so
+  use environment variables or a private flat config file. Environment variables
+  and flat config credentials still take precedence when present.
 
 Flags:
 `
@@ -285,7 +286,7 @@ func validateLoginConfig(request auth.LoginRequest) error {
 		missing = append(missing, "--redirect-uri")
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("login requires %s; existing env/config token credentials still work for `twi chat`, and saved credential files are used on supported Unix builds when those sources are empty", strings.Join(missing, " and "))
+		return fmt.Errorf("login requires %s; existing env/config token credentials still work for `twi chat`, and saved credentials are used on supported platforms when those sources are empty", strings.Join(missing, " and "))
 	}
 	return nil
 }
@@ -304,8 +305,8 @@ func printLoginDryRun(stdout io.Writer, cfg config.Config, redirectURI string, t
 	fmt.Fprintf(stdout, "Client ID: %s\n", presentMissing(cfg.Twitch.ClientID))
 	fmt.Fprintf(stdout, "Client secret: %s\n", presentMissing(cfg.Twitch.ClientSecret))
 	fmt.Fprintln(stdout, "Real login opens a browser and waits for a localhost callback.")
-	fmt.Fprintln(stdout, "On supported Unix builds, tokens are validated, saved privately, and never printed.")
-	fmt.Fprintln(stdout, "For live chat, saved credentials are used on supported Unix builds when environment variables or flat config credentials are empty.")
+	fmt.Fprintln(stdout, "On supported platforms, tokens are validated, saved privately, and never printed.")
+	fmt.Fprintln(stdout, "For live chat, saved credentials are used when environment variables or flat config credentials are empty.")
 }
 
 func presentMissing(value string) string {

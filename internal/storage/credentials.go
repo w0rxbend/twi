@@ -286,6 +286,16 @@ func (s *CredentialFileStore) Path() string {
 	return s.plan.Path
 }
 
+// StoreLabel returns the user-facing name for diagnostics.
+func (s *CredentialFileStore) StoreLabel() string {
+	return "credential file"
+}
+
+// StoreLocation returns the user-facing storage location for diagnostics.
+func (s *CredentialFileStore) StoreLocation() string {
+	return s.Path()
+}
+
 // LoadCredentials reads and parses the fallback credential file. A missing
 // directory or file is reported as an empty store.
 func (s *CredentialFileStore) LoadCredentials(ctx context.Context) (CredentialRecord, bool, error) {
@@ -786,22 +796,30 @@ func (e credentialStoreError) Is(target error) bool {
 }
 
 func credentialFileOperationError(action, path string, err error, redactor auth.Redactor) error {
+	return credentialOperationError(action, path, err, redactor)
+}
+
+func credentialOperationError(action, location string, err error, redactor auth.Redactor) error {
 	if err == nil {
 		return nil
 	}
 	return credentialStoreError{
-		message: sanitizedCredentialMessage(action, path, err.Error(), redactor),
+		message: sanitizedCredentialMessage(action, location, err.Error(), redactor),
 		matches: credentialErrorMatches(err),
 	}
 }
 
 func credentialFileMalformedError(action, path string, err error) error {
+	return credentialMalformedPayloadError(action, path, err)
+}
+
+func credentialMalformedPayloadError(action, location string, err error) error {
 	matches := []error{ErrMalformedCredentialFile}
 	if errors.Is(err, ErrUnsupportedCredentialFileFormat) {
 		matches = append(matches, ErrUnsupportedCredentialFileFormat)
 	}
 	return credentialStoreError{
-		message: sanitizedCredentialMessage(action, path, ErrMalformedCredentialFile.Error(), auth.Redactor{}),
+		message: sanitizedCredentialMessage(action, location, ErrMalformedCredentialFile.Error(), auth.Redactor{}),
 		matches: matches,
 	}
 }

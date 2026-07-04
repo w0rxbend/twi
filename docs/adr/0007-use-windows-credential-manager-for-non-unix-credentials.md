@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for post-release auth-storage implementation.
+Accepted. Implemented by T010 for Windows builds.
 
 ## Context
 
@@ -47,9 +47,8 @@ References:
 ## Decision
 
 Keep the existing Unix credential-file fallback for Linux and macOS. For
-Windows, implement a native Windows Credential Manager backend before enabling
-saved credential persistence. Do not implement a Windows JSON credential file
-for OAuth secrets.
+Windows, use the native Windows Credential Manager backend. Do not implement a
+Windows JSON credential file for OAuth secrets.
 
 The Windows backend must:
 
@@ -80,7 +79,7 @@ Windows Credential Manager.
 
 DACL inheritance and reparse-point/no-follow requirements do not apply to the
 selected Windows backend because it does not create, open, or delete a
-user-controlled credential file path. T010 must not enable the current
+user-controlled credential file path. T010 did not enable the current
 credential-file fallback on Windows. If a future task proposes a Windows file
 backend instead, it must be a separate decision with exact DACL, owner SID,
 inheritance, final-handle validation, and reparse-point semantics before code
@@ -106,7 +105,7 @@ enough to test and review.
 
 ## Testing And Support
 
-T010 must include:
+T010 includes:
 
 - deterministic unit tests for payload serialization, redaction, missing
   credentials, provider failures, save/load/delete behavior, overwrite behavior,
@@ -122,16 +121,16 @@ T010 must include:
   available and that unsupported non-Unix platforms still fail before OAuth
   starts.
 
-Until T010 implements those checks and the backend, current Windows builds keep
-using environment variables or a private flat config file for Twitch
-credentials.
+Real Windows-host execution of the native smoke remains environment-dependent.
+The opt-in smoke test uses a namespaced fake Twitch credential record and never
+requires real Twitch credentials.
 
 ## Consequences
 
-- Windows gets a concrete implementation target without weakening the current
-  storage boundary.
+- Windows gets a concrete implementation without weakening the current storage
+  boundary.
 - The current non-Unix file fallback remains disabled.
 - Linux and macOS credential-file behavior remains unchanged.
 - Cross-platform support claims stay conservative until platform tests exist.
-- Users who need Windows persistence must wait for the native backend or use
-  env/config credentials.
+- Users on unsupported non-Unix targets must use env/config credentials until a
+  backend is selected and implemented for that target.

@@ -109,15 +109,17 @@ var buildDoctorReport = func(ctx context.Context, cfg config.Config, cfgErr erro
 }
 
 var newCredentialStore = func() (storage.CredentialStore, error) {
-	return storage.NewDefaultCredentialFileStore()
+	return storage.NewDefaultCredentialStore()
 }
 
 type credentialLoadStatus struct {
-	Path    string
-	Present bool
-	Err     error
-	Store   storage.CredentialStore
-	Record  storage.CredentialRecord
+	Path     string
+	Label    string
+	Location string
+	Present  bool
+	Err      error
+	Store    storage.CredentialStore
+	Record   storage.CredentialRecord
 }
 
 // Run executes the command line entrypoint. It returns a process exit code.
@@ -439,7 +441,7 @@ func runDoctor(args []string, stdout, stderr io.Writer) int {
 	logger.Log(context.Background(), "cli.doctor.start")
 
 	report := buildDoctorReport(context.Background(), cfg, loadErr)
-	if credentialStatus.Path != "" || credentialStatus.Present || credentialStatus.Err != nil {
+	if credentialStatus.Path != "" || credentialStatus.Label != "" || credentialStatus.Location != "" || credentialStatus.Present || credentialStatus.Err != nil {
 		check := credentialFileDoctorCheck(credentialStatus)
 		fmt.Fprintf(stdout, "[%s] %s: %s\n", check.Status, check.Name, check.Detail)
 	}
@@ -464,6 +466,8 @@ func applyStoredCredentials(ctx context.Context, cfg *config.Config) (credential
 	status := credentialLoadStatus{}
 	if store != nil {
 		status.Path = credentialStorePath(store)
+		status.Label = credentialStoreLabel(store)
+		status.Location = credentialStoreLocation(store)
 		status.Store = store
 	}
 	if err != nil {
@@ -498,6 +502,26 @@ func credentialStorePath(store storage.CredentialStore) string {
 		return withPath.Path()
 	}
 	return ""
+}
+
+func credentialStoreLabel(store storage.CredentialStore) string {
+	if withLabel, ok := store.(interface{ StoreLabel() string }); ok {
+		return strings.TrimSpace(withLabel.StoreLabel())
+	}
+	if credentialStorePath(store) != "" {
+		return "credential file"
+	}
+	return "credential store"
+}
+
+func credentialStoreLocation(store storage.CredentialStore) string {
+	if withLocation, ok := store.(interface{ StoreLocation() string }); ok {
+		return strings.TrimSpace(withLocation.StoreLocation())
+	}
+	if path := credentialStorePath(store); path != "" {
+		return path
+	}
+	return credentialStoreLabel(store)
 }
 
 func applyCredentialRecord(cfg *config.Config, record storage.CredentialRecord) {
@@ -586,29 +610,36 @@ func normalizeIRCOAuthToken(value string) string {
 }
 
 func credentialFileDoctorCheck(status credentialLoadStatus) app.DoctorCheck {
-	path := strings.TrimSpace(status.Path)
-	if path == "" {
-		path = "credential file"
+	label := strings.TrimSpace(status.Label)
+	if label == "" {
+		label = "credential store"
 	}
-	displayPath := config.RedactDisplayValue(path)
+	location := strings.TrimSpace(status.Location)
+	if location == "" {
+		location = strings.TrimSpace(status.Path)
+	}
+	if location == "" {
+		location = label
+	}
+	displayLocation := config.RedactDisplayValue(location)
 	if status.Err != nil {
 		return app.DoctorCheck{
-			Name:   "credential file",
+			Name:   label,
 			Status: app.DoctorStatusWarn,
-			Detail: fmt.Sprintf("%s load failed: %s; using env/config/defaults", displayPath, config.RedactDisplayValue(status.Err.Error())),
+			Detail: fmt.Sprintf("%s load failed: %s; using env/config/defaults", displayLocation, config.RedactDisplayValue(status.Err.Error())),
 		}
 	}
 	if status.Present {
 		return app.DoctorCheck{
-			Name:   "credential file",
+			Name:   label,
 			Status: app.DoctorStatusOK,
-			Detail: displayPath + " loaded",
+			Detail: displayLocation + " loaded",
 		}
 	}
 	return app.DoctorCheck{
-		Name:   "credential file",
+		Name:   label,
 		Status: app.DoctorStatusWarn,
-		Detail: displayPath + " not found; run `twi login` after configuring a Twitch app client",
+		Detail: displayLocation + " not found; run `twi login` after configuring a Twitch app client",
 	}
 }
 

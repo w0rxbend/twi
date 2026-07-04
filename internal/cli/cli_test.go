@@ -1510,7 +1510,7 @@ func TestDoctorWarnsWhenCredentialFileFallbackUnsupported(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("Run returned %d, want 0; stderr=%q", code, stderr.String())
 	}
-	for _, want := range []string{"[warn] credential file:", "disabled on non-Unix builds", "environment variables", "private flat config file", "using env/config/defaults"} {
+	for _, want := range []string{"[warn] credential store:", "disabled on non-Unix builds", "environment variables", "private flat config file", "using env/config/defaults"} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Fatalf("doctor output missing %q: %s", want, stdout.String())
 		}
@@ -1848,6 +1848,9 @@ func clearTwitchCredentialEnv(t *testing.T) {
 func writeStoredCredentialFixture(t *testing.T, record storage.CredentialRecord) {
 	t.Helper()
 	store, err := storage.NewDefaultCredentialFileStore()
+	if errors.Is(err, storage.ErrUnsupportedCredentialFilePlatform) {
+		t.Skipf("credential-file fallback unsupported on this platform: %v", err)
+	}
 	if err != nil {
 		t.Fatalf("NewDefaultCredentialFileStore returned error: %v", err)
 	}
@@ -1858,6 +1861,11 @@ func writeStoredCredentialFixture(t *testing.T, record storage.CredentialRecord)
 
 func writeRawStoredCredentialFile(t *testing.T, content string) {
 	t.Helper()
+	if _, err := storage.NewDefaultCredentialFileStore(); errors.Is(err, storage.ErrUnsupportedCredentialFilePlatform) {
+		t.Skipf("credential-file fallback unsupported on this platform: %v", err)
+	} else if err != nil {
+		t.Fatalf("NewDefaultCredentialFileStore returned error: %v", err)
+	}
 	path, err := storage.DefaultCredentialFilePath()
 	if err != nil {
 		t.Fatalf("DefaultCredentialFilePath returned error: %v", err)

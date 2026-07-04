@@ -1,19 +1,19 @@
 # Authentication
 
-This document describes the authentication model for `twi`. It covers the current environment/config-file credential path for Twitch IRC, the OAuth login command, and the restrictive credential-file fallback.
+This document describes the authentication model for `twi`. It covers the current environment/config-file credential path for Twitch IRC, the OAuth login command, the restrictive Unix credential-file fallback, and the Windows Credential Manager backend.
 
 ## Current State
 
-- On supported Unix builds, `twi login` starts a Twitch authorization-code login through the browser/local-callback flow, validates the returned token, saves it through the private credential store, and reports identity/scope/storage status without printing token values. On non-Unix builds, the credential-file fallback is disabled before the browser opens, and users should use environment variables or a private flat config file.
+- On supported Unix and Windows builds, `twi login` starts a Twitch authorization-code login through the browser/local-callback flow, validates the returned token, saves it through the private credential store, and reports identity/scope/storage status without printing token values. Unix builds use the restrictive credential-file fallback. Windows builds use native Windows Credential Manager. Other non-Unix builds stop before the browser opens, and users should use environment variables or a private flat config file.
 - Mock chat is ready and needs no Twitch credentials.
-- The MVP accepts Twitch credentials from environment variables, a local flat config file, or on supported Unix builds the private credential file. CLI flags currently override the config path and channels, not username or token values.
+- The MVP accepts Twitch credentials from environment variables, a local flat config file, or saved credentials on supported platforms. CLI flags currently override the config path and channels, not username or token values.
 - Multi-channel live IRC read/send is partially shipped for configured credentials, including composer sends, selected-message replies, and `/me` actions.
 - Multi-channel UX is partially shipped: the keyboard-first sidebar, command palette, optional mouse controls, and selected-message inspect panel are current behavior.
 - `twi doctor` diagnostics are partially shipped; Twitch OAuth validation is wired into doctor and reports identity, expiry, required IRC scopes, username mismatch, and refresh availability without printing credential values.
-- The internal credential storage boundary and Unix-only restrictive file
-  fallback are wired into `twi login`, `twi chat`, `twi config show`, and
-  `twi doctor`. `twi setup` can update non-secret config values and hand off
-  to login.
+- The internal credential storage boundary, Unix-only restrictive file
+  fallback, and Windows Credential Manager backend are wired into `twi login`,
+  `twi chat`, `twi config show`, and `twi doctor`. `twi setup` can update
+  non-secret config values and hand off to login.
   Richer EventSub/API chat support remains later work.
 
 ## MVP Credential Model
@@ -33,7 +33,7 @@ The implemented config sources are, from highest to lowest priority:
 1. CLI flags for `--config` and `--channel`.
 2. Environment variables.
 3. Config file.
-4. Saved credential file values for empty credential fields on supported Unix builds.
+4. Saved credential values for empty credential fields on supported platforms.
 5. Defaults.
 
 `twi setup` is the current guided path for non-secret local configuration. It
@@ -65,8 +65,8 @@ When live Twitch IRC login fails with an authentication error, `twi` tries one O
 - Client ID.
 - Client secret.
 
-The refresh request is sent to Twitch's OAuth token endpoint. On supported Unix
-builds, the refreshed access token and refresh token are saved through the
+The refresh request is sent to Twitch's OAuth token endpoint. On supported
+platforms, the refreshed access token and refresh token are saved through the
 private credential store. If the credential store is unavailable or saving
 fails, live chat keeps using the refreshed tokens in memory for the current
 process and reports a redacted warning with next-step guidance. Refresh never
@@ -115,10 +115,9 @@ The command requests the MVP scopes by default:
 - `chat:edit`
 
 On supported Unix builds, the command saves successful login results through
-the restrictive credential file fallback. On non-Unix builds, the command stops
-before opening the browser because the file fallback is disabled. Windows saved
-credentials are planned through native Credential Manager rather than a
-credential file.
+the restrictive credential file fallback. On Windows builds, it saves through
+native Windows Credential Manager. On other non-Unix builds, the command stops
+before opening the browser because no saved-credential backend is enabled.
 Environment variables and flat config values still take precedence when
 present, so remove duplicates from shell profiles, `.env`, or `config.toml`
 after confirming saved credentials work.
@@ -150,7 +149,8 @@ The internal login boundary now lives in `internal/auth`. It defines:
 
 The CLI converts completed login results into `storage.CredentialRecord` and
 saves them through `CredentialStore`. Token values remain typed secrets until
-the storage-owned marshal path deliberately reveals them for the private file.
+the storage-owned marshal path deliberately reveals them for the private Unix
+file or Windows Credential Manager credential blob.
 
 The adapter uses the MVP scopes by default:
 
@@ -173,19 +173,16 @@ for login/setup work:
   access token, refresh token, token type, scopes, expiry, and update time.
 - `MemoryCredentialStore` and `FailingCredentialStore` fakes for unit tests.
 - `CredentialFileStore`, the restrictive Unix-only local fallback implementation.
+- `WindowsCredentialManagerStore`, the Windows-only native Credential Manager
+  implementation.
 - A versioned fallback JSON record format for Twitch credentials.
 
 `CredentialRecord` stores token values as `auth.Secret`, so ordinary formatting
-and ordinary JSON encoding remain redacted. The fallback file implementation
-must use `MarshalCredentialFile` and `ParseCredentialFile`; that marshal helper
-is the explicit storage-owned reveal path for access and refresh tokens. Do not
-use it for logs, diagnostics, screenshots, snapshots, or user-facing output.
-
-No OS keychain backend is implemented today. The interface is shaped so one can
-be added later after dependency, platform, and support tradeoffs are explicit.
-[ADR 0007](adr/0007-use-windows-credential-manager-for-non-unix-credentials.md)
-selects native Windows Credential Manager for the future Windows backend, but
-users should not expect keychain behavior from the current binary.
+and ordinary JSON encoding remain redacted. The Unix file implementation and
+the Windows Credential Manager implementation must use `MarshalCredentialFile`
+and `ParseCredentialFile`; that marshal helper is the explicit storage-owned
+reveal path for access and refresh tokens. Do not use it for logs, diagnostics,
+screenshots, snapshots, or user-facing output.
 
 The credential-file fallback is supported only on Go `unix` builds today,
 including Linux and macOS. It is a separate local credential file under the
@@ -212,13 +209,25 @@ fallback implementation:
 Windows and other non-Unix builds do not have this file fallback enabled. The
 current binary does not enforce Windows owner-only ACLs, DACL inheritance
 rules, or reparse-point/no-follow protections for credential files, and it does
-not pretend that Unix `0700`/`0600` mode semantics apply there. The selected
-future Windows path is native Windows Credential Manager, not a JSON credential
-file. Until that backend is implemented, `twi chat`, `twi config show`, and
-`twi doctor` continue to work with environment variables and the flat config
-file; `twi doctor` reports the disabled file fallback as a warning. `twi login`
-reports a redacted actionable error before starting OAuth so tokens are not
-obtained without a supported persistence path.
+not pretend that Unix `0700`/`0600` mode semantics apply there.
+
+Windows instead stores one generic Windows Credential Manager entry for the
+current user:
+
+- target name: `w0rxbend/twi/twitch-oauth`;
+- credential type: `CRED_TYPE_GENERIC`;
+- persistence: `CRED_PERSIST_LOCAL_MACHINE`;
+- payload: the same versioned Twitch credential record described below.
+
+The Windows backend does not create a `credentials.json` file and does not
+claim protection against the same Windows user, local administrators,
+credential-export tools, malware running in the user's session, or enterprise
+policy that permits credential inspection. Other non-Unix builds keep saved
+credentials disabled until a native backend is selected; on those platforms,
+`twi chat`, `twi config show`, and `twi doctor` continue to work with
+environment variables and the flat config file. `twi login` reports a redacted
+actionable error before starting OAuth so tokens are not obtained without a
+supported persistence path.
 
 The fallback JSON format is versioned. Version 1 records only Twitch OAuth
 credential material and safe identity metadata:
@@ -254,9 +263,12 @@ Refresh tokens should be used when available and appropriate for the selected OA
 
 ## Startup And Doctor Checks
 
-Startup currently checks that username and OAuth token are present after applying
-env/config and saved credential values. `twi doctor` reports credential and
-credential-file presence without printing raw credential values.
+Startup currently checks that username and OAuth token are present after
+applying env/config and saved credential values. `twi doctor` reports
+credential and credential-store presence without printing raw credential values.
+On Unix this check names the credential file path. On Windows it names the
+Windows Credential Manager target. On unsupported platforms it warns that saved
+credential persistence is disabled and points to env/config credentials.
 
 Current `twi doctor` behavior:
 
