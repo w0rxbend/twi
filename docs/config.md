@@ -19,7 +19,7 @@ This document describes the configuration model for `twi`. The implemented parse
   for auth, network, asset, render, send, and connection diagnostics rather
   than raw transport structs or raw tag maps.
 - Multi-channel UX is partially shipped: per-channel history, unread counts, scroll, drafts, replies, sends, local view filters, keyboard sidebar, command palette, optional mouse interactions, and selected-message inspect are current behavior.
-- Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned.
+- Inline terminal image support is partially shipped: bounded image decode/cell preparation, renderer cells, stable fallback rows, cache boundaries, standard emoji provider metadata, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned for a compatible graphics terminal session.
 - `twi setup` can create or update non-secret flat config values and hand off
   to login. On supported Unix builds, `twi login` can run the OAuth
   browser/callback flow and save returned tokens through the restrictive
@@ -207,8 +207,8 @@ This example matches the current flat parser. A richer TOML schema can be added 
 
 ```toml
 twitch_username = "my_login"
-twitch_oauth_token = "PLACEHOLDER_TWITCH_OAUTH_TOKEN"
-twitch_refresh_token = "PLACEHOLDER_TWITCH_REFRESH_TOKEN"
+twitch_oauth_token = ""
+twitch_refresh_token = ""
 twitch_client_id = ""
 twitch_client_secret = ""
 default_channels = "somechannel"
@@ -226,9 +226,9 @@ debug_log_path = ""
 ```
 
 Do not paste a real token into shared docs, commits, logs, or support issues.
-Prefer `twi login` for saved tokens on supported Unix builds. If you keep
-credentials in this flat config file too, keep the file private to your user
-account, for example with
+Shared config examples should leave secret values empty. Prefer `twi login` for
+saved tokens on supported Unix builds. If you keep credentials in this flat
+config file too, keep the file private to your user account, for example with
 `chmod 600`. `twi` does not automatically migrate values out of `config.toml`,
 and flat config values still take precedence over saved credentials.
 
@@ -278,7 +278,8 @@ event counts, and hostnames.
 restrictive fallback-file store on supported Unix builds; non-Unix builds keep
 environment variables and private flat config files as the supported credential
 path. `twi setup` is implemented for non-secret settings and login handoff.
-Manual Kitty/Ghostty validation is still planned.
+Manual Kitty/Ghostty validation is still planned for a compatible graphics
+terminal session.
 Twitch IRC chat is current when username, OAuth token, and at least one channel
 are configured. Live image startup is current for enabled asset kinds when
 config, credentials, cache writability, and terminal capability allow it.

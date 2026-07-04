@@ -45,6 +45,43 @@ release dependencies. Native binary smokes run with temporary isolated
 `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` directories, plus empty Twitch credential
 environment variables, so local config files and saved credentials are not read.
 
+## Installing A Built Binary
+
+The dry-run writes executable binaries directly into the output directory. Pick
+the file that matches the target machine, verify the matching checksum, then
+copy it into a directory on `PATH`.
+
+Linux amd64 example:
+
+```sh
+cd /tmp/twi-release
+sha256sum -c twi_linux_amd64.sha256
+install -m 0755 twi_linux_amd64 "$HOME/.local/bin/twi"
+twi --help
+```
+
+macOS users can verify with `shasum -a 256 -c twi_darwin_arm64.sha256` when
+`sha256sum` is unavailable. Windows builds are emitted as
+`twi_windows_amd64.exe`. No package-manager manifest, signing, notarization,
+registry publishing, or SBOM/provenance step is implemented in this release
+candidate path.
+
+## Container Usage
+
+Build and run the local image:
+
+```sh
+docker build -t twi:local .
+docker run --rm twi:local --help
+docker run --rm -it twi:local chat --mock --channel demo
+```
+
+For live chat, pass credentials through environment variables, an ignored
+local `.env`, a private runtime secret mechanism, or a mounted private config
+directory. Never bake OAuth tokens, refresh tokens, callback codes, client
+secrets, authorization URLs, debug logs, screenshots, or local config files
+into the image.
+
 ## Automated Checks
 
 The local script and `.github/workflows/release.yml` perform these checks:
@@ -86,3 +123,10 @@ The release dry-run does not prove:
 Record those checks in [manual-validation.md](manual-validation.md) when the
 right terminal and credentials are available. If an environment is unavailable,
 document the skip reason instead of claiming support.
+
+Current release-candidate evidence is credential-free. The T004 manual matrix
+covered PTY mock chat, resize, keyboard workflows, setup/login dry-run,
+doctor/config smokes, debug-log privacy, and non-Kitty fallbacks. Credentialed
+Twitch, exact Docker CLI smokes on a Docker-enabled host, and real Kitty/Ghostty
+inline image drawing remain the release-specific checks to complete before
+making broader support claims.

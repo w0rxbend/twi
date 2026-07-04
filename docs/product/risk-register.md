@@ -1,11 +1,14 @@
 # Risk Register
 
-Status: Risk register aligned with the current MVP. Mock chat is ready;
-multi-channel live IRC read/send, diagnostics, multi-channel UX, and inline
-image plumbing are partial; on supported Unix builds login can save through the
-restrictive credential file fallback; setup can write non-secret config and hand off to login;
-refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image
-validation remain planned.
+Status: Risk register aligned with the release-candidate MVP. Mock chat is
+ready; multi-channel live IRC read/send, diagnostics, multi-channel UX, redacted
+debug logging, release binary/container packaging, and inline image plumbing are
+partial or current for their documented paths; on supported Unix builds login
+can save through the restrictive credential file fallback; setup can write
+non-secret config and hand off to login. Refresh-token persistence after IRC
+reconnect, secure non-Unix credential persistence, credentialed Twitch release
+validation, exact Docker CLI validation, and manual Kitty/Ghostty image
+validation remain planned or environment-dependent.
 
 Credential assumption: Twitch username/token values currently come from
 environment variables, the flat config file, or on supported Unix builds the private credential file.
@@ -18,7 +21,7 @@ Likelihood and impact use `Low`, `Medium`, or `High`.
 | --- | --- | --- | --- | --- | --- | --- |
 | RR-001 | Twitch auth scopes or token ownership are wrong, causing read/send failures. | High | High | Require `chat:read` and `chat:edit` for IRC MVP; validate token when Helix is available; show actionable errors without printing secrets. | Twitch integration engineer | Invalid-token and missing-scope tests; manual login/config failure check; redaction tests. |
 | RR-002 | Twitch rate limits or phone verification block sending. | Medium | High | Add local send queue, visible cooldown/status, clear failure messages, and preserve composer text on failure. | Twitch integration engineer | Fake sender rate-limit tests; manual failed-send scenario; no lost composer text. |
-| RR-003 | Terminal image protocol behavior varies across Kitty, Ghostty, and non-Kitty terminals. | High | Medium | Capability-detect image support; keep image renderer behind interface; ship text/initial fallbacks first. | Asset/image engineer | `twi doctor` image signals; manual Kitty/Ghostty/non-Kitty matrix still pending; golden fallback snapshots. |
+| RR-003 | Terminal image protocol behavior varies across Kitty, Ghostty, and non-Kitty terminals. | High | Medium | Capability-detect image support; keep image renderer behind interface; ship text/initial fallbacks first; do not claim Kitty/Ghostty drawing until manual evidence exists. | Asset/image engineer | `twi doctor` image signals; non-Kitty fallback manual evidence; Kitty/Ghostty image smoke still pending; golden fallback snapshots. |
 | RR-004 | Image cache or asset downloads slow chat rendering. | Medium | High | Never block Bubble Tea `Update` or `View`; async asset pipeline; bounded cache; placeholders reserve width. | Asset/image engineer | Tests with delayed asset fake; search for blocking I/O in `View`; stress run with cache misses. |
 | RR-005 | Busy channels create an unbounded animation backlog or sluggish UI. | High | High | Bound reveal queue; coalesce/skip reveals under load; support reduced/off modes; render off-screen rows statically. | Motion engineer | Fake clock throughput tests; stress harness; queue length assertions. |
 | RR-006 | Unicode, emoji, ANSI styles, or emote placeholders are corrupted by reveal/wrapping. | High | High | Build reveal units from normalized render fragments, not raw strings; use width-aware and grapheme-safe logic. | Rendering engineer and motion engineer | Golden partial-frame tests; grapheme tests; wide-character layout tests. |
@@ -32,6 +35,7 @@ Likelihood and impact use `Low`, `Medium`, or `High`.
 | RR-014 | Visual design becomes a debug console or unreadable in small terminals. | Medium | Medium | Define layout snapshots; correct low-contrast username colors; hide sidebar/status details in narrow mode. | Core TUI engineer and rendering engineer | Golden layouts at narrow/normal/wide widths; manual resize check. |
 | RR-015 | OAuth login UX is blocked by Twitch app registration or local callback constraints. | Medium | Medium | Keep MVP token config path; support a localhost callback flow with clear dry-run and fallback docs; document redirect URI requirements. | Twitch integration engineer | Login command tests; auth docs; manual token setup docs; redaction checkpoint. |
 | RR-016 | Stored credential files are created or reused with unsafe permissions. | Medium | High | Keep credential persistence behind `CredentialStore`; support the file fallback only on Unix builds; require exact `0700` credential directories, `0600` credential files, symlink rejection, and no-follow opens; disable non-Unix file persistence until ACL and reparse-point protections are implemented; do not claim OS keychain support until implemented. | Twitch integration engineer and QA/release engineer | Storage permission unit tests; non-Unix gated tests; `config show`/`doctor` redaction checks; manual docs review. |
+| RR-017 | Release artifacts are treated as fully published despite incomplete environment-specific validation. | Medium | Medium | Keep the release dry-run credential-free; separate Docker, credentialed Twitch, Kitty/Ghostty, registry, signing, notarization, and package-manager claims from the automated artifact build; document skipped environment checks explicitly. | QA/release engineer | Release dry-run artifacts and checksums; exact Docker CLI smokes in final validation; manual-validation evidence for credentialed and terminal-specific checks. |
 
 ## Highest Early Risks
 

@@ -13,7 +13,7 @@
 
 `twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-The project is currently an MVP-shaped Go app: mock chat is ready without the network; live Twitch IRC read/send, diagnostics, redacted debug logging, multi-channel UX, inline image plumbing, OAuth login, setup, and Unix-only restrictive credential-file persistence are partially shipped; refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image validation are still planned. Current manual terminal evidence is recorded in [docs/manual-validation.md](docs/manual-validation.md).
+The project is currently an MVP-shaped Go app: mock chat is ready without the network; live Twitch IRC read/send, diagnostics, redacted debug logging, multi-channel UX, inline image plumbing, OAuth login, setup, and Unix-only restrictive credential-file persistence are partially shipped. Release binary/container packaging is available through the dry-run workflow. Refresh-token persistence after IRC reconnect, secure non-Unix credential persistence, credentialed Twitch release validation, and manual Kitty/Ghostty image validation remain planned or environment-dependent. Current manual terminal evidence is recorded in [docs/manual-validation.md](docs/manual-validation.md).
 
 ```text
         +---------------------------------------------+
@@ -65,6 +65,19 @@ SHA-256 checksums, builds the Docker image, and smokes help, doctor, and mock
 chat with local config and Twitch credentials isolated. More detail:
 [Release Packaging](docs/release.md).
 
+Install a dry-run binary only after verifying its checksum:
+
+```sh
+cd /tmp/twi-release
+sha256sum -c twi_linux_amd64.sha256
+install -m 0755 twi_linux_amd64 "$HOME/.local/bin/twi"
+twi --help
+```
+
+Pick the artifact that matches your OS and CPU. There are no package-manager
+manifests, signing, notarization, or registry publishing steps in this release
+candidate path yet.
+
 ## Live Twitch Chat
 
 Live mode needs a Twitch login, an IRC OAuth token, and at least one channel. Repeat `--channel` to join multiple Twitch IRC channels. The token needs `chat:read`; sending from the composer also needs `chat:edit`. Username/token credentials can come from environment variables, the flat config file, or on Unix builds the private credential file created by `twi login`. Environment and flat config values take precedence over saved credentials. CLI flags currently override channels and config path, not username or token values.
@@ -83,7 +96,7 @@ or client secrets.
 
 ```sh
 export TWI_TWITCH_USERNAME="your_twitch_login"
-export TWI_TWITCH_OAUTH_TOKEN="<your-twitch-oauth-token>"
+export TWI_TWITCH_OAUTH_TOKEN="<oauth token from Twitch>"
 
 go run ./cmd/twi chat --channel somechannel
 go run ./cmd/twi chat --channel onechannel --channel anotherchannel
@@ -93,10 +106,10 @@ The shorter dotenv-style aliases also work:
 
 ```sh
 export TWITCH_USERNAME="your_twitch_login"
-export TWITCH_ACCESS_TOKEN="<your-twitch-access-token>"
+export TWITCH_ACCESS_TOKEN="<oauth token from Twitch>"
 export TWITCH_CLIENT_ID="your_client_id"
-export TWITCH_CLIENT_SECRET="<your-twitch-client-secret>"
-export TWITCH_REFRESH_TOKEN="<your-twitch-refresh-token>"
+export TWITCH_CLIENT_SECRET="<client secret from Twitch>"
+export TWITCH_REFRESH_TOKEN="<refresh token from Twitch>"
 ```
 
 If Twitch IRC rejects the access token during login, `twi` will try one in-memory OAuth refresh and reconnect when `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET`, and `TWITCH_REFRESH_TOKEN` are also configured. It does not write the refreshed token back to disk yet.
@@ -112,7 +125,7 @@ The command needs a Twitch app client ID and client secret from environment vari
 
 ```sh
 export TWI_TWITCH_CLIENT_ID="your_twitch_client_id"
-export TWI_TWITCH_CLIENT_SECRET="<your-twitch-client-secret>"
+export TWI_TWITCH_CLIENT_SECRET="<client secret from Twitch>"
 
 go run ./cmd/twi login
 ```
@@ -207,8 +220,8 @@ Example:
 
 ```toml
 twitch_username = "your_twitch_login"
-twitch_oauth_token = "PLACEHOLDER_TWITCH_OAUTH_TOKEN"
-twitch_refresh_token = "PLACEHOLDER_TWITCH_REFRESH_TOKEN"
+twitch_oauth_token = ""
+twitch_refresh_token = ""
 twitch_client_id = ""
 twitch_client_secret = ""
 default_channels = "somechannel"
@@ -240,9 +253,28 @@ no-follow semantics before validating the opened file.
 
 Nested TOML tables are not implemented yet. Keep the file flat.
 
-Prefer `twi login` for saved tokens on supported Unix builds. If you also keep real tokens in the flat
-config, keep that file private to your user account, for example with
+Prefer `twi login` for saved tokens on supported Unix builds. Leave secret
+values empty in shared examples and docs. If you also keep real tokens in the
+flat config, keep that file private to your user account, for example with
 `chmod 600`; flat config values still take precedence over saved credentials.
+
+## Known Release Gaps
+
+The release candidate path is intentionally explicit about what is not yet
+claimed:
+
+- Credentialed Twitch read/send/reconnect and browser login still require a
+  real Twitch app, username, token set, and manual validation evidence.
+- Exact Docker CLI smokes need a Docker-enabled host; Podman-equivalent smokes
+  do not replace the final Docker check.
+- Kitty/Ghostty inline image drawing is not claimed until a compatible graphics
+  terminal session is recorded in [docs/manual-validation.md](docs/manual-validation.md).
+- Refreshed IRC tokens are kept in memory for the current process and are not
+  persisted yet.
+- Non-Unix builds do not have a secure credential-file backend or OS keychain
+  backend yet.
+- Package-manager manifests, signing, notarization, registry publishing, and
+  SBOM/provenance are post-release work.
 
 ## Docker And Deploy
 
@@ -319,4 +351,5 @@ GOTOOLCHAIN=local GOCACHE=/tmp/twi-gocache GOMODCACHE=/tmp/twi-gomodcache go tes
 
 ## Project Direction
 
-Near-term work is focused on keeping the MVP sharp: release packaging and manual terminal validation. The source of truth lives in the product docs under `docs/`.
+Near-term work is focused on final release validation and post-release auth
+storage hardening. The source of truth lives in the product docs under `docs/`.

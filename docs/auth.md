@@ -45,10 +45,10 @@ Suggested environment variables:
 
 ```sh
 TWITCH_USERNAME="your_twitch_login"
-TWITCH_ACCESS_TOKEN="<your-twitch-oauth-token>"
-TWITCH_REFRESH_TOKEN="<your-twitch-refresh-token>"
+TWITCH_ACCESS_TOKEN="<oauth token from Twitch>"
+TWITCH_REFRESH_TOKEN="<refresh token from Twitch>"
 TWITCH_CLIENT_ID="your_twitch_client_id"
-TWITCH_CLIENT_SECRET="<your-twitch-client-secret>"
+TWITCH_CLIENT_SECRET="<client secret from Twitch>"
 ```
 
 The canonical `TWI_TWITCH_USERNAME`, `TWI_TWITCH_OAUTH_TOKEN`, `TWI_TWITCH_REFRESH_TOKEN`, `TWI_TWITCH_CLIENT_ID`, and `TWI_TWITCH_CLIENT_SECRET` names still work and take priority when both forms are set. `TWITCH_ACCESS_TOKEN` may be either a plain token or an `oauth:`-prefixed IRC token.
@@ -80,7 +80,7 @@ Default command behavior:
 
 ```sh
 export TWI_TWITCH_CLIENT_ID="your_twitch_client_id"
-export TWI_TWITCH_CLIENT_SECRET="<your-twitch-client-secret>"
+export TWI_TWITCH_CLIENT_SECRET="<client secret from Twitch>"
 twi login
 ```
 
@@ -222,8 +222,8 @@ credential material and safe identity metadata:
     "login": "your_twitch_login",
     "display_name": "YourDisplayName",
     "client_id": "your_twitch_client_id",
-    "access_token": "<stored-access-token>",
-    "refresh_token": "<stored-refresh-token>",
+    "access_token": "<stored access token>",
+    "refresh_token": "<stored refresh token>",
     "token_type": "bearer",
     "scopes": ["chat:read", "chat:edit"],
     "expires_at": "2026-07-03T13:00:00Z",

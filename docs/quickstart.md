@@ -98,8 +98,8 @@ go run ./cmd/twi login --dry-run
 
 For the real OAuth flow, set `TWITCH_CLIENT_ID`/`TWITCH_CLIENT_SECRET` or the
 canonical `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_CLIENT_SECRET` names and register
-`http://127.0.0.1:17643/oauth/twitch/callback` on the Twitch app. The command
-On supported Unix builds, the command validates returned tokens, saves them
+`http://127.0.0.1:17643/oauth/twitch/callback` on the Twitch app. On supported
+Unix builds, the command validates returned tokens, saves them
 privately, and never prints them. The credential file fallback uses a separate
 private `credentials.json` under a `0700` platform config directory with `0600`
 file permissions, symlink rejection, and no-follow file opens. On Windows and
@@ -112,7 +112,7 @@ Environment variable setup:
 
 ```sh
 export TWITCH_USERNAME="your_twitch_login"
-export TWITCH_ACCESS_TOKEN="<your-twitch-access-token>"
+export TWITCH_ACCESS_TOKEN="<oauth token from Twitch>"
 export TWI_DEFAULT_CHANNELS="somechannel"
 ```
 
@@ -148,8 +148,8 @@ Create that file with flat `key = value` lines:
 
 ```toml
 twitch_username = "your_twitch_login"
-twitch_oauth_token = "PLACEHOLDER_TWITCH_OAUTH_TOKEN"
-twitch_refresh_token = "PLACEHOLDER_TWITCH_REFRESH_TOKEN"
+twitch_oauth_token = ""
+twitch_refresh_token = ""
 default_channels = "somechannel"
 enable_kitty_images = true
 image_mode = "auto"
@@ -161,9 +161,10 @@ animation_mode = "fast"
 
 The parser is intentionally small right now. Do not use nested TOML tables yet.
 Prefer `twi setup` for non-secret config values and `twi login` for saved
-tokens. If you keep any flat config that contains real tokens, keep it private
-to your user account, for example with `chmod 600`; flat config values still
-take precedence over saved credentials.
+tokens. Leave secret values empty in shared examples. If you keep any flat
+config that contains real tokens, keep it private to your user account, for
+example with `chmod 600`; flat config values still take precedence over saved
+credentials.
 
 ## 6. Diagnose Before Blaming The Terminal
 
@@ -196,8 +197,8 @@ The template uses this shape:
 ```dotenv
 TWITCH_CLIENT_ID=your_client_id_here
 TWITCH_CLIENT_SECRET=your_client_secret_here
-TWITCH_ACCESS_TOKEN=your_access_token_here
-TWITCH_REFRESH_TOKEN=your_refresh_token_here
+TWITCH_ACCESS_TOKEN=paste_token_in_your_private_env_file
+TWITCH_REFRESH_TOKEN=paste_refresh_value_in_your_private_env_file
 TWITCH_USERNAME=your_twitch_login_here
 TWITCH_CHANNEL=somechannel
 ```

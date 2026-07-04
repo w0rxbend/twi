@@ -49,9 +49,10 @@ non-secret config values and can hand off to login. In the Linux container,
 `twi login` is an OAuth browser/callback flow that saves returned tokens
 through the restrictive credential-file fallback without printing them;
 manual reconnect restarts the live IRC transport while preserving channel UI
-state. Refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image validation are still planned. Live
-image asset wiring is current when config, credentials, cache, and terminal
-checks allow it.
+state. Refresh-token persistence after IRC reconnect and manual Kitty/Ghostty
+image validation are still planned or environment-dependent. Live image asset
+wiring is current when config, credentials, cache, and terminal checks allow
+it.
 
 Username/token credentials currently come from environment variables, the flat
 config file, or on supported Unix builds the private credential file. Docker
@@ -63,7 +64,7 @@ Set credentials in your shell:
 
 ```sh
 export TWITCH_USERNAME="your_twitch_login"
-export TWITCH_ACCESS_TOKEN="<your-twitch-access-token>"
+export TWITCH_ACCESS_TOKEN="<oauth token from Twitch>"
 export TWITCH_CHANNEL="somechannel"
 ```
 

@@ -9,16 +9,20 @@ Progress as of the initial swarm pass:
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
 - Current status labels: mock chat is ready; multi-channel live IRC read/send,
   multi-channel UX, diagnostics, redacted debug logging, inline image plumbing,
-  OAuth login, and Unix-only restrictive credential-file persistence are
-  partial; setup can write non-secret config and hand off to login;
-  refresh-token persistence after IRC reconnect and manual Kitty/Ghostty image
-  validation are planned. Active live IRC reconnect restart and per-channel
-  local filters are implemented.
+  OAuth login, setup, release binary/container packaging, and Unix-only
+  restrictive credential-file persistence are partial or current for their
+  documented paths. Refresh-token persistence after IRC reconnect, secure
+  non-Unix credential persistence, credentialed Twitch release validation, and
+  manual Kitty/Ghostty image validation remain planned or environment-dependent.
+  Active live IRC reconnect restart and per-channel local filters are
+  implemented.
 - Credential rule: Twitch username/token values currently come from
   environment variables, the flat config file, or on supported Unix builds the
   private credential file; environment and flat config values take precedence
   over saved credentials, and CLI overrides cover channel and config path.
-- Remaining near-term work: release packaging and manual terminal validation.
+- Remaining near-term work: final release-candidate validation in a
+  Docker-enabled environment, plus post-release auth-storage hardening for
+  refreshed-token persistence and non-Unix credential support.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -160,7 +164,12 @@ Owner lane: Asset/image engineer.
 Goal: Prepare avatars, emotes, emoji, and badges without blocking MVP.
 Context: Image rendering is core later scope, but MVP must define fallback contracts early.
 Files likely touched: `internal/assets`, `internal/storage`, `internal/render`.
-Implementation notes: Completed in T015 with renderer placeholder widths, context-aware storage cache contracts, and no-image fallback snapshots. Real downloads and terminal image drawing remain future work. Do not download assets in `View`.
+Implementation notes: Completed initially in T015 with renderer placeholder
+widths, context-aware storage cache contracts, and no-image fallback snapshots.
+Later slices added public image downloading, disk cache write-through, bounded
+PNG/JPEG/GIF preparation, Kitty-compatible renderer plumbing, visible-row asset
+events, and default live resolver wiring. Manual Kitty/Ghostty drawing evidence
+remains future work. Do not download assets in `View`.
 Acceptance criteria: Renderer can request asset placeholders and render fallbacks when assets are missing, disabled, or unsupported.
 Verification: Fake cache/renderer tests; fallback golden snapshots; code search for I/O in render/view paths.
 Risks: Designing too much before real assets; keep interfaces minimal.
@@ -196,7 +205,8 @@ Owner lane: QA/release engineer.
 Goal: Make README, quickstart, config, auth, Docker, terminal image docs, and
 the product requirements describe the same shipped behavior.
 Context: Several docs mention planned work that is now partially implemented,
-while image and login features remain planned.
+while image drawing evidence, credentialed Twitch evidence, and non-Unix
+credential storage remain planned or environment-dependent.
 Files likely touched: `README.md`, `docs/quickstart.md`, `docs/auth.md`,
 `docs/config.md`, `docs/development.md`, `docs/terminal-images.md`,
 `docs/product/requirements.md`.
@@ -608,18 +618,25 @@ Verification: GitHub Actions run; local equivalent commands.
 Risks: Latest Go/toolchain availability can lag in hosted runners.
 Follow-ups: Add release workflow after the gates are stable.
 
-Task: Add release packaging.
+Task: Add release packaging. Status: implemented for the dry-run artifact path;
+final release-candidate validation remains tracked separately.
 Owner lane: QA/release engineer.
 Goal: Build reproducible binaries and container images for supported
 platforms.
-Context: Docker files exist locally, but release artifacts are not defined.
+Context: The release dry-run now builds the supported binary target matrix,
+checksum files, and the Docker image. It smokes help, doctor, and mock chat
+with isolated config/cache directories and empty credential environment
+variables. Exact Docker CLI validation still depends on a Docker-enabled host.
 Files likely touched: `Dockerfile`, `compose.yaml`, `.github/workflows/*`,
 `docs/docker.md`, `README.md`.
-Implementation notes: Publish checksums, SBOM/provenance if practical, and
-private-image guidance before public distribution decisions.
+Implementation notes: Publish checksums and keep private-image guidance before
+public distribution decisions. SBOM/provenance, package-manager manifests,
+signing, notarization, and registry publishing remain future work.
 Acceptance criteria: Tagged builds produce binaries and a container image that
-can run `twi --help`, `twi doctor`, and mock chat.
-Verification: Release dry run; container smoke; checksum validation.
+can run `twi --help`, `twi doctor`, and mock chat without reading local
+credentials.
+Verification: Release dry run; exact Docker container smoke on a host with
+Docker access; checksum validation.
 Risks: Terminal TUI behavior inside containers needs clear documentation.
 Follow-ups: Package manager manifests only after CLI stabilizes.
 

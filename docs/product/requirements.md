@@ -10,11 +10,11 @@ Source: `PLAN.md`. Current stable Go was verified externally as `go1.26.4` on
 | Area | Status | Notes |
 | --- | --- | --- |
 | Mock chat | Ready | Runs without Twitch credentials or network access. |
-| Multi-channel live IRC read/send | Partial | Reads, sends, replies, and sends `/me` actions for configured channels with env/config credentials. Broader manual Twitch evidence remains future work. |
+| Multi-channel live IRC read/send | Partial | Reads, sends, replies, and sends `/me` actions for configured channels with environment, flat config, or supported Unix saved credentials. Broader manual Twitch evidence remains future work. |
 | Diagnostics | Partial | `twi doctor` reports config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability/pruning, and feature modes. |
 | Login/setup | Partial | `twi setup` writes non-secret config values and can hand off to login. On supported Unix builds, `twi login` runs the browser/local-callback OAuth flow or a `--dry-run` explanation, validates returned tokens, and saves them through the restrictive credential-file fallback without printing them. Non-Unix builds use env/config credentials until ACL and reparse-point protections are implemented. |
 | Multi-channel UX | Partial | Per-channel state, local view filters, live routing, keyboard-first sidebar, command palette, optional mouse controls, selected-message inspect, and active live IRC reconnect restart are implemented; real two-channel Twitch manual evidence and transport-specific per-channel reconnect isolation remain pending. |
-| Inline terminal images | Partial | Renderer fallback rows, fixed-width prepared cell substitution, cache boundaries, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned. |
+| Inline terminal images | Partial | Renderer fallback rows, fixed-width prepared cell substitution, cache boundaries, capability diagnostics, visible-row asset event scheduling, and default live resolver/downloader/preparer/renderer wiring exist; manual Kitty/Ghostty validation remains planned for a compatible graphics terminal session. |
 
 ## MVP Scope
 
