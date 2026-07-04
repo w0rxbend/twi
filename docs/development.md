@@ -124,6 +124,20 @@ Twitch credentials. It should print redacted guidance for
 `TWI_TWITCH_USERNAME`, `TWI_TWITCH_OAUTH_TOKEN`, `--mock`, `chat:read`, and
 `chat:edit`, and it should not attempt networking when credentials are absent.
 
+High-throughput chat stress coverage is deterministic and credential-free:
+
+```sh
+go test ./internal/animation ./internal/app ./internal/render
+go test ./internal/app -run TestLiveShellHighThroughputChatStressHarness
+```
+
+The named app stress test feeds a burst of normalized chat, reply, action,
+notice, deleted, system, emote, emoji, badge, mention, and Unicode rows through
+the live shell model without Twitch credentials, network clients, terminal image
+support, or wall-clock sleeps. It asserts fallback rendering at narrow and
+normal widths, the bounded reveal queue and overflow count, resize and scroll
+behavior, composer input, and send completion state during the burst.
+
 Focused review searches used by the loop:
 
 ```sh

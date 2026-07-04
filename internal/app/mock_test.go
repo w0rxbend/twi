@@ -1307,40 +1307,59 @@ func TestMockShellInputAndScrollRemainResponsiveDuringAnimation(t *testing.T) {
 	}
 }
 
-func TestLiveShellBurstKeepsRevealQueueBoundedAndControlsResponsive(t *testing.T) {
+func TestLiveShellHighThroughputChatStressHarness(t *testing.T) {
 	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
 	client := NewFakeChatClient(1)
 	if err := client.QueueSendResult(SendResult{AcceptedAt: clock.Now(), Detail: "accepted during burst"}, nil); err != nil {
 		t.Fatalf("QueueSendResult returned error: %v", err)
 	}
 	model := newLiveShellModelWithClock("example", config.Default(), client, clock)
+	if got, want := model.imageCapability.Status, render.ImageCapabilityUnsupported; got != want {
+		t.Fatalf("image capability status = %q, want %q for credential-free fallback stress", got, want)
+	}
+	if model.avatarResolver != nil || model.assetResolver != nil || model.imageRenderer != nil {
+		t.Fatalf("stress model has image/network services installed: avatar=%T asset=%T renderer=%T", model.avatarResolver, model.assetResolver, model.imageRenderer)
+	}
 
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 72, Height: 12})
 	model = updated.(mockShellModel)
-	for i := 0; i < 40; i++ {
+	maxQueued := animation.DefaultConfig().MaxQueued
+	burstSize := maxQueued + 8
+	burst := highThroughputBurstMessages("example", burstSize, clock.Now())
+	assertHighThroughputFallbackRendering(t, model, burst)
+	for i := 0; i < burstSize; i++ {
 		updated, _ = model.Update(chatClientMessageMsg{
-			message: mockIncomingMessage("example", fmt.Sprintf("burst-%02d", i), fmt.Sprintf("burst message %02d", i)),
+			message: burst[i],
 			ok:      true,
 		})
 		model = updated.(mockShellModel)
-		if model.activeChannelState().revealQueue.Len() > animation.DefaultConfig().MaxQueued {
-			t.Fatalf("after burst message %02d reveal queue len = %d, want <= %d", i, model.activeChannelState().revealQueue.Len(), animation.DefaultConfig().MaxQueued)
+		if model.activeChannelState().revealQueue.Len() > maxQueued {
+			t.Fatalf("after burst message %02d reveal queue len = %d, want <= %d", i, model.activeChannelState().revealQueue.Len(), maxQueued)
 		}
 	}
 
-	if got, want := model.activeChannelState().revealQueue.Len(), animation.DefaultConfig().MaxQueued; got != want {
+	if got, want := model.activeChannelState().revealQueue.Len(), maxQueued; got != want {
 		t.Fatalf("reveal queue len after burst = %d, want %d", got, want)
 	}
-	if got, want := len(model.activeChannelState().messages), 40-animation.DefaultConfig().MaxQueued; got != want {
+	if got, want := len(model.activeChannelState().messages), burstSize-maxQueued; got != want {
 		t.Fatalf("static overflow messages = %d, want %d", got, want)
 	}
-	for _, want := range []string{"burst message 00", "burst message 07"} {
+	for _, want := range []string{"burst message 00 fallback", "burst message 07 unicode"} {
 		if !messagesContainText(model.activeChannelState().messages, want) {
 			t.Fatalf("overflowed static messages missing %q: %#v", want, model.activeChannelState().messages)
 		}
 	}
-	if messagesContainText(model.activeChannelState().messages, "burst message 08") {
+	if messagesContainText(model.activeChannelState().messages, "burst message 08 fallback") {
 		t.Fatalf("non-overflowed burst message rendered statically too early: %#v", model.activeChannelState().messages)
+	}
+	if got, want := model.activeChannelState().revealQueue.OverflowCount(), burstSize-maxQueued; got != want {
+		t.Fatalf("reveal overflow count = %d, want %d", got, want)
+	}
+	if got, want := len(model.activeChannelState().activeOrder), maxQueued; got != want {
+		t.Fatalf("active reveal order length = %d, want %d", got, want)
+	}
+	if got := len(model.imageCells); got != 0 {
+		t.Fatalf("image cells after fallback stress = %d, want 0", got)
 	}
 
 	updated, _ = model.Update(tea.WindowSizeMsg{Width: 36, Height: 9})
@@ -3579,6 +3598,119 @@ func mockIncomingMessage(channel, id, text string) twitch.ChatMessage {
 		DisplayName: "viewer",
 		Text:        text,
 		Type:        twitch.MessageTypeChat,
+	}
+}
+
+func highThroughputBurstMessages(channel string, count int, startedAt time.Time) []twitch.ChatMessage {
+	messages := make([]twitch.ChatMessage, 0, count)
+	for i := 0; i < count; i++ {
+		text := fmt.Sprintf("burst message %02d", i)
+		message := twitch.ChatMessage{
+			ID:          fmt.Sprintf("burst-%02d", i),
+			Channel:     channel,
+			ChannelID:   "room-42",
+			Timestamp:   startedAt.Add(time.Duration(i) * time.Millisecond),
+			AuthorID:    fmt.Sprintf("user-%02d", i%6),
+			AuthorLogin: fmt.Sprintf("viewer_%02d", i%6),
+			DisplayName: fmt.Sprintf("viewer_%02d", i%6),
+			AuthorColor: "#00d1ff",
+			Text:        text,
+			Type:        twitch.MessageTypeChat,
+		}
+
+		switch i % 8 {
+		case 0:
+			message.Text = text + " fallback @twi_bot Kappa 😀"
+			message.Badges = []twitch.Badge{{SetID: "moderator", ID: "1"}}
+			message.Fragments = []twitch.MessageFragment{
+				{Type: twitch.FragmentText, Text: text + " fallback "},
+				{Type: twitch.FragmentMention, Text: "@twi_bot"},
+				{Type: twitch.FragmentText, Text: " "},
+				{Type: twitch.FragmentEmote, Text: "Kappa", Ref: twitch.AssetRef{Kind: assets.KindTwitchEmote, ID: "25"}},
+				{Type: twitch.FragmentText, Text: " "},
+				{Type: twitch.FragmentEmoji, Text: "😀"},
+			}
+		case 1:
+			message.Text = text + " reply wraps around the viewport while keeping the parent summary visible"
+			message.Reply = &twitch.Reply{
+				ParentMessageID: "parent-1",
+				ParentAuthor:    "origin",
+				ParentText:      "parent text also wraps",
+			}
+		case 2:
+			message.Text = text + " action waves at chat"
+			message.Type = twitch.MessageTypeAction
+		case 3:
+			message.Text = text + " notice reconnecting without credentials"
+			message.Type = twitch.MessageTypeNotice
+		case 4:
+			message.Text = text + " deleted fallback"
+			message.Deleted = true
+		case 5:
+			message.Text = text + " Kappa wraps with fallback token"
+			message.Emotes = []twitch.Emote{{ID: "25", Name: "Kappa", Start: 17, End: 21}}
+		case 6:
+			message.Text = text + " system error stays readable"
+			message.Type = twitch.MessageTypeSystem
+			message.RawTags = map[string]string{"level": "error"}
+		default:
+			message.Text = text + " unicode keeps 👨‍👩‍👧‍👦 and ありがとう together @viewer"
+		}
+		messages = append(messages, message)
+	}
+	return messages
+}
+
+func assertHighThroughputFallbackRendering(t *testing.T, model mockShellModel, messages []twitch.ChatMessage) {
+	t.Helper()
+
+	seenKinds := map[render.FragmentKind]bool{}
+	var fallbackText strings.Builder
+	for _, width := range []int{36, 72} {
+		options := model.renderOptions(width)
+		for _, message := range messages {
+			rows := render.Rows(message, options)
+			if len(rows) == 0 {
+				t.Fatalf("render rows for %s at width %d are empty", message.ID, width)
+			}
+			for _, row := range rows {
+				if got := row.Width(); got > width {
+					t.Fatalf("row width for %s at width %d = %d, want <= %d: %#v", message.ID, width, got, width, row.Plain())
+				}
+				if terminal := row.TerminalString(); strings.Contains(terminal, "\x1b_G") {
+					t.Fatalf("fallback render for %s emitted Kitty image command: %q", message.ID, terminal)
+				}
+				fallbackText.WriteString(row.Plain())
+				fallbackText.WriteByte('\n')
+				for _, fragment := range row.Fragments {
+					seenKinds[fragment.Kind] = true
+					if fragment.ImageReady {
+						t.Fatalf("fallback render for %s has prepared image fragment: %#v", message.ID, fragment)
+					}
+				}
+			}
+		}
+	}
+
+	for _, kind := range []render.FragmentKind{
+		render.FragmentBadge,
+		render.FragmentMention,
+		render.FragmentEmoteFallback,
+		render.FragmentEmojiFallback,
+		render.FragmentReply,
+		render.FragmentAction,
+		render.FragmentNotice,
+		render.FragmentDeleted,
+	} {
+		if !seenKinds[kind] {
+			t.Fatalf("fallback stress did not render fragment kind %q; saw %#v", kind, seenKinds)
+		}
+	}
+	plain := fallbackText.String()
+	for _, want := range []string{"Kappa", "😀", "reply to origin", "[notice]", "[message deleted]", "ありがとう"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("fallback stress output missing %q:\n%s", want, plain)
+		}
 	}
 }
 
