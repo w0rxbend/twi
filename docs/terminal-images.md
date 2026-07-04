@@ -16,7 +16,7 @@
 - Live startup installs the concrete resolver, public downloader, disk cache, emoji provider, Twitch metadata clients, PNG preparer, and Kitty renderer when config, credentials, cache, and terminal capability checks allow it.
 - Image loading and rendering must be capability-driven and non-blocking.
 - The chat UI must remain usable when image rendering is disabled, unsupported, still loading, or failed.
-- Known limitation: Kitty/Ghostty inline drawing still needs manual terminal validation in a compatible terminal.
+- Known limitation: Kitty/Ghostty inline drawing still needs manual terminal validation in a compatible terminal. Current environment evidence and skipped checks are recorded in [manual-validation.md](manual-validation.md).
 
 ## Support Tiers
 
@@ -189,4 +189,4 @@ Future diagnostics should also distinguish:
 - Helix metadata lookup failed.
 - Image render failed but fallback is active.
 
-Unsupported image rendering should not prevent chat read, send, scrolling, or composition.
+Unsupported image rendering should not prevent chat read, send, scrolling, or composition. Do not claim Kitty/Ghostty inline drawing as manually verified unless [manual-validation.md](manual-validation.md) records a compatible graphics terminal session.

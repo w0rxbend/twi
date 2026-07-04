@@ -13,6 +13,9 @@ This document summarizes the development workflow and architecture for `twi`. It
 - Partially shipped behavior: multi-channel live Twitch IRC read/send with active-channel composer sends, selected-message replies and inspect diagnostics, `/me` action sends, keyboard-first channel sidebar, command palette, per-channel local message filters, optional mouse support, Twitch avatar metadata, Twitch emote/badge metadata resolution, standard emoji provider metadata, public image downloading, visible-row asset event integration, bounded PNG/JPEG/GIF image decode and cell preparation, inline image renderer plumbing, default live asset resolver/downloader/preparer/renderer wiring, opt-in redacted JSON debug logging, and `twi doctor` diagnostics for credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch reachability, terminal hints, Kitty/Ghostty signals, cache writability, image capability, live image-stack readiness, and feature modes.
 - Partially shipped auth/setup behavior: `twi setup` writes non-secret config values and can hand off to login; on supported Unix builds, `twi login` runs a browser/local-callback OAuth flow with a `--dry-run` explanation path and saves returned tokens through the restrictive credential-file fallback without printing them. On non-Unix builds, the credential-file fallback is disabled and env/config credentials remain the supported path.
 - Planned behavior: refresh-token persistence after IRC reconnect and manual Kitty/Ghostty inline image validation.
+- Current environment-specific manual evidence is recorded in
+  [manual-validation.md](manual-validation.md), including checked PTY sizes,
+  credential-free smoke paths, and skipped credentialed/Kitty checks.
 - Twitch username/token credentials currently come from environment variables, the flat config file, or on supported Unix builds the private credential file; environment and flat config values take precedence over saved credentials, and CLI flags currently override channels and config path only.
 - The shell handles resize, chat/composer focus via `tab`, channel switching via `[`/`]`, active-channel filter toggles via `1` through `4` plus `0` reset, a normal/wide channel sidebar with unread counts, connection indicators, and filter markers, collapsed narrow-width channel status, command palette via `ctrl+p`, expanded help via `?`, page-key viewport scrolling, selected-message reply mode with `up`/`down` and `r`, selected-message inspect with `i`, `esc` inspect/reply cancellation, optional mouse wheel/sidebar/composer/message interactions, composer text entry, Enter-to-send for live clients, reduced narrow-width status/help text, send status feedback, and tick-driven reveal animation for scheduled incoming mock messages.
 - `internal/app` owns the UI-facing chat boundary, deterministic fake chat client, live transport adapter, and Bubble Tea shell; the app layer consumes normalized `internal/twitch` messages instead of concrete Twitch transport types.
@@ -207,6 +210,11 @@ Manual verification should include:
 - Terminal resize while connected.
 - Kitty/Ghostty image mode and non-Kitty fallback mode.
 - Reduced/off animation modes.
+
+Record manual evidence in [manual-validation.md](manual-validation.md). If
+credentials, a real Twitch channel, pointer input, or a Kitty/Ghostty graphics
+session are unavailable, mark the check skipped with the environment reason
+instead of implying it passed.
 
 ## Quality Gates
 
