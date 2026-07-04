@@ -259,9 +259,14 @@ twi doctor --debug-log
 `--debug-log=false` explicitly disables logging for that command even if
 `TWI_DEBUG_LOG=true` or `debug_logging = true` is configured. Debug logs are
 JSON lines written to a private file opened with create mode `0600`; parent
-directories are created with `0700` when needed. Records redact OAuth access
-tokens, refresh tokens, client secrets, bearer authorization headers, callback
-codes/state, credential-shaped URL query values, and explicit config secrets.
+directories are created with `0700` when needed. Existing debug-log files that
+are directories, symlinks, or allow group/other access are rejected. Unix builds
+open existing debug-log files with a no-follow final path and validate the
+opened file descriptor; non-Unix builds do not claim Unix no-follow or exact
+ACL guarantees beyond the paths they can observe before and after open. Records
+redact OAuth access tokens, refresh tokens, client secrets, bearer authorization
+headers, callback codes/state, credential-shaped URL query values, and explicit
+config secrets.
 They also avoid raw `%+v`/`%#v` dumps of `ConnectionState`, `ChatMessage`,
 raw IRC events, transport events, send results, raw tag maps, source URLs, and
 transport errors. Review logs before sharing anyway because they can still

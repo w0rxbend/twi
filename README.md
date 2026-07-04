@@ -218,7 +218,9 @@ twi doctor --debug-log
 ```
 
 When no path is provided, the log file is `debug.log` under the platform cache
-directory.
+directory. Existing debug-log files that are directories, symlinks, or allow
+group/other access are rejected; Unix builds also open the final log path with
+no-follow semantics before validating the opened file.
 
 Nested TOML tables are not implemented yet. Keep the file flat.
 
