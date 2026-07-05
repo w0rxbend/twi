@@ -1,6 +1,6 @@
 # Quickstart
 
-This guide assumes nothing except a terminal and either Go or Docker. It keeps to what `twi` can do today.
+This guide assumes nothing except a terminal and either Go or Docker. It keeps to what `twi` can do today. For the full documentation map, read [index.md](index.md); for failure diagnosis, read [troubleshooting.md](troubleshooting.md).
 
 ## 1. Pick Your Path
 

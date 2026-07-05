@@ -7,6 +7,8 @@
   <a href="https://www.twitch.tv/"><img alt="Twitch chat" src="https://img.shields.io/badge/Twitch-chat-9146FF?style=for-the-badge&logo=twitch&logoColor=white"></a>
   <a href="Dockerfile"><img alt="Dockerfile" src="https://img.shields.io/badge/Dockerfile-present-2496ED?style=for-the-badge&logo=docker&logoColor=white"></a>
   <a href="docs/config.md"><img alt="Secrets redacted" src="https://img.shields.io/badge/secrets-redacted-111827?style=for-the-badge"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-10B981?style=for-the-badge"></a>
+  <a href="docs/index.md"><img alt="Documentation" src="https://img.shields.io/badge/docs-complete-F59E0B?style=for-the-badge"></a>
 </p>
 
 # twi
@@ -24,6 +26,34 @@ The project is currently an MVP-shaped Go app for Unix-like terminals and Docker
         |  you      no browser tab circus required    |
         +---------------------------------------------+
 ```
+
+## Why It Exists
+
+Most chat workflows force you back into a browser tab when the rest of your work is already in a terminal. `twi` keeps chat close to your shell, preserves keyboard-first workflows, and treats credentials like production secrets instead of casual config strings.
+
+What makes this project different:
+
+- A real TUI shell with mock mode, multi-channel state, command palette, selected-message inspect, reply context, local filters, and resize-aware layouts.
+- Live Twitch IRC read/send plumbing behind internal interfaces, with startup token validation and redacted auth-refresh behavior.
+- Fallback-first rendering for avatars, badges, emotes, emoji, replies, mentions, moderation notices, and system events.
+- Async asset plumbing for Twitch/emoji metadata, downloads, cache records, image preparation, and Kitty-compatible rendering without blocking the UI.
+- A security posture that keeps OAuth tokens, refresh tokens, client secrets, callback values, and private config out of normal output and debug logs.
+
+## Documentation
+
+The docs are split by audience:
+
+| Need | Read |
+| --- | --- |
+| Run it quickly | [Quickstart](docs/quickstart.md) |
+| Understand every doc | [Documentation Index](docs/index.md) |
+| Configure auth and secrets | [Authentication](docs/auth.md) and [Configuration](docs/config.md) |
+| Fix setup problems | [Troubleshooting](docs/troubleshooting.md) |
+| Run with Docker | [Docker Guide](docs/docker.md) |
+| Contribute safely | [Contributing](CONTRIBUTING.md), [Development](docs/development.md), and [Code Style](docs/code-style.md) |
+| Report sensitive issues | [Security Policy](SECURITY.md) |
+| Understand package boundaries | [Architecture](docs/architecture.md) |
+| Cut release artifacts | [Release Packaging](docs/release.md) |
 
 ## Start Here
 
@@ -272,8 +302,8 @@ claimed:
 - Refreshed IRC tokens are persisted only when the supported credential store
   is available; otherwise they remain in memory for the current process with a
   redacted warning.
-- Other non-Unix platforms stay deferred until a native credential backend is
-  selected and implemented.
+- Non-Unix saved credentials are out of scope; use environment variables or a
+  private flat config file if you build for an unsupported platform.
 - Package-manager manifests, signing, notarization, registry publishing, and
   SBOM/provenance are post-release work.
 
@@ -340,17 +370,17 @@ Restricted environment cache-friendly form:
 GOTOOLCHAIN=local GOCACHE=/tmp/twi-gocache GOMODCACHE=/tmp/twi-gomodcache go test ./...
 ```
 
-## Docs For Humans
+## Contributor Map
 
-- [Quickstart](docs/quickstart.md)
-- [Docker Guide](docs/docker.md)
-- [Release Packaging](docs/release.md)
-- [Authentication](docs/auth.md)
-- [Configuration](docs/config.md)
-- [Development](docs/development.md)
-- [Terminal Images](docs/terminal-images.md)
+- [Contributing](CONTRIBUTING.md) explains the support boundary, safe workflow, verification commands, PR checklist, and secret-handling rules.
+- [Code Style](docs/code-style.md) defines package ownership, rendering rules, debug logging rules, comments, tests, and documentation style.
+- [Architecture](docs/architecture.md) shows how config, Twitch transport, Bubble Tea state, rendering, assets, storage, and debug logging fit together.
+- [Development](docs/development.md) records the deeper implementation state, toolchain, quality gates, and testing strategy.
 
 ## Project Direction
 
-Near-term work is focused on final release validation and post-release auth
-storage hardening. The source of truth lives in the product docs under `docs/`.
+Near-term work is focused on release evidence, credentialed Twitch validation when credentials are available, and manual Kitty/Ghostty image validation when a compatible graphics terminal is available. The product source of truth lives in [docs/index.md](docs/index.md) and the product docs under `docs/product/`.
+
+## License
+
+`twi` is released under the [MIT License](LICENSE).

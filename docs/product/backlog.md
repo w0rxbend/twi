@@ -205,8 +205,8 @@ Owner lane: QA/release engineer.
 Goal: Make README, quickstart, config, auth, Docker, terminal image docs, and
 the product requirements describe the same shipped behavior.
 Context: Several docs mention planned work that is now partially implemented,
-while image drawing evidence, credentialed Twitch evidence, and non-Unix
-credential storage remain planned or environment-dependent.
+while image drawing evidence and credentialed Twitch evidence remain
+environment-dependent. Non-Unix saved credentials are out of scope.
 Files likely touched: `README.md`, `docs/quickstart.md`, `docs/auth.md`,
 `docs/config.md`, `docs/development.md`, `docs/terminal-images.md`,
 `docs/product/requirements.md`.
@@ -565,16 +565,16 @@ Files likely touched: `internal/storage`, `internal/config`, `internal/cli`,
 Implementation notes: Implement the fallback file on Unix builds with exact
 `0700` directory and `0600` file permissions before advertising saved login
 credentials. Keep env/config compatibility. Disable non-Unix fallback behavior
-unless product direction changes. Do not claim OS keychain support unless a
-backend is actually implemented and platform behavior is documented.
+by product scope. Do not claim any credential backend beyond the Unix
+credential-file store.
 Acceptance criteria: On supported Unix platforms, `twi login` can save credentials
 through the boundary; fallback files are never group/world-accessible; config
 output, doctor, and errors stay redacted. Unsupported non-Unix builds do not
 imply Unix mode semantics.
-Verification: Interface fake tests; fallback permission tests; non-Unix
-platform-gated tests; redaction tests.
-Risks: Cross-platform keychain behavior can be brittle in CI and containers if
-added later.
+Verification: Interface fake tests; fallback permission tests; unsupported
+non-Unix platform-gated tests; redaction tests.
+Risks: Non-Unix builds must keep failing closed for saved credentials rather
+than implying Unix permission semantics.
 Follow-ups: Config migration helper.
 
 Task: Add first-run setup wizard.

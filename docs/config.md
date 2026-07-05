@@ -1,6 +1,6 @@
 # Configuration
 
-This document describes the configuration model for `twi`. The implemented parser is intentionally small and should be expanded deliberately as planned commands become real.
+This document describes the configuration model for `twi`. The implemented parser is intentionally small and should be expanded deliberately as planned commands become real. For authentication details, read [auth.md](auth.md); for setup symptoms and fixes, read [troubleshooting.md](troubleshooting.md).
 
 ## Current State
 

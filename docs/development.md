@@ -1,6 +1,6 @@
 # Development
 
-This document summarizes the development workflow and architecture for `twi`. It describes the current MVP implementation plus planned extension points.
+This document summarizes the development workflow and architecture for `twi`. It describes the current MVP implementation plus planned extension points. Start with [../CONTRIBUTING.md](../CONTRIBUTING.md) for the contribution flow, [code-style.md](code-style.md) for local code rules, and [architecture.md](architecture.md) for the runtime data-flow map.
 
 ## Current State
 

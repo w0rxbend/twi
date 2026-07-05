@@ -1,6 +1,6 @@
 # Docker Guide
 
-`twi` is a terminal app. Docker packaging is useful for repeatable builds, smoke tests, and running the same binary on a host that has Docker installed. Interactive chat still needs a real TTY.
+`twi` is a terminal app. Docker packaging is useful for repeatable builds, smoke tests, and running the same binary on a host that has Docker installed. Interactive chat still needs a real TTY. For the wider documentation map, read [index.md](index.md); for Docker-specific failures, read [troubleshooting.md](troubleshooting.md).
 
 ## Build The Image
 
