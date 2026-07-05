@@ -404,14 +404,19 @@ func validateLiveChatToken(ctx context.Context, cfg config.Config, validator twi
 		return "warning: Twitch OAuth token validation failed (" + detail + "); continuing to IRC authentication. Run `twi doctor` to verify token identity, expiry, and scopes.", nil
 	}
 
+	mismatch := liveTokenUsernameMismatch(cfg.Twitch.Username, validation.Identity.Login)
+	if validation.Status == twitch.TokenValidationWrongUser {
+		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, mismatch))
+	}
+	if validation.Status == twitch.TokenValidationValid && mismatch != "" {
+		return "", liveTokenValidationError(redactor, mismatch)
+	}
+
 	missing := validation.MissingScopes
 	if len(missing) == 0 {
 		missing = twitch.MissingRequiredIRCScopes(validation.Scopes)
 	}
 	if validation.Status == twitch.TokenValidationValid && len(missing) == 0 {
-		if mismatch := liveTokenUsernameMismatch(cfg.Twitch.Username, validation.Identity.Login); mismatch != "" {
-			return "", liveTokenValidationError(redactor, mismatch)
-		}
 		return "", nil
 	}
 	if len(missing) > 0 {
@@ -424,7 +429,7 @@ func validateLiveChatToken(ctx context.Context, cfg config.Config, validator twi
 	case twitch.TokenValidationExpired:
 		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "OAuth token expired"))
 	case twitch.TokenValidationWrongUser:
-		return "", liveTokenValidationError(redactor, liveTokenUsernameMismatch(cfg.Twitch.Username, validation.Identity.Login))
+		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, mismatch))
 	case twitch.TokenValidationMissingScope:
 		return "", liveTokenValidationError(redactor, liveTokenValidationDetail(validation, "missing required IRC scope"))
 	default:

@@ -1061,6 +1061,53 @@ func TestLiveChatTokenValidationMissingScopeStopsBeforeClient(t *testing.T) {
 	}
 }
 
+func TestLiveChatTokenValidationWrongUserPreemptsMissingScope(t *testing.T) {
+	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
+	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
+
+	fakeValidator := twitch.NewFakeTokenValidator(twitch.FakeTokenValidationOutcome{
+		Result: twitch.TokenValidationResult{
+			Status:        twitch.TokenValidationWrongUser,
+			Identity:      twitch.TokenIdentity{Login: "other_viewer"},
+			Scopes:        []twitch.TokenScope{twitch.ScopeChatRead},
+			MissingScopes: []twitch.TokenScope{twitch.ScopeChatEdit},
+			Detail:        `OAuth token belongs to Twitch user "other_viewer", not configured username "viewer"`,
+		},
+	})
+	oldNewLiveTokenValidator := newLiveTokenValidator
+	oldNewLiveChatClient := newLiveChatClient
+	t.Cleanup(func() {
+		newLiveTokenValidator = oldNewLiveTokenValidator
+		newLiveChatClient = oldNewLiveChatClient
+	})
+	newLiveTokenValidator = func() twitch.TokenValidator {
+		return fakeValidator
+	}
+	newLiveChatClient = func(context.Context, config.Config, debuglog.Logger, credentialLoadStatus) (app.ChatClient, error) {
+		t.Fatal("newLiveChatClient called after definitive token validation failure")
+		return nil, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Run([]string{"chat", "--config", t.TempDir() + "/missing.toml", "--channel", "example"}, &stdout, &stderr)
+
+	if code != 2 {
+		t.Fatalf("Run returned %d, want 2; stderr=%q", code, stderr.String())
+	}
+	for _, want := range []string{"twitch OAuth token validation failed", `OAuth token belongs to Twitch user "other_viewer"`, "twi doctor", "--mock"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("stderr missing %q: %q", want, stderr.String())
+		}
+	}
+	if strings.Contains(stderr.String(), "missing required scopes") {
+		t.Fatalf("stderr reported missing scopes instead of wrong user: %q", stderr.String())
+	}
+	assertOutputDoesNotContain(t, stdout.String()+stderr.String(), "oauth:secret-token", "secret-token")
+	if got := len(fakeValidator.Requests()); got != 1 {
+		t.Fatalf("validator requests = %d, want 1", got)
+	}
+}
+
 func TestLiveChatTokenValidationTransientFailureWarnsAndContinues(t *testing.T) {
 	t.Setenv("TWI_TWITCH_USERNAME", "viewer")
 	t.Setenv("TWI_TWITCH_OAUTH_TOKEN", "oauth:secret-token")
