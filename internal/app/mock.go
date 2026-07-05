@@ -51,6 +51,7 @@ type ClientOptions struct {
 	AssetKinds     map[string]bool
 	ImagePreparer  render.ImagePreparer
 	ImageRenderer  render.ImageRenderer
+	SystemNotifier SystemNotifier
 	DebugLogger    debuglog.Logger
 }
 
@@ -59,45 +60,48 @@ type fdWriter interface {
 }
 
 type mockShellModel struct {
-	channels              *channelStateSet
-	mentionLogin          string
-	animationMode         string
-	mouseEnabled          bool
-	imageMode             string
-	avatarMode            string
-	emojiMode             string
-	emoteMode             string
-	imageCapability       render.ImageCapabilityDecision
-	sourceDetail          string
-	client                ChatClient
-	avatarResolver        AvatarResolver
-	assetResolver         assets.EventResolver
-	assetKinds            map[string]bool
-	imagePreparer         render.ImagePreparer
-	imageRenderer         render.ImageRenderer
-	debugLogger           debuglog.Logger
-	incoming              []twitch.ChatMessage
-	nextIncoming          int
-	nextReveal            int
-	width                 int
-	height                int
-	focus                 mockFocus
-	helpExpanded          bool
-	inspectOpen           bool
-	palette               commandPaletteState
-	reconnectInFlight     bool
-	nextSend              int
-	revealTickScheduled   bool
-	avatarLookupScheduled bool
-	avatarLookupInFlight  bool
-	avatarRequested       map[string]bool
-	assetLookupScheduled  bool
-	assetLookupInFlight   bool
-	assetRetryScheduled   bool
-	assetRequested        map[string]bool
-	assetRetryAfter       map[string]time.Time
-	assetPermanentFailure map[assetPermanentFailureKey]struct{}
-	imageCells            map[render.ImageCellKey]render.ImageCell
+	channels               *channelStateSet
+	mentionLogin           string
+	animationMode          string
+	mouseEnabled           bool
+	imageMode              string
+	avatarMode             string
+	emojiMode              string
+	emoteMode              string
+	imageCapability        render.ImageCapabilityDecision
+	sourceDetail           string
+	client                 ChatClient
+	avatarResolver         AvatarResolver
+	assetResolver          assets.EventResolver
+	assetKinds             map[string]bool
+	imagePreparer          render.ImagePreparer
+	imageRenderer          render.ImageRenderer
+	systemNotifier         SystemNotifier
+	debugLogger            debuglog.Logger
+	incoming               []twitch.ChatMessage
+	nextIncoming           int
+	nextReveal             int
+	width                  int
+	height                 int
+	focus                  mockFocus
+	terminalFocused        bool
+	lastSystemNotification *SystemNotification
+	helpExpanded           bool
+	inspectOpen            bool
+	palette                commandPaletteState
+	reconnectInFlight      bool
+	nextSend               int
+	revealTickScheduled    bool
+	avatarLookupScheduled  bool
+	avatarLookupInFlight   bool
+	avatarRequested        map[string]bool
+	assetLookupScheduled   bool
+	assetLookupInFlight    bool
+	assetRetryScheduled    bool
+	assetRequested         map[string]bool
+	assetRetryAfter        map[string]time.Time
+	assetPermanentFailure  map[assetPermanentFailureKey]struct{}
+	imageCells             map[render.ImageCellKey]render.ImageCell
 }
 
 var _ tea.Model = mockShellModel{}
@@ -254,6 +258,10 @@ func RunMockWithOptions(w io.Writer, cfg config.Config, opts ClientOptions) erro
 		_, err := fmt.Fprintln(w, model.View())
 		return err
 	}
+	if opts.SystemNotifier == nil {
+		opts.SystemNotifier = newDefaultSystemNotifier(w)
+	}
+	model.systemNotifier = opts.SystemNotifier
 
 	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
@@ -279,9 +287,13 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 		channel = cfg.DefaultChannels[0]
 	}
 
+	interactive := isInteractiveTerminal(w)
+	if interactive && opts.SystemNotifier == nil {
+		opts.SystemNotifier = newDefaultSystemNotifier(w)
+	}
 	model := newLiveShellModelWithOptionsAndCapability(channel, cfg, client, opts, runtimeImageCapability(cfg))
 	model.debugAppStart("live", len(configuredChannels(channel, cfg.DefaultChannels)))
-	if !isInteractiveTerminal(w) {
+	if !interactive {
 		_, err := fmt.Fprintln(w, model.View())
 		return err
 	}
@@ -292,7 +304,7 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 }
 
 func programOptions(w io.Writer, cfg config.Config) []tea.ProgramOption {
-	options := []tea.ProgramOption{tea.WithOutput(w), tea.WithAltScreen()}
+	options := []tea.ProgramOption{tea.WithOutput(w), tea.WithAltScreen(), tea.WithReportFocus()}
 	if cfg.Features.EnableMouse {
 		options = append(options, tea.WithMouseCellMotion())
 	}
@@ -340,6 +352,7 @@ func newMockShellModelWithClockAndCapability(channel string, cfg config.Config, 
 		width:           defaultMockWidth,
 		height:          defaultMockHeight,
 		focus:           mockFocusChat,
+		terminalFocused: true,
 	}
 }
 
@@ -382,6 +395,7 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		assetKinds:            cloneAssetKinds(opts.AssetKinds),
 		imagePreparer:         opts.ImagePreparer,
 		imageRenderer:         opts.ImageRenderer,
+		systemNotifier:        opts.SystemNotifier,
 		debugLogger:           opts.DebugLogger,
 		avatarRequested:       make(map[string]bool),
 		assetRequested:        make(map[string]bool),
@@ -391,6 +405,7 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		width:                 defaultMockWidth,
 		height:                defaultMockHeight,
 		focus:                 mockFocusChat,
+		terminalFocused:       true,
 	}
 }
 
@@ -580,6 +595,10 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.clampScroll()
 		return m.withAsyncAssetCommands(nil)
+	case tea.FocusMsg:
+		m.terminalFocused = true
+	case tea.BlurMsg:
+		m.terminalFocused = false
 	case mockIncomingMessageMsg:
 		var cmds []tea.Cmd
 		if msg.scheduled && msg.index == m.nextIncoming {
@@ -588,6 +607,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if revealCmd := m.enqueueMessage(msg.message); revealCmd != nil {
 			cmds = append(cmds, revealCmd)
+		}
+		if notificationCmd := m.maybeNotifyForSystemEvent(msg.message); notificationCmd != nil {
+			cmds = append(cmds, notificationCmd)
 		}
 		m.clampScroll()
 		return m.withAsyncAssetCommands(cmds...)
@@ -606,6 +628,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmds []tea.Cmd
 		if revealCmd := m.enqueueMessage(msg.message); revealCmd != nil {
 			cmds = append(cmds, revealCmd)
+		}
+		if notificationCmd := m.maybeNotifyForSystemEvent(msg.message); notificationCmd != nil {
+			cmds = append(cmds, notificationCmd)
 		}
 		cmds = append(cmds, m.nextClientMessageCommand())
 		m.clampScroll()
@@ -722,6 +747,9 @@ func (m mockShellModel) statusLine(width int) string {
 	}
 	if totalUnread := m.channels.totalUnread(); totalUnread > 0 && width >= 34 {
 		left += fmt.Sprintf(" | unread=%d", totalUnread)
+	}
+	if m.lastSystemNotification != nil && width >= 58 {
+		left += " | notify: " + systemNotificationSummary(*m.lastSystemNotification)
 	}
 	if summary := active.messageFilters.summary(); summary != "" && width >= 46 {
 		left += " | filter=" + summary
@@ -1458,6 +1486,52 @@ func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 		return m.scheduleRevealTick()
 	}
 	return nil
+}
+
+func (m *mockShellModel) maybeNotifyForSystemEvent(message twitch.ChatMessage) tea.Cmd {
+	if !m.shouldNotifyForSystemEvent(message) {
+		return nil
+	}
+	if message.Channel == "" {
+		message.Channel = m.activeChannelName()
+	}
+	notification, ok := systemNotificationFromMessage(message)
+	if !ok {
+		return nil
+	}
+	m.lastSystemNotification = &notification
+	if m.systemNotifier == nil {
+		return nil
+	}
+	notifier := m.systemNotifier
+	return func() tea.Msg {
+		_ = notifier.Notify(context.Background(), notification)
+		return nil
+	}
+}
+
+func (m mockShellModel) shouldNotifyForSystemEvent(message twitch.ChatMessage) bool {
+	if _, ok := systemNotificationFromMessage(message); !ok {
+		return false
+	}
+	if !m.messageTargetsActiveChannel(message) {
+		return true
+	}
+	if !m.terminalFocused {
+		return true
+	}
+	return m.focus != mockFocusChat || m.palette.open || m.inspectOpen
+}
+
+func (m mockShellModel) messageTargetsActiveChannel(message twitch.ChatMessage) bool {
+	channel := normalizeChannelName(message.Channel)
+	if channel == "" {
+		channel = m.activeChannelName()
+	}
+	if m.channels == nil {
+		return channelKey(channel) == channelKey(m.activeChannelName())
+	}
+	return channelKey(channel) == m.channels.active
 }
 
 func (m *mockShellModel) nextRevealID(message twitch.ChatMessage) string {

@@ -25,6 +25,19 @@ type appFakeClock struct {
 	now time.Time
 }
 
+type appFakeSystemNotifier struct {
+	notifications []SystemNotification
+	err           error
+}
+
+func (n *appFakeSystemNotifier) Notify(ctx context.Context, notification SystemNotification) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	n.notifications = append(n.notifications, notification)
+	return n.err
+}
+
 func (c *appFakeClock) Now() time.Time {
 	return c.now
 }
@@ -998,6 +1011,127 @@ func TestLiveShellSidebarSwitchesChannelsAndPreservesDrafts(t *testing.T) {
 	}
 	if got, want := model.activeChannelState().composerText, "alpha draft"; got != want {
 		t.Fatalf("restored alpha draft = %q, want %q", got, want)
+	}
+}
+
+func TestLiveShellNotifiesSystemEventWhenComposerFocused(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	notifier := &appFakeSystemNotifier{}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
+	model.width = 120
+	model.focus = mockFocusComposer
+
+	updated, cmd := model.Update(chatClientMessageMsg{message: raidSystemEventMessage("example"), ok: true})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("composer-focused live system event returned nil command, want notification command")
+	}
+	cmd()
+	if got, want := len(notifier.notifications), 1; got != want {
+		t.Fatalf("notifications = %d, want %d", got, want)
+	}
+	if got, want := notifier.notifications[0].EventID, "raid"; got != want {
+		t.Fatalf("notification event = %q, want %q", got, want)
+	}
+	if model.lastSystemNotification == nil || model.lastSystemNotification.Title != "Raid in #example" {
+		t.Fatalf("last notification = %#v, want raid summary", model.lastSystemNotification)
+	}
+	if !strings.Contains(model.View(), "notify: Raid in #example") {
+		t.Fatalf("view missing notification summary:\n%s", model.View())
+	}
+}
+
+func TestLiveShellNotifiesSystemEventWhenTerminalBlurred(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	notifier := &appFakeSystemNotifier{}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
+	model.focus = mockFocusChat
+
+	updated, _ := model.Update(tea.BlurMsg{})
+	model = updated.(mockShellModel)
+	updated, cmd := model.Update(mockIncomingMessageMsg{message: raidSystemEventMessage("example")})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("blurred system event returned nil command, want notification command")
+	}
+	cmd()
+	if got, want := len(notifier.notifications), 1; got != want {
+		t.Fatalf("notifications = %d, want %d", got, want)
+	}
+
+	updated, _ = model.Update(tea.FocusMsg{})
+	model = updated.(mockShellModel)
+	if !model.terminalFocused {
+		t.Fatal("terminalFocused = false after FocusMsg, want true")
+	}
+}
+
+func TestLiveShellNotifiesSystemEventForInactiveChannel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	cfg.DefaultChannels = []string{"alpha", "beta"}
+	notifier := &appFakeSystemNotifier{}
+	model := newLiveShellModelWithClockAndOptions("alpha", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
+	model.focus = mockFocusChat
+
+	updated, cmd := model.Update(mockIncomingMessageMsg{message: raidSystemEventMessage("beta")})
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("inactive-channel system event returned nil command, want notification command")
+	}
+	cmd()
+	if got, want := len(notifier.notifications), 1; got != want {
+		t.Fatalf("notifications = %d, want %d", got, want)
+	}
+	if got, want := notifier.notifications[0].Channel, "beta"; got != want {
+		t.Fatalf("notification channel = %q, want %q", got, want)
+	}
+	if got, want := model.channels.ensure("beta").unread, 1; got != want {
+		t.Fatalf("beta unread = %d, want %d", got, want)
+	}
+}
+
+func TestLiveShellDoesNotNotifyActiveSystemEventWhenChatFocused(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	notifier := &appFakeSystemNotifier{}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
+	model.focus = mockFocusChat
+
+	updated, cmd := model.Update(mockIncomingMessageMsg{message: raidSystemEventMessage("example")})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("active focused system event returned command %#v, want nil", cmd)
+	}
+	if len(notifier.notifications) != 0 {
+		t.Fatalf("notifications = %#v, want none", notifier.notifications)
+	}
+	if model.lastSystemNotification != nil {
+		t.Fatalf("last notification = %#v, want nil", model.lastSystemNotification)
+	}
+}
+
+func TestLiveShellDoesNotNotifyPlainNoticeWhenComposerFocused(t *testing.T) {
+	cfg := config.Default()
+	cfg.Features.AnimationMode = "off"
+	notifier := &appFakeSystemNotifier{}
+	model := newLiveShellModelWithClockAndOptions("example", cfg, nil, nil, ClientOptions{SystemNotifier: notifier})
+	model.focus = mockFocusComposer
+
+	updated, cmd := model.Update(mockIncomingMessageMsg{message: twitch.ChatMessage{
+		ID:      "notice-1",
+		Channel: "example",
+		Text:    "routine Twitch notice",
+		Type:    twitch.MessageTypeNotice,
+	}})
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatalf("plain notice returned command %#v, want nil", cmd)
+	}
+	if len(notifier.notifications) != 0 {
+		t.Fatalf("notifications = %#v, want none", notifier.notifications)
 	}
 }
 
@@ -3598,6 +3732,18 @@ func mockIncomingMessage(channel, id, text string) twitch.ChatMessage {
 		DisplayName: "viewer",
 		Text:        text,
 		Type:        twitch.MessageTypeChat,
+	}
+}
+
+func raidSystemEventMessage(channel string) twitch.ChatMessage {
+	return twitch.ChatMessage{
+		ID:            "raid-1",
+		Channel:       channel,
+		Timestamp:     time.Date(2026, 7, 2, 20, 0, 11, 0, time.UTC),
+		DisplayName:   "raider",
+		Text:          "15 raiders from raider joined",
+		Type:          twitch.MessageTypeNotice,
+		SystemEventID: "raid",
 	}
 }
 

@@ -589,21 +589,47 @@ func messageFromUserNotice(notice twitch.UserNotice) twitch.ChatMessage {
 	if text == "" {
 		text = detailOrFallback(notice.MessageID, "Twitch user notice")
 	}
+	systemEventID := userNoticeSystemEventID(notice)
 	return twitch.ChatMessage{
-		ID:          notice.ID,
-		Channel:     notice.Channel,
-		ChannelID:   notice.RoomID,
-		Timestamp:   notice.Timestamp,
-		AuthorLogin: notice.AuthorLogin,
-		AuthorID:    notice.AuthorID,
-		DisplayName: notice.DisplayName,
-		AuthorColor: notice.AuthorColor,
-		Badges:      notice.Badges,
-		Text:        text,
-		Fragments:   notice.Fragments,
-		Emotes:      notice.Emotes,
-		Type:        twitch.MessageTypeNotice,
+		ID:            notice.ID,
+		Channel:       notice.Channel,
+		ChannelID:     notice.RoomID,
+		Timestamp:     notice.Timestamp,
+		AuthorLogin:   notice.AuthorLogin,
+		AuthorID:      notice.AuthorID,
+		DisplayName:   notice.DisplayName,
+		AuthorColor:   notice.AuthorColor,
+		Badges:        notice.Badges,
+		Text:          text,
+		Fragments:     notice.Fragments,
+		Emotes:        notice.Emotes,
+		Type:          twitch.MessageTypeNotice,
+		SystemEventID: systemEventID,
+		RawTags:       userNoticeRawTags(notice, systemEventID),
 	}
+}
+
+func userNoticeSystemEventID(notice twitch.UserNotice) string {
+	if eventID := strings.TrimSpace(notice.MessageID); eventID != "" {
+		return eventID
+	}
+	return strings.TrimSpace(notice.RawTags["msg-id"])
+}
+
+func userNoticeRawTags(notice twitch.UserNotice, systemEventID string) map[string]string {
+	tags := cloneAppStringMap(notice.RawTags)
+	if systemEventID == "" {
+		return tags
+	}
+	if tags == nil {
+		tags = make(map[string]string, 3)
+	}
+	if _, ok := tags["msg-id"]; !ok {
+		tags["msg-id"] = systemEventID
+	}
+	tags["twi.kind"] = "user_notice"
+	tags["twi.event"] = systemEventID
+	return tags
 }
 
 func messageFromModeration(event twitch.ModerationEvent) twitch.ChatMessage {
@@ -618,13 +644,25 @@ func messageFromModeration(event twitch.ModerationEvent) twitch.ChatMessage {
 		text = fmt.Sprintf("%s - %s", text, event.Text)
 	}
 	return twitch.ChatMessage{
-		ID:        event.TargetMessageID,
-		Channel:   event.Channel,
-		Timestamp: event.Timestamp,
-		Text:      text,
-		Type:      twitch.MessageTypeNotice,
-		Deleted:   event.Type == twitch.ModerationMessageDeleted,
+		ID:            event.TargetMessageID,
+		Channel:       event.Channel,
+		Timestamp:     event.Timestamp,
+		Text:          text,
+		Type:          twitch.MessageTypeNotice,
+		Deleted:       event.Type == twitch.ModerationMessageDeleted,
+		SystemEventID: string(event.Type),
 	}
+}
+
+func cloneAppStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 func isAuthNotice(notice twitch.Notice) bool {

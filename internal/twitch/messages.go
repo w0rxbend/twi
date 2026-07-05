@@ -19,6 +19,9 @@ type ChatMessage struct {
 	Reply       *Reply
 	Type        MessageType
 	Deleted     bool
+	// SystemEventID identifies a normalized non-chat event associated with a
+	// notice/system row, such as "raid" from a Twitch USERNOTICE msg-id.
+	SystemEventID string
 	// RawTags is retained only for diagnostics/debug views. UI and renderer
 	// behavior should use normalized fields above instead of transport tags.
 	RawTags map[string]string

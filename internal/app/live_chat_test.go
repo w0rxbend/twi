@@ -86,10 +86,12 @@ func TestLiveChatClientBridgesTransportEvents(t *testing.T) {
 			DisplayName: "Viewer",
 			SystemText:  "Viewer subscribed.",
 			Text:        "great stream",
+			MessageID:   "raid",
+			RawTags:     map[string]string{"msg-id": "raid"},
 		},
 	})
-	if got := <-client.Messages(); got.Type != twitch.MessageTypeNotice || got.ChannelID != "141981764" {
-		t.Fatalf("user notice message = %#v, want room ID propagated", got)
+	if got := <-client.Messages(); got.Type != twitch.MessageTypeNotice || got.ChannelID != "141981764" || got.SystemEventID != "raid" || got.RawTags["twi.kind"] != "user_notice" {
+		t.Fatalf("user notice message = %#v, want room ID and normalized system event propagated", got)
 	}
 
 	transport.emit(twitch.Event{

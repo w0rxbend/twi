@@ -15,7 +15,7 @@
 
 `twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-The project is currently an MVP-shaped Go app for Unix-like terminals and Docker: mock chat and diagnostics are ready without needing Twitch credentials; live Twitch IRC read/send, redacted debug logging, multi-channel UX, inline image plumbing, OAuth login, setup, and Unix restrictive credential-file persistence are shipped for their documented paths. Release binary/container packaging is available through the dry-run workflow. Credentialed Twitch release validation and manual Kitty/Ghostty image validation remain environment-dependent. Current manual terminal evidence is recorded in [docs/manual-validation.md](docs/manual-validation.md).
+The project is currently an MVP-shaped Go app for Unix-like terminals and Docker: mock chat and diagnostics are ready without needing Twitch credentials; live Twitch IRC read/send, redacted debug logging, multi-channel UX, focus-aware Twitch event notifications, inline image plumbing, OAuth login, setup, and Unix restrictive credential-file persistence are shipped for their documented paths. Release binary/container packaging is available through the dry-run workflow. Credentialed Twitch release validation and manual Kitty/Ghostty image validation remain environment-dependent. Current manual terminal evidence is recorded in [docs/manual-validation.md](docs/manual-validation.md).
 
 ```text
         +---------------------------------------------+
@@ -193,7 +193,7 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Avatar metadata | Partial | When live chat runs with `avatar_mode = "image"` plus Twitch API credentials, a writable cache, and Kitty-compatible image capability, visible author avatar URLs are batched through Helix Get Users, downloaded, prepared, and rendered through async asset events while initials remain stable on every failure path. |
 | Emote/badge metadata | Partial | Live startup can wire Helix-backed Twitch emote and badge metadata, the public downloader, disk cache, PNG preparer, and Kitty renderer behind config, credential, cache, and terminal gates while keeping compact badge labels and exact emote-token fallbacks stable. |
 | Login/setup | Partial | `twi setup` creates or updates non-secret flat config values and can hand off to `twi login`; on supported Unix builds, `twi login` saves through the restrictive credential-file fallback. Non-Unix builds keep env/config credentials as the supported path. |
-| Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, sends, and local view filters are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators, unread counts, and filter markers; `ctrl+p` opens a keyboard command palette for common actions, panel toggles, channel switching, local filters, local clear, and live reconnect restart. Optional mouse support can scroll chat, click channels, focus the composer, and select messages. Selected messages can be inspected in a redacted diagnostics panel even when filters hide them from the chat view. Narrow terminals collapse channel state into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. Manual reconnect tears down the active live IRC transport before creating a fresh one while preserving per-channel UI state. |
+| Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, sends, and local view filters are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators, unread counts, and filter markers; `ctrl+p` opens a keyboard command palette for common actions, panel toggles, channel switching, local filters, local clear, and live reconnect restart. Optional mouse support can scroll chat, click channels, focus the composer, and select messages. Twitch `USERNOTICE` events such as raids carry normalized event IDs; when the relevant chat is not active, the terminal is blurred, or another panel has focus, `twi` attempts a desktop system notification, falls back to a terminal bell, and shows a status-line notification summary. Selected messages can be inspected in a redacted diagnostics panel even when filters hide them from the chat view. Narrow terminals collapse channel state into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. Manual reconnect tears down the active live IRC transport before creating a fresh one while preserving per-channel UI state. |
 | Inline terminal images | Partial | Live startup installs the concrete resolver/downloader/disk-cache/emoji-provider/Twitch-metadata/preparer/Kitty-renderer stack only when config, credentials for Twitch-backed assets, cache writability, and terminal capability allow it. Disabled, unsupported, missing-dependency, degraded, resolver failure, downloader failure, preparation failure, and render failure paths keep initials, badge labels, emote tokens, and Unicode emoji fallbacks. Manual Kitty/Ghostty validation remains pending. |
 
 Manual validation evidence for the current environment is tracked in
@@ -221,6 +221,13 @@ records a complete credential set or a compatible graphics terminal session.
 | `/me does a thing` | Send a Twitch action message. |
 
 Mouse support is enabled by default. Set `enable_mouse = false` or `TWI_ENABLE_MOUSE=false` to keep terminal mouse reporting disabled; all workflows remain available from the keyboard.
+
+Terminal focus reporting is enabled for interactive chat sessions. Terminals that
+do not report focus still behave as focused, so system-event notifications avoid
+extra alerts unless another in-app panel or channel has the user's attention.
+Desktop notifications are best effort and dependency-free: Linux uses
+`notify-send`, macOS uses `osascript`, Windows uses PowerShell toast APIs, and
+unsupported or unavailable notification commands fall back to a terminal bell.
 
 ## Configure It
 
