@@ -37,8 +37,8 @@ func (m mockShellModel) splashView() string {
 	filled := int(fraction * splashProgressWidth)
 	bar := strings.Repeat("#", filled) + strings.Repeat("-", splashProgressWidth-filled)
 
-	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Bold(true)
-	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted))
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Background(lipgloss.Color(m.theme.Background)).Bold(true)
+	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).Background(lipgloss.Color(m.theme.Background))
 
 	content := lipgloss.JoinVertical(lipgloss.Center,
 		accent.Render("twi"),

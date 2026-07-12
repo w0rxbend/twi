@@ -110,6 +110,39 @@ func (r Row) Width() int {
 	return fragmentsWidth(r.Fragments)
 }
 
+// TerminalStringWithBackground behaves like TerminalString, but fills every
+// fragment's unset background with background instead of leaving it empty.
+//
+// Each fragment renders through its own independent lipgloss.Style.Render
+// call and ends in its own ANSI reset. Wrapping the fully-assembled row in an
+// outer Background() style afterward (as View() does for the whole screen)
+// only colors text up to that row's first embedded reset — verified
+// empirically against lipgloss v1.1.0 — so every fragment after the first
+// falls back to the terminal's own default background, which many terminals
+// render with the user's configured transparency/blur even after an OSC 11
+// default-background override. Setting an explicit background on every
+// fragment sidesteps that: explicit SGR backgrounds are always opaque,
+// regardless of terminal transparency settings. Fragments that already carry
+// their own background (e.g. the avatar-initials chip) are left untouched.
+func (r Row) TerminalStringWithBackground(background string) string {
+	var builder strings.Builder
+	for _, fragment := range r.Fragments {
+		if fragment.ImageReady {
+			builder.WriteString(fragment.ImageCell.Text)
+			continue
+		}
+		builder.WriteString(renderFragment(fragmentWithDefaultBackground(fragment, background)))
+	}
+	return builder.String()
+}
+
+func fragmentWithDefaultBackground(fragment Fragment, background string) Fragment {
+	if fragment.Style.Background == "" {
+		fragment.Style.Background = background
+	}
+	return fragment
+}
+
 // Options controls message rendering and wrapping.
 type Options struct {
 	Width   int

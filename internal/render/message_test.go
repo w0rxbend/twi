@@ -10,11 +10,107 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/storage"
 	"github.com/w0rxbend/twi/internal/theme"
 	"github.com/w0rxbend/twi/internal/twitch"
 )
+
+// forceColorProfile pins lipgloss's default renderer to TrueColor for the
+// duration of the test and restores whatever profile was active before.
+// Setting env vars alone isn't reliable here: lipgloss/termenv detect and
+// cache the profile once per process, so whichever test in this package
+// first touches lipgloss rendering can lock in "no color" for every test
+// that runs after it in the same `go test` binary.
+func forceColorProfile(t *testing.T) {
+	t.Helper()
+	original := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(original)
+	})
+}
+
+func TestFragmentWithDefaultBackgroundFillsOnlyWhenUnset(t *testing.T) {
+	withoutBackground := Fragment{Kind: FragmentText, Text: "hi", Style: FragmentStyle{Foreground: "#ffffff"}}
+	filled := fragmentWithDefaultBackground(withoutBackground, "#111018")
+	if filled.Style.Background != "#111018" {
+		t.Fatalf("Background = %q, want #111018", filled.Style.Background)
+	}
+	if withoutBackground.Style.Background != "" {
+		t.Fatal("fragmentWithDefaultBackground mutated the original fragment")
+	}
+
+	withBackground := Fragment{Kind: FragmentText, Text: "hi", Style: FragmentStyle{Background: "#9146ff"}}
+	unchanged := fragmentWithDefaultBackground(withBackground, "#111018")
+	if unchanged.Style.Background != "#9146ff" {
+		t.Fatalf("Background = %q, want existing #9146ff preserved", unchanged.Style.Background)
+	}
+}
+
+// backgroundOnlySGRCode renders a single Background-only fragment to learn
+// exactly which SGR code this test environment's detected color profile
+// (truecolor, 256-color, or ANSI16) produces for hex, so assertions below
+// don't hardcode a specific profile's downsampled color code.
+func backgroundOnlySGRCode(t *testing.T, hex string) string {
+	t.Helper()
+	ref := Row{Fragments: []Fragment{{Kind: FragmentText, Text: "x", Style: FragmentStyle{Background: hex}}}}
+	out := ref.TerminalString()
+	start := strings.Index(out, "\x1b[")
+	end := strings.Index(out, "m")
+	if start < 0 || end < 0 || end <= start+2 {
+		t.Fatalf("could not parse an SGR sequence out of %q", out)
+	}
+	return out[start+2 : end]
+}
+
+func TestTerminalStringWithBackgroundAppliesPastEmbeddedResets(t *testing.T) {
+	forceColorProfile(t)
+	background := "#111018"
+	backgroundCode := backgroundOnlySGRCode(t, background)
+
+	row := Row{Fragments: []Fragment{
+		{Kind: FragmentText, Text: "red", Style: FragmentStyle{Foreground: "#ff0000"}},
+		{Kind: FragmentText, Text: " plain"},
+		{Kind: FragmentUsername, Text: "green", Style: FragmentStyle{Foreground: "#00ff00"}},
+	}}
+
+	// Plain TerminalString leaves every fragment's background empty, so
+	// each fragment's own SGR reset ends any background coloring — this is
+	// the exact bug: only text before the *first* reset would ever show a
+	// background if the whole row were later wrapped in an outer style.
+	plain := row.TerminalString()
+	if strings.Contains(plain, backgroundCode+"m") {
+		t.Fatalf("TerminalString() unexpectedly contains the background SGR code %q: %q", backgroundCode, plain)
+	}
+
+	// TerminalStringWithBackground must apply the background to every
+	// fragment independently, so it survives each fragment's own reset.
+	withBg := row.TerminalStringWithBackground(background)
+	backgroundCount := strings.Count(withBg, backgroundCode+"m")
+	if backgroundCount < 3 {
+		t.Fatalf("TerminalStringWithBackground(%s) applied background %d times, want at least 3 (once per fragment):\n%q", background, backgroundCount, withBg)
+	}
+}
+
+func TestTerminalStringWithBackgroundPreservesExplicitFragmentBackground(t *testing.T) {
+	forceColorProfile(t)
+	defaultCode := backgroundOnlySGRCode(t, "#111018")
+	explicitCode := backgroundOnlySGRCode(t, "#9146ff")
+
+	row := Row{Fragments: []Fragment{
+		{Kind: FragmentText, Text: "AB", Style: FragmentStyle{Background: "#9146ff"}},
+	}}
+	out := row.TerminalStringWithBackground("#111018")
+	if strings.Contains(out, defaultCode+"m") {
+		t.Fatalf("TerminalStringWithBackground overrode an explicit fragment background: %q", out)
+	}
+	if !strings.Contains(out, explicitCode+"m") {
+		t.Fatalf("TerminalStringWithBackground dropped the explicit fragment background: %q", out)
+	}
+}
 
 func TestRowsSnapshotNormalWidth(t *testing.T) {
 	now := time.Date(2026, 7, 1, 20, 0, 0, 0, time.Local)

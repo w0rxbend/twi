@@ -988,6 +988,7 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 		Height(layout.chatContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
+		Background(lipgloss.Color(m.theme.Background)).
 		Padding(0, 1).
 		Render(content)
 }
@@ -1035,6 +1036,7 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 		Height(layout.sidebarContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
+		Background(lipgloss.Color(m.theme.Background)).
 		Render(strings.Join(lines, "\n"))
 }
 
@@ -1059,15 +1061,15 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 	rows := make([]string, 0, chatRowBlockCount(blocks))
 	for _, block := range blocks {
 		if len(block.rows) == 0 {
-			rows = append(rows, fitLine("", rowWidth))
+			rows = append(rows, backgroundStyledLine(fitLine("", rowWidth), m.theme.Background))
 			continue
 		}
 		for _, row := range block.rows {
-			rows = append(rows, terminalRowString(row, rowWidth))
+			rows = append(rows, terminalRowString(row, rowWidth, m.theme.Background))
 		}
 	}
 	if len(rows) == 0 && active.messageFilters.active() {
-		rows = append(rows, m.emptyFilterRow(rowWidth))
+		rows = append(rows, backgroundStyledLine(m.emptyFilterRow(rowWidth), m.theme.Background))
 	}
 	return rows
 }
@@ -1160,16 +1162,16 @@ func (m mockShellModel) composerView(layout mockShellLayout) string {
 
 	lines := []string{}
 	if active.replyTo != nil && layout.composerContentHeight >= 3 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).Italic(true).Render(m.replyContextLine(layout.width-4)))
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).Background(lipgloss.Color(m.theme.Background)).Italic(true).Render(m.replyContextLine(layout.width-4)))
 	}
 	lines = append(lines,
-		lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Render(label),
-		lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Foreground)).Render(input),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Background(lipgloss.Color(m.theme.Background)).Render(label),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Foreground)).Background(lipgloss.Color(m.theme.Background)).Render(input),
 	)
 	box := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
 	if layout.composerContentHeight == 1 {
-		box = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Foreground)).Render(input)
+		box = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Foreground)).Background(lipgloss.Color(m.theme.Background)).Render(input)
 	}
 
 	borderColor := lipgloss.Color(m.theme.Border)
@@ -1181,6 +1183,7 @@ func (m mockShellModel) composerView(layout mockShellLayout) string {
 		Height(layout.composerContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
+		Background(lipgloss.Color(m.theme.Background)).
 		Padding(0, 1).
 		Render(box)
 }
@@ -1229,6 +1232,7 @@ func (m mockShellModel) emotesView(layout mockShellLayout) string {
 		Height(layout.emotesContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
+		Background(lipgloss.Color(m.theme.Background)).
 		Padding(0, 1).
 		Render(content)
 }
@@ -1339,18 +1343,38 @@ func fitLine(value string, width int) string {
 	return builder.String()
 }
 
-func terminalRowString(row render.Row, width int) string {
+// terminalRowString renders row to an exact-width terminal line. background
+// (the active theme's background) is applied explicitly to every fragment
+// and to the trailing width-padding, rather than relying on an outer
+// lipgloss wrap: fragments each end in their own ANSI reset, so an outer
+// Background() applied after the fact only colors text up to the row's
+// first reset (see Row.TerminalStringWithBackground) — real terminals then
+// show their own default background, which some render as transparent, for
+// everything after that.
+func terminalRowString(row render.Row, width int, background string) string {
 	if width <= 0 {
 		return ""
 	}
 	if row.Width() > width {
-		return fitLine(row.Plain(), width)
+		return backgroundStyledLine(fitLine(row.Plain(), width), background)
 	}
-	out := row.TerminalString()
+	out := row.TerminalStringWithBackground(background)
 	if padding := width - row.Width(); padding > 0 {
-		out += strings.Repeat(" ", padding)
+		out += backgroundStyledLine(strings.Repeat(" ", padding), background)
 	}
 	return out
+}
+
+// backgroundStyledLine wraps plain (non-ANSI) text in an explicit background
+// style so it renders opaque instead of falling through to the terminal's
+// own default/transparent background. Safe to call with already-plain text
+// only (never pre-styled ANSI content — see terminalRowString's doc comment
+// for why wrapping already-styled content doesn't work).
+func backgroundStyledLine(text string, background string) string {
+	if text == "" || strings.TrimSpace(background) == "" {
+		return text
+	}
+	return lipgloss.NewStyle().Background(lipgloss.Color(background)).Render(text)
 }
 
 func (m mockShellModel) layout() mockShellLayout {

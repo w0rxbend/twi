@@ -6,8 +6,97 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/w0rxbend/twi/internal/config"
+	"github.com/w0rxbend/twi/internal/render"
 )
+
+// forceColorProfile pins lipgloss's default renderer to TrueColor for the
+// duration of the test and restores whatever profile was active before.
+// Setting env vars alone (CLICOLOR_FORCE, COLORTERM) isn't reliable here:
+// lipgloss/termenv detect and cache the profile once per process, so
+// whichever test in this package first touches lipgloss rendering can lock
+// in "no color" for every test that runs after it in the same `go test`
+// binary, regardless of env vars set later.
+func forceColorProfile(t *testing.T) {
+	t.Helper()
+	original := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() {
+		lipgloss.SetColorProfile(original)
+	})
+}
+
+// backgroundOnlySGRCode learns which SGR code this environment's detected
+// color profile actually renders hex as (truecolor, 256-color, or ANSI16),
+// so assertions don't hardcode one profile's downsampled code.
+func backgroundOnlySGRCode(t *testing.T, hex string) string {
+	t.Helper()
+	out := lipgloss.NewStyle().Background(lipgloss.Color(hex)).Render("x")
+	start := strings.Index(out, "\x1b[")
+	end := strings.Index(out, "m")
+	if start < 0 || end < 0 || end <= start+2 {
+		t.Fatalf("could not parse an SGR sequence out of %q", out)
+	}
+	return out[start+2 : end]
+}
+
+func TestTerminalRowStringPaddingCarriesExplicitBackground(t *testing.T) {
+	forceColorProfile(t)
+	background := "#111018"
+	backgroundCode := backgroundOnlySGRCode(t, background)
+
+	row := render.Row{Fragments: []render.Fragment{{Kind: render.FragmentText, Text: "hi"}}}
+	out := terminalRowString(row, 10, background)
+	if got := strings.Count(out, backgroundCode+"m"); got < 1 {
+		t.Fatalf("terminalRowString padding missing background code %q: %q", backgroundCode, out)
+	}
+
+	// Without a background, no styling should be added at all (padding stays
+	// plain, matching pre-fix behavior for callers that don't want it).
+	unstyled := terminalRowString(row, 10, "")
+	if strings.Contains(unstyled, "\x1b[") {
+		t.Fatalf("terminalRowString with empty background unexpectedly styled output: %q", unstyled)
+	}
+}
+
+func TestBackgroundStyledLineWrapsPlainTextOnly(t *testing.T) {
+	forceColorProfile(t)
+	background := "#111018"
+	backgroundCode := backgroundOnlySGRCode(t, background)
+
+	styled := backgroundStyledLine("hello", background)
+	if !strings.Contains(styled, backgroundCode+"m") {
+		t.Fatalf("backgroundStyledLine missing background code %q: %q", backgroundCode, styled)
+	}
+	if got := backgroundStyledLine("", background); got != "" {
+		t.Fatalf("backgroundStyledLine(\"\", ...) = %q, want empty", got)
+	}
+	if got := backgroundStyledLine("hello", ""); got != "hello" {
+		t.Fatalf("backgroundStyledLine(..., \"\") = %q, want unchanged plain text", got)
+	}
+}
+
+func TestSplashViewWordmarkAndTaglineCarryExplicitBackground(t *testing.T) {
+	forceColorProfile(t)
+	cfg := config.Default()
+	background := cfg.ResolveTheme().Background
+	backgroundCode := backgroundOnlySGRCode(t, background)
+
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 22
+	model.splashUntil = time.Now().Add(splashDuration)
+
+	view := model.View()
+	// The wordmark/tagline/progress-bar lines are each rendered independently
+	// (their own lipgloss.Style.Render call, each ending in its own ANSI
+	// reset) before being joined; the outer splash Background() wrap alone
+	// only colors up to the first such reset. Regression test for that gap.
+	if got := strings.Count(view, backgroundCode+"m"); got < 2 {
+		t.Fatalf("splash view applies background %d times, want at least 2 (outer wrap + inner lines):\n%q", got, view)
+	}
+}
 
 func TestThemeBackgroundSequenceOnlyWhenInteractive(t *testing.T) {
 	model := newMockShellModel("alpha", config.Default())
