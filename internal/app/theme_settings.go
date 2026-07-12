@@ -51,20 +51,22 @@ func (m *mockShellModel) toggleThemeSettings() {
 	}
 }
 
+// handleThemeSettingsKey needs no explicit terminal-background side effect:
+// View() re-derives the OSC 11 background sequence from m.theme on every
+// render (see themeBackgroundSequence), so changing m.theme here is enough
+// to keep the terminal background in sync with the live preview.
 func (m mockShellModel) handleThemeSettingsKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
 		m.theme = m.themeSettings.originalPalette
 		m.themeSettings = themeSettingsState{}
-		return m, m.writeThemeBackground()
+		return m, nil
 	case tea.KeyEnter:
 		return m.persistSelectedTheme()
 	case tea.KeyUp:
 		m.moveThemeSettingsSelection(-1)
-		return m, m.writeThemeBackground()
 	case tea.KeyDown, tea.KeyTab:
 		m.moveThemeSettingsSelection(1)
-		return m, m.writeThemeBackground()
 	}
 	return m, nil
 }

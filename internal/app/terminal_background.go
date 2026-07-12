@@ -1,45 +1,52 @@
 package app
 
 import (
-	"fmt"
 	"io"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
-// setBackgroundColorSeq is the OSC 11 escape sequence that overrides the
-// terminal emulator's own default background color (not just the cells
+// themeBackgroundSequence returns the OSC 11 escape sequence that overrides
+// the terminal emulator's own default background color (not just the cells
 // lipgloss paints), so the active theme covers the whole terminal, not only
-// the alt-screen viewport content. resetBackgroundColorSeq (OSC 111) restores
-// whatever background the user's terminal was configured with before twi
-// started. Both are widely supported (xterm, iTerm2, kitty, Alacritty,
-// WezTerm, VTE-based terminals); unsupported terminals simply ignore them.
-const (
-	setBackgroundColorSeqFormat = "\x1b]11;%s\x07"
-	resetBackgroundColorSeq     = "\x1b]111\x07"
-)
+// the cells that carry an explicit background SGR code. It must be part of
+// View()'s returned string rather than written directly to the output
+// writer: bubbletea's renderer owns that writer from its own goroutine, and
+// writing to it independently (e.g. from a tea.Cmd) races that goroutine and
+// can interleave or drop the sequence, leaving some regions on the terminal's
+// original background. Embedding it in View() is safe because View() runs
+// synchronously on the renderer's own goroutine, and the ANSI parser bubbletea
+// and lipgloss share (charmbracelet/x/ansi) recognizes OSC sequences as
+// zero-width, so it doesn't perturb layout/width calculations.
+//
+// Returns "" outside an interactive session (terminalOutput is only set by
+// RunMockWithOptions/RunClientWithOptions) so piped/test output stays clean.
+func (m mockShellModel) themeBackgroundSequence() string {
+	if m.terminalOutput == nil || strings.TrimSpace(m.theme.Background) == "" {
+		return ""
+	}
+	return ansi.SetBackgroundColor(m.theme.Background)
+}
 
-// writeThemeBackground overrides the terminal's background color to match
-// the active theme. It is a fire-and-forget tea.Cmd side effect (no
-// resulting Msg) rather than part of View()'s returned string, since OSC
-// sequences use a BEL/ST terminator that isn't handled the same way as the
-// SGR color sequences lipgloss strips when measuring rendered width.
-func (m mockShellModel) writeThemeBackground() tea.Cmd {
-	w := m.terminalOutput
-	background := m.theme.Background
-	if w == nil || strings.TrimSpace(background) == "" {
-		return nil
+// primeTerminalBackground writes the OSC 11 override once, synchronously,
+// before the interactive tea.Program (and its renderer goroutine) starts.
+// This is race-free by construction — nothing else is writing to w yet — and
+// avoids a brief flash of the terminal's original background before the
+// first frame renders. View()'s embedded sequence (themeBackgroundSequence)
+// still covers the ongoing session, including live theme-preview changes.
+func primeTerminalBackground(w io.Writer, background string) {
+	if strings.TrimSpace(background) == "" {
+		return
 	}
-	return func() tea.Msg {
-		fmt.Fprintf(w, setBackgroundColorSeqFormat, background)
-		return nil
-	}
+	io.WriteString(w, ansi.SetBackgroundColor(background)) //nolint:errcheck
 }
 
 // resetTerminalBackground restores the terminal's own background color.
 // Callers must invoke this once after an interactive program exits so the
-// override doesn't leak into the user's shell.
+// override doesn't leak into the user's shell. Called after program.Run()
+// returns, when bubbletea's renderer goroutine has already stopped, so a
+// direct write here is race-free.
 func resetTerminalBackground(w io.Writer) {
-	fmt.Fprint(w, resetBackgroundColorSeq)
+	io.WriteString(w, ansi.ResetBackgroundColor) //nolint:errcheck
 }

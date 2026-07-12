@@ -312,6 +312,7 @@ func RunMockWithOptions(w io.Writer, cfg config.Config, opts ClientOptions) erro
 	model.systemNotifier = opts.SystemNotifier
 	model.splashUntil = splashDeadline(model.animationMode)
 	model.terminalOutput = w
+	primeTerminalBackground(w, model.theme.Background)
 
 	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
@@ -350,6 +351,7 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 	}
 	model.splashUntil = splashDeadline(model.animationMode)
 	model.terminalOutput = w
+	primeTerminalBackground(w, model.theme.Background)
 
 	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
@@ -588,7 +590,6 @@ func (m mockShellModel) Init() tea.Cmd {
 		m.scheduleFrameTick(),
 		m.resolveStreamStatusCommand(),
 		m.scheduleStreamStatusTick(),
-		m.writeThemeBackground(),
 	)
 }
 
@@ -867,8 +868,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m mockShellModel) View() string {
+	backgroundOverride := m.themeBackgroundSequence()
 	if m.splashActive() {
-		return m.splashView()
+		return backgroundOverride + m.splashView()
 	}
 	layout := m.layout()
 
@@ -906,12 +908,13 @@ func (m mockShellModel) View() string {
 	}
 
 	joined := lipgloss.JoinVertical(lipgloss.Left, regions...)
-	return lipgloss.NewStyle().
+	rendered := lipgloss.NewStyle().
 		Width(layout.width).
 		Height(clampMin(m.height, 1)).
 		Background(lipgloss.Color(m.theme.Background)).
 		Foreground(lipgloss.Color(m.theme.Foreground)).
 		Render(joined)
+	return backgroundOverride + rendered
 }
 
 func (m mockShellModel) statusLine(width int) string {
