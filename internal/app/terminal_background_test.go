@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,12 @@ import (
 	"github.com/w0rxbend/twi/internal/config"
 	"github.com/w0rxbend/twi/internal/render"
 )
+
+// unstyledGapAfterReset matches an ANSI reset immediately followed by two or
+// more plain (unescaped) whitespace characters and then another escape
+// sequence — the exact signature of centering an already-styled span by
+// padding it afterward instead of padding the plain text before styling it.
+var unstyledGapAfterReset = regexp.MustCompile(`\x1b\[0m\s{2,}\x1b\[`)
 
 // forceColorProfile pins lipgloss's default renderer to TrueColor for the
 // duration of the test and restores whatever profile was active before.
@@ -95,6 +102,62 @@ func TestSplashViewWordmarkAndTaglineCarryExplicitBackground(t *testing.T) {
 	// only colors up to the first such reset. Regression test for that gap.
 	if got := strings.Count(view, backgroundCode+"m"); got < 2 {
 		t.Fatalf("splash view applies background %d times, want at least 2 (outer wrap + inner lines):\n%q", got, view)
+	}
+}
+
+func TestSplashViewWordmarkLineHasNoUnstyledGapBetweenResets(t *testing.T) {
+	forceColorProfile(t)
+	cfg := config.Default()
+	model := newMockShellModel("alpha", cfg)
+	model.width, model.height = 88, 22
+	model.splashUntil = time.Now().Add(splashDuration)
+
+	view := model.splashView()
+	var wordmarkLine string
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "twi") {
+			wordmarkLine = line
+			break
+		}
+	}
+	if wordmarkLine == "" {
+		t.Fatalf("could not find the wordmark line in splash view:\n%q", view)
+	}
+
+	// Signature of the bug: centering an already-styled, already-reset
+	// span by padding it afterward (lipgloss.JoinVertical(lipgloss.Center,
+	// ...)) leaves a run of plain, unstyled spaces sandwiched between that
+	// inner reset and the next escape sequence — nothing re-establishes a
+	// background for those cells. Centering the plain text before styling
+	// it (centeredPlainLine) keeps the padding inside the styled span, so
+	// this pattern should never appear.
+	if unstyledGapAfterReset.MatchString(wordmarkLine) {
+		t.Fatalf("wordmark line has an unstyled gap between two resets (unpadded-before-styling regression): %q", wordmarkLine)
+	}
+}
+
+func TestCenteredPlainLineStyledAsOneUnstyledFreeSpan(t *testing.T) {
+	forceColorProfile(t)
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("#d97757")).Background(lipgloss.Color("#1a1523")).Bold(true)
+
+	// Fixed correct usage: pad the plain text first, then style the result
+	// in one Render() call.
+	fixed := style.Render(centeredPlainLine("twi", 26))
+	if lipgloss.Width(fixed) != 26 {
+		t.Fatalf("centeredPlainLine visible width = %d, want 26", lipgloss.Width(fixed))
+	}
+	if strings.Count(fixed, "\x1b[0m") != 1 || !strings.HasSuffix(fixed, "\x1b[0m") {
+		t.Fatalf("styling centered plain text left unstyled padding outside the span: %q", fixed)
+	}
+
+	// The bug this guards against: centering an *already-styled* string by
+	// padding it afterward (e.g. via lipgloss.JoinVertical(lipgloss.Center,
+	// ...)) leaves the padding, added after the inner ANSI reset, fully
+	// unstyled — demonstrated here for contrast.
+	buggy := lipgloss.JoinVertical(lipgloss.Center, style.Render("twi"), strings.Repeat("x", 26))
+	wordmarkLine := strings.SplitN(buggy, "\n", 2)[0]
+	if strings.HasSuffix(wordmarkLine, "\x1b[0m") {
+		t.Fatal("expected the pad-after-styling approach to leave trailing unstyled padding, but it didn't — centeredPlainLine's fix may no longer be necessary, or this test's premise is stale")
 	}
 }
 

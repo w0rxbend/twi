@@ -40,12 +40,27 @@ func (m mockShellModel) splashView() string {
 	accent := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Background(lipgloss.Color(m.theme.Background)).Bold(true)
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).Background(lipgloss.Color(m.theme.Background))
 
-	content := lipgloss.JoinVertical(lipgloss.Center,
-		accent.Render("twi"),
-		muted.Render("terminal Twitch chat"),
-		"",
-		muted.Render("["+bar+"]"),
-	)
+	wordmark := "twi"
+	tagline := "terminal Twitch chat"
+	barLine := "[" + bar + "]"
+	textWidth := lipgloss.Width(tagline)
+	if w := lipgloss.Width(barLine); w > textWidth {
+		textWidth = w
+	}
+
+	// Center each line as plain text *before* styling it, rather than
+	// joining already-styled (already-reset-terminated) lines with
+	// lipgloss.JoinVertical(lipgloss.Center, ...): that helper centers by
+	// padding with plain, unstyled spaces, which carry no background since
+	// they're added after each line's own ANSI reset. Styling the
+	// already-centered plain text in one Render() call colors the padding
+	// along with the text.
+	content := strings.Join([]string{
+		accent.Render(centeredPlainLine(wordmark, textWidth)),
+		muted.Render(centeredPlainLine(tagline, textWidth)),
+		muted.Render(centeredPlainLine("", textWidth)),
+		muted.Render(centeredPlainLine(barLine, textWidth)),
+	}, "\n")
 
 	return lipgloss.NewStyle().
 		Width(width).
@@ -53,4 +68,19 @@ func (m mockShellModel) splashView() string {
 		Align(lipgloss.Center, lipgloss.Center).
 		Background(lipgloss.Color(m.theme.Background)).
 		Render(content)
+}
+
+// centeredPlainLine center-pads plain (non-ANSI) text to width with spaces.
+// Callers must style the result afterward in one Render() call rather than
+// centering already-styled text, so the padding this adds shares the same
+// background as the text (see splashView's doc comment).
+func centeredPlainLine(text string, width int) string {
+	textWidth := lipgloss.Width(text)
+	if textWidth >= width {
+		return text
+	}
+	total := width - textWidth
+	left := total / 2
+	right := total - left
+	return strings.Repeat(" ", left) + text + strings.Repeat(" ", right)
 }
