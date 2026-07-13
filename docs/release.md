@@ -110,21 +110,27 @@ It is not a pull-request trigger.
 
 ## Snap Store Packaging
 
-`snap/snapcraft.yaml` packages `twi` as a strictly confined snap (`base:
-core24`) for `amd64` and `arm64`. The snap version is derived from `git
-describe --tags` at build time, so it always matches the nearest `v*` tag.
-`plugs: [network, network-bind, home]` cover outbound Twitch IRC/Helix/CDN
-traffic, the local loopback listener `twi login` uses for its OAuth callback,
-and letting `--config`/`--debug-log-path` point outside the snap's own
-sandboxed data directory (`~/snap/twi/current/...`, used by default under
-strict confinement instead of the real `~/.config`/`~/.cache`).
+`snap/snapcraft.yaml` packages `twi` as a classically confined snap (`base:
+core24`) for `amd64` and `arm64`. Classic confinement runs unsandboxed, like a
+traditional package, so `twi` reads/writes config, cache, and credential
+files at their normal locations under the real `$HOME` (e.g. `~/.config/twi`,
+`~/.cache/twi`) and `twi login` can bind its local OAuth callback listener and
+launch a browser without interface-plug restrictions. The snap version is
+derived from `git describe --tags` at build time, so it always matches the
+nearest `v*` tag.
+
+Classic confinement requires manual review by the Snap Store team before a
+snap can publish to a stable channel for the first time (see
+[the classic confinement review process](https://forum.snapcraft.io/t/process-for-reviewing-classic-confinement-snaps/));
+request that review from the Snapcraft forum once the snap is registered and
+an initial build has been pushed to `edge`.
 
 `.github/workflows/snap.yml` builds the snap with
 [`snapcore/action-build`](https://github.com/snapcore/action-build) on every
 push to `main` and on `v*` tag pushes, smokes the built snap with `twi
 --help`, `twi doctor`, and `twi chat --mock --channel example` via a local
-`snap install --dangerous`, and uploads it as a workflow artifact. It also
-publishes with [`snapcore/action-publish`](https://github.com/snapcore/action-publish):
+`snap install --dangerous --classic`, and uploads it as a workflow artifact.
+It also publishes with [`snapcore/action-publish`](https://github.com/snapcore/action-publish):
 
 - Pushes to `main` publish to the `edge` channel.
 - `v*` tag pushes publish to the `stable` channel.
@@ -150,7 +156,7 @@ snapcraft --classic`, and `multipass` or LXD as the build backend):
 
 ```sh
 snapcraft
-sudo snap install --dangerous ./twi_*.snap
+sudo snap install --dangerous --classic ./twi_*.snap
 ```
 
 ## Secret Handling

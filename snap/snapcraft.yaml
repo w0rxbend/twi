@@ -1,7 +1,7 @@
 name: twi
 base: core24
 grade: stable
-confinement: strict
+confinement: classic
 adopt-info: twi
 summary: Terminal Twitch chat client
 description: |
@@ -11,9 +11,15 @@ description: |
   and Twitch OAuth login.
 
   Run `twi chat --mock` for a credential-free demo, or `twi setup` for a
-  guided path to live chat. Config and cache live under this snap's own data
-  directory (`~/snap/twi/current/...`) since twi runs under strict
-  confinement; pass `--config` to use a config file elsewhere.
+  guided path to live chat.
+
+  This snap uses classic confinement (unsandboxed, like a traditional
+  package) so it can read/write config, cache, and credential files at their
+  normal locations under the real $HOME (e.g. ~/.config/twi,
+  ~/.cache/twi) instead of a snap-specific sandboxed data directory, and so
+  `twi login` can bind its local OAuth callback listener and launch a
+  browser without interface-plug restrictions. Install with
+  `snap install twi --classic`.
 
 license: MIT
 
@@ -28,13 +34,6 @@ platforms:
 apps:
   twi:
     command: bin/twi
-    plugs:
-      # Outbound Twitch IRC/Helix/CDN traffic.
-      - network
-      # Local loopback HTTP listener for the `twi login` OAuth callback.
-      - network-bind
-      # Lets --config/--debug-log-path point outside the snap's own data dir.
-      - home
 
 parts:
   twi:

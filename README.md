@@ -414,11 +414,11 @@ For live Docker runs, put real values only in your local ignored `.env`, pass cr
 
 More detail: [Docker Guide](docs/docker.md).
 
-`twi` is also packaged as a snap (`snap/snapcraft.yaml`, strict confinement,
+`twi` is also packaged as a snap (`snap/snapcraft.yaml`, classic confinement,
 `amd64`/`arm64`). Once published:
 
 ```sh
-sudo snap install twi
+sudo snap install twi --classic
 ```
 
 Release binary, container, and snap packaging are covered by

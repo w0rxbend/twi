@@ -47,7 +47,7 @@ jobs:
           TWITCH_CLIENT_SECRET: ""
         run: |
           set -eu
-          sudo snap install --dangerous "${{ steps.build.outputs.snap }}"
+          sudo snap install --dangerous --classic "${{ steps.build.outputs.snap }}"
           twi --help >/dev/null
           twi doctor >/dev/null
           twi chat --mock --channel example >/dev/null
@@ -60,12 +60,18 @@ jobs:
           path: ${{ steps.build.outputs.snap }}
           if-no-files-found: error
 
-      # SNAPCRAFT_STORE_CREDENTIALS is a one-time manual setup step: run
-      # `snapcraft export-login --snaps=twi --acls package_access,package_push,
-      # package_update,package_release exported.txt` locally, then paste the
-      # contents of exported.txt into this repo's Settings > Secrets and
-      # variables > Actions as SNAPCRAFT_STORE_CREDENTIALS. Both publish steps
-      # below are skipped (not failed) until that secret exists.
+      # Two one-time manual steps are required before these publish steps can
+      # actually succeed (see docs/release.md):
+      # 1. Run `snapcraft export-login --snaps=twi --acls package_access,
+      #    package_push,package_update,package_release exported.txt` locally,
+      #    then paste the contents of exported.txt into this repo's
+      #    Settings > Secrets and variables > Actions as
+      #    SNAPCRAFT_STORE_CREDENTIALS. Both publish steps below are skipped
+      #    (not failed) until that secret exists.
+      # 2. This snap uses classic confinement, which the Snap Store only
+      #    grants after manual human review of a forum request — until that
+      #    review completes, uploads with the credentials above are accepted
+      #    but held back from the requested channel rather than published.
       - name: Publish to the edge channel
         if: |
           github.event_name == 'push' && github.ref == 'refs/heads/main' &&
