@@ -111,6 +111,17 @@ install -m 0755 twi_linux_amd64 "$HOME/.local/bin/twi"
 twi --help
 ```
 
+On Linux, published releases can also be installed with a curl-pipe script
+that downloads the matching binary, verifies its checksum, and wires
+`~/.local/bin` into `PATH`:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://github.com/w0rxbend/twi/releases/latest/download/install.sh | sh
+```
+
+More detail, including how to pin a version: [Release Packaging](docs/release.md).
+
 Pick the artifact that matches your OS and CPU. There are no package-manager
 manifests, signing, notarization, or registry publishing steps in this release
 candidate path yet.

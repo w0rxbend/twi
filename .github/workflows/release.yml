@@ -67,6 +67,7 @@ jobs:
               --notes "Automated release for $RELEASE_TAG with Linux amd64 and arm64 binaries."
           fi
           gh release upload "$RELEASE_TAG" \
+            scripts/install.sh \
             "$release_dir/twi_linux_amd64" \
             "$release_dir/twi_linux_amd64.sha256" \
             "$release_dir/twi_linux_arm64" \

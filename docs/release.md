@@ -64,6 +64,31 @@ macOS users can verify with `shasum -a 256 -c twi_darwin_arm64.sha256` when
 manifest, signing, notarization, registry publishing, or SBOM/provenance step
 is implemented in this release candidate path.
 
+## Curl-Pipe Install (Linux)
+
+`scripts/install.sh` automates the steps above for Linux amd64/arm64: it
+downloads the matching `twi_linux_*` binary from a GitHub Release (latest by
+default), verifies its `.sha256`, installs it as `twi` under `~/.local/bin`
+(or `--dir`/`TWI_INSTALL_DIR`), and appends that directory to `PATH` in
+`~/.bashrc` and `~/.zshrc` if it's missing. It refuses to run on any OS other
+than Linux, since only Linux binaries are published.
+
+Each release upload (`.github/workflows/release.yml`) attaches
+`scripts/install.sh` itself as a release asset named `install.sh`, so it is
+reachable at a stable URL and can be piped straight into `sh`:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://github.com/w0rxbend/twi/releases/latest/download/install.sh | sh
+```
+
+Pin a specific release instead of the latest with `--version`:
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://github.com/w0rxbend/twi/releases/download/v0.3.0/install.sh | sh -s -- --version v0.3.0
+```
+
 ## Container Usage
 
 Build and run the local image:
