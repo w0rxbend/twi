@@ -31,10 +31,13 @@ const loginUsage = `Usage:
   twi login [--config path] [--redirect-uri url] [--timeout duration] [--dry-run] [--write-default-config]
 
 Starts Twitch OAuth login for:
-  chat:read                  read Twitch IRC chat
-  chat:edit                  send Twitch IRC chat
-  channel:manage:broadcast   view/edit your stream's title, category,
-                             language, and tags on the Stream Info tab
+  chat:read                    read Twitch IRC chat
+  chat:edit                    send Twitch IRC chat
+  channel:manage:broadcast     view/edit your stream's title, category,
+                                language, and tags (Stream Info tab), and
+                                create/list stream markers (Misc tab)
+  moderator:read:followers     show your follower count in the status line
+  channel:read:subscriptions   show your subscriber count in the status line
 
 Required for a real login:
   TWI_TWITCH_CLIENT_ID or TWITCH_CLIENT_ID

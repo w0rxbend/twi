@@ -161,7 +161,9 @@ If Twitch IRC rejects the access token during login, `twi` will try one OAuth re
 
 - `chat:read`
 - `chat:edit`
-- `channel:manage:broadcast` (view/edit title, category, language, and tags on the Stream Info tab)
+- `channel:manage:broadcast` (view/edit title, category, language, and tags on the Stream Info tab; create/list stream markers on the Misc tab)
+- `moderator:read:followers` (follower count in the status line)
+- `channel:read:subscriptions` (subscriber count in the status line)
 
 The command needs a Twitch app client ID and client secret from environment variables or the flat config file:
 
@@ -225,8 +227,9 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Text-only asset rendering | Ready | Avatars, badges, emotes, and emoji always render as text: `[XY]` initials chips (or nothing when `avatar_mode = "off"`), compact badge labels, matched emote text tokens, and native Unicode emoji glyphs. There is no image decode, cache, or terminal-graphics rendering path; missing metadata, missing credentials, or lookup failures simply keep the text fallback. |
 | Theming | Ready | 13 built-in presets (Claude, Codex, Btop, Nord, Dracula, Gruvbox, Solarized Dark, Monokai, One Dark, Tokyo Night, Catppuccin Mocha, Rose Pine, Mono) plus a custom hex palette apply across every widget, including the full terminal background. `ctrl+t` opens a btop-style settings view that live-previews a theme as you move the selection and persists it with `enter` (`esc` reverts); `twi profile list\|show\|set` manages the same setting from the CLI. |
 | Animation | Ready | A shared ~10fps clock (disabled when `animation_mode = "off"`) drives a pulsing LIVE/REC status-bar segment, a channel-switch flash, a typewriter reveal for command-palette results, and a ~2s animated startup splash (skippable by any keypress). |
-| Live status telemetry | Partial | The status bar shows real Twitch broadcast status via Helix "Get Streams" polling (LIVE + elapsed on-air time + viewer count) when `stream_status_mode` and Twitch API credentials allow it, otherwise OFFLINE; REC reflects `debug_logging`; CPU%/memory/FPS are twi's own process stats; "chat" bitrate is derived chat-message throughput, not stream encode bitrate. `--mock` simulates a fixed demo LIVE state. |
+| Live status telemetry | Partial | The status bar shows real Twitch broadcast status via Helix "Get Streams" polling (LIVE + elapsed on-air time + viewer count) when `stream_status_mode` and Twitch API credentials allow it, otherwise OFFLINE; follower and subscriber counts poll Helix "Get Channel Followers"/"Get Broadcaster Subscriptions" every 2 minutes when credentials and the `moderator:read:followers`/`channel:read:subscriptions` scopes allow it; REC reflects `debug_logging`; CPU%/memory/FPS are twi's own process stats; "chat" bitrate is derived chat-message throughput, not stream encode bitrate. `--mock` simulates a fixed demo LIVE state. |
 | Emote autocomplete | Partial | `ctrl+e` opens a searchable emote picker and a persistent quick-select row (third `tab` stop) backed by real Twitch global/channel emotes when `emote_autocomplete_mode` and credentials allow it, with a built-in sample list in `--mock` mode. |
+| Activity log column | Partial | On wide terminals (140+ columns), the Chat tab shows a right-hand Activity column alongside chat (and the optional channel sidebar): raids, subs/resubs/gift subs from Twitch IRC events, and new followers (detected by polling Get Channel Followers and diffing against previously seen followers, since Twitch only pushes follow events through EventSub, not IRC or any webhook twi can receive). Hidden below 100 columns and on the Stream Info/Misc tabs. |
 
 Manual validation evidence for the current environment is tracked in
 [docs/manual-validation.md](docs/manual-validation.md). Credentialed Twitch chat
@@ -236,7 +239,7 @@ is only claimed when that document records a complete credential set.
 
 | Key | Action |
 | --- | --- |
-| `alt+1` / `alt+2` | Switch the top tab bar between Chat and Stream Info. |
+| `alt+1` / `alt+2` / `alt+3` | Switch the top tab bar between Chat, Stream Info, and Misc. |
 | `ctrl+p` | Open or close the command palette. |
 | `ctrl+t` | Open or close theme settings; live-preview a theme with `up`/`down`, `enter` to save, `esc` to revert. |
 | `ctrl+e` | Open or close the searchable emote picker; filter by typing, `up`/`down` to select, `enter` to insert. |
@@ -266,22 +269,33 @@ unsupported or unavailable notification commands fall back to a terminal bell.
 
 ## Stream Info Tab
 
-`twi` opens with a top tab bar; `alt+1` selects Chat (the default) and `alt+2`
-selects Stream Info, a dedicated screen for viewing and editing your own
-channel's title, category, language, and tags without leaving the terminal.
-On that tab, `up`/`down` selects a field and `ctrl+s` saves every changed
-field to Twitch. `enter` on Title/Language/Tags edits free text (`enter`
-again commits, `esc` cancels). `enter` on Category instead opens a live
-search against Twitch's category list (Helix Search Categories): type to
-filter, `up`/`down` to pick a result, `enter` to select it, or `esc` to
-cancel - category is always a real Twitch category chosen from the API,
-never free-typed text.
+`twi` opens with a top tab bar; `alt+1` selects Chat (the default), `alt+2`
+selects Stream Info, and `alt+3` selects Misc. Stream Info is a dedicated
+screen for viewing and editing your own channel's title, category, language,
+and tags without leaving the terminal. On that tab, `up`/`down` selects a
+field and `ctrl+s` saves every changed field to Twitch. `enter` on
+Title/Language/Tags edits free text (`enter` again commits, `esc` cancels).
+`enter` on Category instead opens a live search against Twitch's category
+list (Helix Search Categories): type to filter, `up`/`down` to pick a
+result, `enter` to select it, or `esc` to cancel - category is always a
+real Twitch category chosen from the API, never free-typed text.
 
 The Stream Info tab needs a Twitch app client ID and OAuth token (the same
 credentials live chat uses) and the `channel:manage:broadcast` scope, which
 `twi login` requests automatically alongside `chat:read`/`chat:edit`. Without
 those credentials the tab explains what is missing instead of failing
 silently.
+
+## Misc Tab
+
+`alt+3` opens Misc, which lists your own stream's markers (Twitch Helix
+Stream Markers) and lets you add new ones. `up`/`down` selects a marker,
+`enter` opens a free-text description prompt (`enter` again saves the
+marker at the current live position, `esc` cancels the prompt without
+creating one). Creating a marker only succeeds while you're live - Twitch
+rejects it otherwise, and that error shows in the tab. Misc uses the same
+`channel:manage:broadcast` scope and credentials as Stream Info, so no
+separate login step is needed.
 
 ## Configure It
 

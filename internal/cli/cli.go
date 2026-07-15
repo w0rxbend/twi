@@ -96,6 +96,9 @@ var newLiveClientOptions = func(cfg config.Config) app.ClientOptions {
 		ChannelManager:       newChannelManager(cfg),
 		GameLookup:           newGameLookup(cfg),
 		UserLookup:           newUserLookup(cfg),
+		MarkerManager:        newMarkerManager(cfg),
+		FollowerLookup:       newFollowerLookup(cfg),
+		SubscriptionLookup:   newSubscriptionLookup(cfg),
 	}
 }
 
@@ -137,6 +140,48 @@ func newUserLookup(cfg config.Config) twitch.UserLookup {
 	}
 	return twitch.NewHelixUsersClient(twitch.HelixUsersClientConfig{
 		HTTPClient: &http.Client{Timeout: 2 * time.Second},
+		ClientID:   cfg.Twitch.ClientID,
+		OAuthToken: cfg.Twitch.OAuthToken,
+	})
+}
+
+// newMarkerManager wires the Misc tab's Create/Get Stream Marker calls to
+// real Twitch Helix. Uses the same channel:manage:broadcast scope already
+// requested for Stream Info, so no additional login scope is needed.
+func newMarkerManager(cfg config.Config) twitch.MarkerManager {
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	return twitch.NewHelixMarkersClient(twitch.HelixMarkersClientConfig{
+		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+		ClientID:   cfg.Twitch.ClientID,
+		OAuthToken: cfg.Twitch.OAuthToken,
+	})
+}
+
+// newFollowerLookup wires the status line's follower count to real Twitch
+// Helix, gated on Twitch API credentials (moderator:read:followers is
+// requested at login but Twitch still enforces it per-request).
+func newFollowerLookup(cfg config.Config) twitch.FollowerLookup {
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	return twitch.NewHelixFollowersClient(twitch.HelixFollowersClientConfig{
+		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+		ClientID:   cfg.Twitch.ClientID,
+		OAuthToken: cfg.Twitch.OAuthToken,
+	})
+}
+
+// newSubscriptionLookup wires the status line's subscriber count to real
+// Twitch Helix, gated on Twitch API credentials (channel:read:subscriptions
+// is requested at login but Twitch still enforces it per-request).
+func newSubscriptionLookup(cfg config.Config) twitch.SubscriptionLookup {
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	return twitch.NewHelixSubscriptionsClient(twitch.HelixSubscriptionsClientConfig{
+		HTTPClient: &http.Client{Timeout: 5 * time.Second},
 		ClientID:   cfg.Twitch.ClientID,
 		OAuthToken: cfg.Twitch.OAuthToken,
 	})

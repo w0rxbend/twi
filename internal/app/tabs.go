@@ -18,8 +18,11 @@ func (m mockShellModel) switchToTab(tab shellTab) (tea.Model, tea.Cmd) {
 	m.closeOtherOverlays("")
 	m.activeTab = tab
 	m.clampScroll()
-	if tab == tabStreamInfo {
+	switch tab {
+	case tabStreamInfo:
 		return m, m.scheduleStreamInfoLoad()
+	case tabMisc:
+		return m, m.scheduleMiscLoad()
 	}
 	return m, nil
 }

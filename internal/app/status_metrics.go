@@ -148,7 +148,7 @@ func (m mockShellModel) formatStatusMetrics(now time.Time, debugRecording bool) 
 	active := m.activeChannelState()
 	pulse := now.IsZero() || (now.UnixMilli()/500)%2 == 0
 
-	parts := make([]string, 0, 6)
+	parts := make([]string, 0, 8)
 	if active.live {
 		parts = append(parts, pulseLabel("LIVE", pulse)+" "+formatElapsed(liveElapsed(now, active.liveSince)))
 		if active.viewerCount > 0 {
@@ -156,6 +156,12 @@ func (m mockShellModel) formatStatusMetrics(now time.Time, debugRecording bool) 
 		}
 	} else {
 		parts = append(parts, "OFFLINE")
+	}
+	if m.followerCountKnown {
+		parts = append(parts, fmt.Sprintf("followers=%d", m.followerCount))
+	}
+	if m.subscriberCountKnown {
+		parts = append(parts, fmt.Sprintf("subs=%d", m.subscriberCount))
 	}
 	if debugRecording {
 		parts = append(parts, pulseLabel("REC", pulse))

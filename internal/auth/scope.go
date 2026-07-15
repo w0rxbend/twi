@@ -12,13 +12,24 @@ const (
 	ScopeChatEdit Scope = "chat:edit"
 	// ScopeChannelManageBroadcast allows reading and updating the
 	// authenticated broadcaster's channel info (title, category, language,
-	// tags) through Twitch Helix "Get/Modify Channel Information".
+	// tags) through Twitch Helix "Get/Modify Channel Information", and
+	// creating/listing stream markers.
 	ScopeChannelManageBroadcast Scope = "channel:manage:broadcast"
+	// ScopeModeratorReadFollowers allows reading the authenticated
+	// broadcaster's own follower list/count through Twitch Helix "Get
+	// Channel Followers" (moderator_id set to the broadcaster's own ID).
+	ScopeModeratorReadFollowers Scope = "moderator:read:followers"
+	// ScopeChannelReadSubscriptions allows reading the authenticated
+	// broadcaster's subscriber count through Twitch Helix "Get Broadcaster
+	// Subscriptions".
+	ScopeChannelReadSubscriptions Scope = "channel:read:subscriptions"
 )
 
 var requiredChatScopes = []Scope{ScopeChatRead, ScopeChatEdit}
 
 var streamManageScopes = []Scope{ScopeChannelManageBroadcast}
+
+var channelMetricsScopes = []Scope{ScopeModeratorReadFollowers, ScopeChannelReadSubscriptions}
 
 // ChatReadScopes returns the OAuth scopes required for read-only Twitch chat.
 func ChatReadScopes() []Scope {
@@ -43,10 +54,21 @@ func StreamManageScopes() []Scope {
 	return append([]Scope(nil), streamManageScopes...)
 }
 
+// ChannelMetricsScopes returns the OAuth scopes required to show follower
+// and subscriber counts in the chat status line.
+func ChannelMetricsScopes() []Scope {
+	return append([]Scope(nil), channelMetricsScopes...)
+}
+
 // LoginScopes returns every OAuth scope `twi login` requests: the required
-// chat read/send scopes plus stream info management for the Stream Info tab.
+// chat read/send scopes, stream info management for the Stream Info and
+// Misc tabs, and the channel metrics scopes for the status line's
+// follower/subscriber counts.
 func LoginScopes() []Scope {
-	return append(RequiredChatScopes(), StreamManageScopes()...)
+	scopes := RequiredChatScopes()
+	scopes = append(scopes, StreamManageScopes()...)
+	scopes = append(scopes, ChannelMetricsScopes()...)
+	return scopes
 }
 
 // MissingScopes returns required scopes that are absent from granted.

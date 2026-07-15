@@ -145,7 +145,7 @@ func TestStreamInfoLoadFailureSurfacesError(t *testing.T) {
 	model.width, model.height = 88, 20
 	model.activeTab = tabStreamInfo
 	model.channelManager = &appFakeChannelManager{getErr: errors.New("twitch says no")}
-	model.streamInfo.broadcasterID = "123" // skip user lookup
+	model.selfBroadcasterID = "123" // skip user lookup
 
 	cmd := model.scheduleStreamInfoLoad()
 	if cmd == nil {
@@ -174,7 +174,7 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 		Tags:          []string{"Chill"},
 	}}
 	model.channelManager = channelManager
-	model.streamInfo.broadcasterID = "123"
+	model.selfBroadcasterID = "123"
 
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)
 	model = model.applyStreamInfoLoaded(loaded)
@@ -236,7 +236,7 @@ func TestStreamInfoCategoryChangeSendsPickedGameID(t *testing.T) {
 		GameName:      "Old Game",
 	}}
 	model.channelManager = channelManager
-	model.streamInfo.broadcasterID = "123"
+	model.selfBroadcasterID = "123"
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)
 	model = model.applyStreamInfoLoaded(loaded)
 
@@ -274,7 +274,7 @@ func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 		"Fortnite Creative": {ID: "509670", Name: "Fortnite Creative"},
 		"Just Chatting":     {ID: "509658", Name: "Just Chatting"},
 	}}
-	model.streamInfo.broadcasterID = "123"
+	model.selfBroadcasterID = "123"
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)
 	model = model.applyStreamInfoLoaded(loaded)
 
@@ -404,7 +404,7 @@ func TestStreamInfoMissingScopeErrorIsUserFriendly(t *testing.T) {
 	model.width, model.height = 88, 20
 	model.activeTab = tabStreamInfo
 	model.channelManager = twitch.NewHelixChannelsClient(twitch.HelixChannelsClientConfig{Endpoint: server.URL})
-	model.streamInfo.broadcasterID = "123"
+	model.selfBroadcasterID = "123"
 
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)
 	if !twitch.IsMissingScope(loaded.err) {

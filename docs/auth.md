@@ -159,7 +159,9 @@ The command requests these scopes by default:
 
 - `chat:read`
 - `chat:edit`
-- `channel:manage:broadcast` (Stream Info tab: view/edit title, category, language, tags)
+- `channel:manage:broadcast` (Stream Info tab: view/edit title, category, language, tags; Misc tab: create/list stream markers)
+- `moderator:read:followers` (status line: follower count)
+- `channel:read:subscriptions` (status line: subscriber count)
 
 On supported Unix builds, the command saves successful login results through
 the restrictive credential file fallback. On non-Unix builds, the command stops
@@ -340,11 +342,17 @@ MVP IRC scopes:
 - `chat:read`
 - `chat:edit`
 
-Stream Info tab scope (view/edit the broadcaster's own title, category,
-language, and tags; unrelated to IRC readiness, so `twi doctor` and live chat
-startup do not gate on it):
+Stream Info and Misc tab scope (view/edit the broadcaster's own title,
+category, language, and tags; create/list stream markers; unrelated to IRC
+readiness, so `twi doctor` and live chat startup do not gate on it):
 
 - `channel:manage:broadcast`
+
+Status line scopes (follower/subscriber counts; also unrelated to IRC
+readiness):
+
+- `moderator:read:followers`
+- `channel:read:subscriptions`
 
 Future EventSub or API chat work may require scopes such as:
 

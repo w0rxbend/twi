@@ -21,15 +21,18 @@ import (
 )
 
 const (
-	defaultMockWidth   = 88
-	defaultMockHeight  = 22
-	mockIncomingDelay  = 650 * time.Millisecond
-	mockRevealDelay    = 20 * time.Millisecond
-	sidebarMinWidth    = 72
-	sidebarNormalSize  = 18
-	sidebarWideSize    = 24
-	sceneFlashDuration = 180 * time.Millisecond
-	splashDuration     = 2 * time.Second
+	defaultMockWidth      = 88
+	defaultMockHeight     = 22
+	mockIncomingDelay     = 650 * time.Millisecond
+	mockRevealDelay       = 20 * time.Millisecond
+	sidebarMinWidth       = 72
+	sidebarNormalSize     = 18
+	sidebarWideSize       = 24
+	activityLogMinWidth   = 100
+	activityLogNormalSize = 28
+	activityLogWideSize   = 34
+	sceneFlashDuration    = 180 * time.Millisecond
+	splashDuration        = 2 * time.Second
 )
 
 // StreamStatusResolver is the app-facing boundary for real Twitch broadcast
@@ -47,6 +50,9 @@ type ClientOptions struct {
 	ChannelManager       twitch.ChannelManager
 	GameLookup           twitch.GameLookup
 	UserLookup           twitch.UserLookup
+	MarkerManager        twitch.MarkerManager
+	FollowerLookup       twitch.FollowerLookup
+	SubscriptionLookup   twitch.SubscriptionLookup
 }
 
 type fdWriter interface {
@@ -54,61 +60,73 @@ type fdWriter interface {
 }
 
 type mockShellModel struct {
-	channels                  *channelStateSet
-	theme                     theme.Palette
-	effectiveConfig           config.Config
-	terminalOutput            io.Writer
-	mentionLogin              string
-	animationMode             string
-	mouseEnabled              bool
-	avatarMode                string
-	sourceDetail              string
-	client                    ChatClient
-	systemNotifier            SystemNotifier
-	debugLogger               debuglog.Logger
-	incoming                  []twitch.ChatMessage
-	nextIncoming              int
-	nextReveal                int
-	width                     int
-	height                    int
-	focus                     mockFocus
-	terminalFocused           bool
-	lastSystemNotification    *SystemNotification
-	helpExpanded              bool
-	inspectOpen               bool
-	palette                   commandPaletteState
-	themeSettings             themeSettingsState
-	emotePicker               emotePickerState
-	categoryPicker            categoryPickerState
-	reconnectInFlight         bool
-	nextSend                  int
-	frameTickScheduled        bool
-	lastFrameAt               time.Time
-	sceneFlashUntil           time.Time
-	splashUntil               time.Time
-	splashSkipped             bool
-	frameTimestamps           []time.Time
-	paletteRevealSeq          animation.Sequence
-	paletteRevealKey          string
-	streamStatusResolver      StreamStatusResolver
-	streamStatusTickScheduled bool
-	debugRecording            bool
-	cpuSampleAt               time.Time
-	cpuSampleTime             time.Duration
-	cpuPercent                float64
-	cpuAvailable              bool
-	memoryMB                  float64
-	chatByteSamples           []chatByteSample
-	revealTickScheduled       bool
-	emoteIndex                *assets.EmoteIndex
-	emoteEntries              map[string][]assets.EmoteEntry
-	emoteEntriesRequested     map[string]bool
-	emoteSelected             int
-	activeTab                 shellTab
-	channelManager            twitch.ChannelManager
-	gameLookup                twitch.GameLookup
-	userLookup                twitch.UserLookup
-	streamInfo                streamInfoState
+	channels                    *channelStateSet
+	theme                       theme.Palette
+	effectiveConfig             config.Config
+	terminalOutput              io.Writer
+	mentionLogin                string
+	animationMode               string
+	mouseEnabled                bool
+	avatarMode                  string
+	sourceDetail                string
+	client                      ChatClient
+	systemNotifier              SystemNotifier
+	debugLogger                 debuglog.Logger
+	incoming                    []twitch.ChatMessage
+	nextIncoming                int
+	nextReveal                  int
+	width                       int
+	height                      int
+	focus                       mockFocus
+	terminalFocused             bool
+	lastSystemNotification      *SystemNotification
+	helpExpanded                bool
+	inspectOpen                 bool
+	palette                     commandPaletteState
+	themeSettings               themeSettingsState
+	emotePicker                 emotePickerState
+	categoryPicker              categoryPickerState
+	reconnectInFlight           bool
+	nextSend                    int
+	frameTickScheduled          bool
+	lastFrameAt                 time.Time
+	sceneFlashUntil             time.Time
+	splashUntil                 time.Time
+	splashSkipped               bool
+	frameTimestamps             []time.Time
+	paletteRevealSeq            animation.Sequence
+	paletteRevealKey            string
+	streamStatusResolver        StreamStatusResolver
+	streamStatusTickScheduled   bool
+	followerLookup              twitch.FollowerLookup
+	subscriptionLookup          twitch.SubscriptionLookup
+	followerCount               int
+	followerCountKnown          bool
+	subscriberCount             int
+	subscriberCountKnown        bool
+	channelMetricsTickScheduled bool
+	activityLog                 []activityEntry
+	seenFollowerIDs             map[string]bool
+	debugRecording              bool
+	cpuSampleAt                 time.Time
+	cpuSampleTime               time.Duration
+	cpuPercent                  float64
+	cpuAvailable                bool
+	memoryMB                    float64
+	chatByteSamples             []chatByteSample
+	revealTickScheduled         bool
+	emoteIndex                  *assets.EmoteIndex
+	emoteEntries                map[string][]assets.EmoteEntry
+	emoteEntriesRequested       map[string]bool
+	emoteSelected               int
+	activeTab                   shellTab
+	channelManager              twitch.ChannelManager
+	gameLookup                  twitch.GameLookup
+	userLookup                  twitch.UserLookup
+	selfBroadcasterID           string
+	streamInfo                  streamInfoState
+	misc                        miscState
+	markerManager               twitch.MarkerManager
 }
 
 var _ tea.Model = mockShellModel{}
@@ -120,6 +138,7 @@ type shellTab int
 const (
 	tabChat shellTab = iota
 	tabStreamInfo
+	tabMisc
 )
 
 // shellTabs lists every tab in display/shortcut order: tab N is switched to
@@ -130,6 +149,7 @@ var shellTabs = []struct {
 }{
 	{tabChat, "Chat"},
 	{tabStreamInfo, "Stream Info"},
+	{tabMisc, "Misc"},
 }
 
 // tabForShortcutRune maps an Alt+<digit> keypress to the tab it selects.
@@ -194,6 +214,8 @@ type mockShellLayout struct {
 	chatWidth                   int
 	sidebarWidth                int
 	sidebarContentHeight        int
+	activityWidth               int
+	activityContentHeight       int
 	inspectHeight               int
 	inspectContentHeight        int
 	inspectFramed               bool
@@ -212,6 +234,9 @@ type mockShellLayout struct {
 	streamInfoHeight            int
 	streamInfoContentHeight     int
 	streamInfoFramed            bool
+	miscHeight                  int
+	miscContentHeight           int
+	miscFramed                  bool
 	composerHeight              int
 	composerContentHeight       int
 	composerFramed              bool
@@ -438,6 +463,9 @@ func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, cli
 		channelManager:        opts.ChannelManager,
 		gameLookup:            opts.GameLookup,
 		userLookup:            opts.UserLookup,
+		markerManager:         opts.MarkerManager,
+		followerLookup:        opts.FollowerLookup,
+		subscriptionLookup:    opts.SubscriptionLookup,
 		emoteEntries:          make(map[string][]assets.EmoteEntry),
 		emoteEntriesRequested: make(map[string]bool),
 		debugLogger:           opts.DebugLogger,
@@ -518,6 +546,8 @@ func (m mockShellModel) Init() tea.Cmd {
 		m.scheduleFrameTick(),
 		m.resolveStreamStatusCommand(),
 		m.scheduleStreamStatusTick(),
+		m.resolveChannelMetricsCommand(),
+		m.scheduleChannelMetricsTick(),
 	)
 }
 
@@ -562,6 +592,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.activeTab == tabStreamInfo {
 			return m.handleStreamInfoKey(msg)
+		}
+		if m.activeTab == tabMisc {
+			return m.handleMiscKey(msg)
 		}
 		switch msg.Type {
 		case tea.KeyTab:
@@ -688,6 +721,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if revealCmd := m.enqueueMessage(msg.message); revealCmd != nil {
 			cmds = append(cmds, revealCmd)
 		}
+		m.recordActivityFromMessage(msg.message)
 		if notificationCmd := m.maybeNotifyForSystemEvent(msg.message); notificationCmd != nil {
 			cmds = append(cmds, notificationCmd)
 		}
@@ -709,6 +743,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if revealCmd := m.enqueueMessage(msg.message); revealCmd != nil {
 			cmds = append(cmds, revealCmd)
 		}
+		m.recordActivityFromMessage(msg.message)
 		if notificationCmd := m.maybeNotifyForSystemEvent(msg.message); notificationCmd != nil {
 			cmds = append(cmds, notificationCmd)
 		}
@@ -747,6 +782,11 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.applyStreamStatusResults(msg.results)
 		}
 		return m, nil
+	case channelMetricsTickMsg:
+		m.channelMetricsTickScheduled = false
+		return m, tea.Batch(m.resolveChannelMetricsCommand(), m.scheduleChannelMetricsTick())
+	case channelMetricsResolvedMsg:
+		return m.applyChannelMetrics(msg), nil
 	case broadcasterIDResolvedMsg:
 		m.applyBroadcasterIDResult(msg)
 		return m.withAsyncAssetCommands(nil)
@@ -761,6 +801,10 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyCategoryPickerDebounce(msg)
 	case categoryPickerResultsMsg:
 		return m.applyCategoryPickerResults(msg), nil
+	case miscMarkersLoadedMsg:
+		return m.applyMiscLoaded(msg), nil
+	case miscMarkerCreatedMsg:
+		return m.applyMiscMarkerCreated(msg), nil
 	case mockAnimationTickMsg:
 		m.revealTickScheduled = false
 		active := m.activeChannelState()
@@ -796,10 +840,16 @@ func (m mockShellModel) View() string {
 		if layout.sidebarWidth > 0 {
 			chat = lipgloss.JoinHorizontal(lipgloss.Top, m.sidebarView(layout), chat)
 		}
+		if layout.activityWidth > 0 {
+			chat = lipgloss.JoinHorizontal(lipgloss.Top, chat, m.activityLogView(layout))
+		}
 		regions = append(regions, chat)
 	}
 	if layout.streamInfoHeight > 0 {
 		regions = append(regions, m.streamInfoView(layout))
+	}
+	if layout.miscHeight > 0 {
+		regions = append(regions, m.miscView(layout))
 	}
 	if layout.paletteHeight > 0 {
 		regions = append(regions, m.commandPaletteView(layout))
@@ -956,6 +1006,48 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 		Height(layout.sidebarContentHeight).
 		Border(lipgloss.NormalBorder()).
 		BorderForeground(borderColor).
+		BorderBackground(lipgloss.Color(m.theme.Background)).
+		Background(lipgloss.Color(m.theme.Background)).
+		Render(strings.Join(lines, "\n"))
+}
+
+// activityLogView renders the right-hand activity log column: raids,
+// subs/resubs/gift subs (from IRC, via recordActivityFromMessage), and new
+// followers (from polling and diffing Get Channel Followers, via
+// applyNewFollowerActivity) - most recent entries at the bottom, matching
+// chat's own bottom-anchored scroll convention.
+func (m mockShellModel) activityLogView(layout mockShellLayout) string {
+	if layout.activityWidth <= 0 {
+		return ""
+	}
+	contentWidth := clampMin(layout.activityWidth-2, 1)
+	lines := make([]string, 0, layout.activityContentHeight)
+	lines = append(lines, fitLine(" Activity", contentWidth))
+
+	maxRows := clampMin(layout.activityContentHeight-1, 0)
+	entries := m.activityLog
+	if len(entries) > maxRows {
+		entries = entries[len(entries)-maxRows:]
+	}
+	for _, entry := range entries {
+		text := entry.Text
+		if entry.Channel != "" {
+			text = "#" + entry.Channel + " " + text
+		}
+		lines = append(lines, fitLine(" "+text, contentWidth))
+	}
+	for len(lines) < layout.activityContentHeight {
+		lines = append(lines, fitLine("", contentWidth))
+	}
+	if len(lines) > layout.activityContentHeight {
+		lines = lines[:layout.activityContentHeight]
+	}
+
+	return lipgloss.NewStyle().
+		Width(contentWidth).
+		Height(layout.activityContentHeight).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color(m.theme.Border)).
 		BorderBackground(lipgloss.Color(m.theme.Background)).
 		Background(lipgloss.Color(m.theme.Background)).
 		Render(strings.Join(lines, "\n"))
@@ -1326,8 +1418,9 @@ func (m mockShellModel) layout() mockShellLayout {
 	}
 
 	onStreamInfo := m.activeTab == tabStreamInfo
+	onMisc := m.activeTab == tabMisc
 
-	if !onStreamInfo {
+	if !onStreamInfo && !onMisc {
 		layout.composerHeight = 4
 		layout.composerContentHeight = 2
 		if m.activeChannelState().replyTo != nil {
@@ -1467,7 +1560,8 @@ func (m mockShellModel) layout() mockShellLayout {
 
 	layout.chatHeight = clampMin(remaining, 0)
 	layout.sidebarWidth = m.sidebarWidth(width, layout.chatHeight)
-	layout.chatWidth = clampMin(width-layout.sidebarWidth, 1)
+	layout.activityWidth = m.activityWidthFor(width, layout.chatHeight)
+	layout.chatWidth = clampMin(width-layout.sidebarWidth-layout.activityWidth, 1)
 	layout.chatFramed = layout.chatHeight >= 3 && width >= 5
 	layout.chatContentHeight = layout.chatHeight
 	if layout.chatFramed {
@@ -1477,6 +1571,7 @@ func (m mockShellModel) layout() mockShellLayout {
 	if layout.sidebarContentHeight < 0 {
 		layout.sidebarContentHeight = 0
 	}
+	layout.activityContentHeight = layout.sidebarContentHeight
 	if layout.chatContentHeight < 0 {
 		layout.chatContentHeight = 0
 	}
@@ -1493,15 +1588,31 @@ func (m mockShellModel) layout() mockShellLayout {
 		if layout.sidebarContentHeight < 0 {
 			layout.sidebarContentHeight = 0
 		}
+		layout.activityContentHeight = layout.sidebarContentHeight
 	}
 
-	if onStreamInfo {
+	switch {
+	case onStreamInfo:
 		layout.sidebarWidth = 0
+		layout.activityWidth = 0
 		layout.chatWidth = width
 		layout.sidebarContentHeight = 0
+		layout.activityContentHeight = 0
 		layout.streamInfoHeight = layout.chatHeight
 		layout.streamInfoContentHeight = layout.chatContentHeight
 		layout.streamInfoFramed = layout.chatFramed
+		layout.chatHeight = 0
+		layout.chatContentHeight = 0
+		layout.chatFramed = false
+	case onMisc:
+		layout.sidebarWidth = 0
+		layout.activityWidth = 0
+		layout.chatWidth = width
+		layout.sidebarContentHeight = 0
+		layout.activityContentHeight = 0
+		layout.miscHeight = layout.chatHeight
+		layout.miscContentHeight = layout.chatContentHeight
+		layout.miscFramed = layout.chatFramed
 		layout.chatHeight = 0
 		layout.chatContentHeight = 0
 		layout.chatFramed = false
@@ -1518,6 +1629,20 @@ func (m mockShellModel) sidebarWidth(width, chatHeight int) int {
 		return sidebarWideSize
 	}
 	return sidebarNormalSize
+}
+
+// activityWidthFor decides the right-hand activity log column's width.
+// Unlike the left channel sidebar, it doesn't need multiple channels to be
+// useful (raids/subs/new followers matter even with one channel open), so
+// it's gated only on having enough width and chat vertical room.
+func (m mockShellModel) activityWidthFor(width, chatHeight int) int {
+	if width < activityLogMinWidth || chatHeight < 3 {
+		return 0
+	}
+	if width >= 140 {
+		return activityLogWideSize
+	}
+	return activityLogNormalSize
 }
 
 func (m mockShellModel) chatRowWidth(layout mockShellLayout) int {
@@ -1632,8 +1757,9 @@ func isMouseLeftPress(event tea.MouseEvent) bool {
 func (m mockShellModel) mouseInChatRegion(event tea.MouseEvent, layout mockShellLayout) bool {
 	chatTop := layout.tabBarHeight + layout.statusHeight
 	chatLeft := layout.sidebarWidth
+	chatRight := layout.sidebarWidth + layout.chatWidth
 	return event.X >= chatLeft &&
-		event.X < layout.width &&
+		event.X < chatRight &&
 		event.Y >= chatTop &&
 		event.Y < chatTop+layout.chatHeight
 }
@@ -2503,7 +2629,7 @@ func (m mockShellModel) helpLines(width, height int) []string {
 	}
 
 	lines := []string{
-		" alt+1/2: switch tab (chat/stream info) | tab focus: chat/composer",
+		" alt+1/2/3: switch tab (chat/stream info/misc) | tab focus: chat/composer",
 		" ctrl+p: commands | [/]: switch channel | 1-4 filters, 0 reset | up/down: select message",
 		" r: reply | i: inspect | pgup/pgdn: scroll | ctrl+l: clear | ctrl+r: reconnect | ?: compact help | q: quit | " + source,
 	}

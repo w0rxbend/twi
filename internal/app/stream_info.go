@@ -39,11 +39,10 @@ var streamInfoFieldLabels = [streamInfoFieldCount]string{
 // save), while original holds the last confirmed Twitch-side snapshot so
 // saving only sends fields that actually changed.
 type streamInfoState struct {
-	loading       bool
-	loaded        bool
-	loadErr       string
-	broadcasterID string
-	original      twitch.ChannelInfo
+	loading  bool
+	loaded   bool
+	loadErr  string
+	original twitch.ChannelInfo
 
 	title          string
 	category       string
@@ -88,8 +87,8 @@ func (m *mockShellModel) scheduleStreamInfoLoad() tea.Cmd {
 
 	channelManager := m.channelManager
 	userLookup := m.userLookup
-	username := strings.TrimSpace(m.effectiveConfig.Twitch.Username)
-	knownID := m.streamInfo.broadcasterID
+	username := m.effectiveConfig.Twitch.Username
+	knownID := m.selfBroadcasterID
 
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), streamInfoRequestTimeout)
@@ -97,22 +96,11 @@ func (m *mockShellModel) scheduleStreamInfoLoad() tea.Cmd {
 
 		id := knownID
 		if id == "" {
-			if userLookup == nil || username == "" {
-				return streamInfoLoadedMsg{err: fmt.Errorf("resolve your Twitch user ID: missing username or user lookup")}
-			}
-			users, err := userLookup.GetUsers(ctx, twitch.UserLookupRequest{UserLogins: []string{username}})
+			resolved, err := resolveSelfBroadcasterID(ctx, userLookup, username)
 			if err != nil {
 				return streamInfoLoadedMsg{err: err}
 			}
-			for _, u := range users {
-				if strings.EqualFold(u.Login, username) {
-					id = u.UserID
-					break
-				}
-			}
-			if id == "" {
-				return streamInfoLoadedMsg{err: fmt.Errorf("could not resolve a Twitch user ID for %q", username)}
-			}
+			id = resolved
 		}
 
 		info, err := channelManager.GetChannelInformation(ctx, id)
@@ -126,7 +114,7 @@ func (m *mockShellModel) scheduleStreamInfoLoad() tea.Cmd {
 func (m mockShellModel) applyStreamInfoLoaded(msg streamInfoLoadedMsg) mockShellModel {
 	m.streamInfo.loading = false
 	if msg.broadcasterID != "" {
-		m.streamInfo.broadcasterID = msg.broadcasterID
+		m.selfBroadcasterID = msg.broadcasterID
 	}
 	if msg.err != nil {
 		m.streamInfo.loadErr = streamInfoErrorMessage(msg.err)
@@ -149,7 +137,7 @@ func (m mockShellModel) applyStreamInfoLoaded(msg streamInfoLoadedMsg) mockShell
 // picking a real category in the category picker (category_picker.go), never
 // typed - so no name->ID resolution is needed here.
 func (m *mockShellModel) scheduleStreamInfoSave() tea.Cmd {
-	if m.channelManager == nil || m.streamInfo.broadcasterID == "" || m.streamInfo.saving {
+	if m.channelManager == nil || m.selfBroadcasterID == "" || m.streamInfo.saving {
 		return nil
 	}
 
@@ -159,7 +147,7 @@ func (m *mockShellModel) scheduleStreamInfoSave() tea.Cmd {
 	categoryGameID := m.streamInfo.categoryGameID
 	language := strings.TrimSpace(m.streamInfo.language)
 	tags := parseStreamInfoTags(m.streamInfo.tags)
-	broadcasterID := m.streamInfo.broadcasterID
+	broadcasterID := m.selfBroadcasterID
 	channelManager := m.channelManager
 
 	m.streamInfo.saving = true
