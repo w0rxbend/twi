@@ -38,6 +38,7 @@ Starts Twitch OAuth login for:
                                 create/list stream markers (Misc tab)
   moderator:read:followers     show your follower count in the status line
   channel:read:subscriptions   show your subscriber count in the status line
+  clips:edit                   create clips of your active stream (/clip)
 
 Required for a real login:
   TWI_TWITCH_CLIENT_ID or TWITCH_CLIENT_ID

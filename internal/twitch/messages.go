@@ -23,6 +23,10 @@ type ChatMessage struct {
 	Reply       *Reply
 	Type        MessageType
 	Deleted     bool
+	// Bits is the cheer amount from a Twitch PRIVMSG's "bits" tag, or 0 for a
+	// message with no cheer. Cheers arrive as ordinary chat messages (not a
+	// USERNOTICE), so this is the only signal that a message is a cheer.
+	Bits int
 	// SystemEventID identifies a normalized non-chat event associated with a
 	// notice/system row, such as "raid" from a Twitch USERNOTICE msg-id.
 	SystemEventID string

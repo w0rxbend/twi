@@ -3124,6 +3124,36 @@ func TestApplyStreamStatusResultsUpdatesLiveOfflineAndViewers(t *testing.T) {
 	if beta.live || !beta.liveSince.IsZero() {
 		t.Fatalf("beta state = %+v, want offline with zero liveSince", beta)
 	}
+	if len(model.activityLog) != 0 {
+		t.Fatalf("activityLog after first poll = %#v, want empty (baseline only)", model.activityLog)
+	}
+}
+
+func TestApplyStreamStatusResultsLogsLiveOfflineTransitionsAfterBaseline(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultChannels = []string{"alpha"}
+	model := newMockShellModel("alpha", cfg)
+
+	model.applyStreamStatusResults([]twitch.StreamInfo{{UserLogin: "alpha", Live: false}})
+	if len(model.activityLog) != 0 {
+		t.Fatalf("activityLog after baseline poll = %#v, want empty", model.activityLog)
+	}
+
+	model.applyStreamStatusResults([]twitch.StreamInfo{{UserLogin: "alpha", Live: true}})
+	if len(model.activityLog) != 1 || model.activityLog[0].Kind != activityStreamStatus || model.activityLog[0].Text != "stream went live" {
+		t.Fatalf("activityLog after going live = %#v, want one \"stream went live\" entry", model.activityLog)
+	}
+
+	// Polling again with the same live status must not re-report it.
+	model.applyStreamStatusResults([]twitch.StreamInfo{{UserLogin: "alpha", Live: true}})
+	if len(model.activityLog) != 1 {
+		t.Fatalf("activityLog after repeat poll = %#v, want still 1 entry", model.activityLog)
+	}
+
+	model.applyStreamStatusResults([]twitch.StreamInfo{{UserLogin: "alpha", Live: false}})
+	if len(model.activityLog) != 2 || model.activityLog[1].Text != "stream went offline" {
+		t.Fatalf("activityLog after going offline = %#v, want a second \"stream went offline\" entry", model.activityLog)
+	}
 }
 
 func TestStatusLineShowsLiveOrOfflineAtSufficientWidth(t *testing.T) {

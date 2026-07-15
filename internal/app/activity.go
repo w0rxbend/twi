@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -14,12 +15,20 @@ const maxActivityEntries = 200
 // subs, etc.) map to activityIRCEvent; new followers map to activityFollow
 // (detected by polling and diffing Get Channel Followers, since Twitch only
 // pushes follow events through EventSub - a separate WebSocket push API -
-// not IRC or any plain polling endpoint with real-time semantics).
+// not IRC or any plain polling endpoint with real-time semantics); cheers
+// map to activityCheer (detected from a PRIVMSG's "bits" tag, since Twitch
+// sends cheers as ordinary chat messages, not a USERNOTICE); and stream
+// live/offline transitions map to activityStreamStatus (detected by polling
+// and diffing Get Streams, the same status the LIVE/OFFLINE status-bar
+// badge already uses).
 type activityKind string
 
 const (
-	activityFollow   activityKind = "follow"
-	activityIRCEvent activityKind = "irc_event"
+	activityFollow       activityKind = "follow"
+	activityIRCEvent     activityKind = "irc_event"
+	activityClip         activityKind = "clip"
+	activityCheer        activityKind = "cheer"
+	activityStreamStatus activityKind = "stream_status"
 )
 
 // activityEntry is one row in the activity log column.
@@ -30,12 +39,28 @@ type activityEntry struct {
 	At      time.Time
 }
 
-// recordActivityFromMessage appends an activity log entry when message
-// represents a Twitch system event twi already classifies for desktop
-// notifications (raid, sub, resub, gift sub, etc. - see
-// systemNotificationFromMessage/systemEventLabel in system_notification.go).
-// Plain chat messages produce no activity entry.
+// recordActivityFromMessage appends an activity log entry for a Twitch
+// system event twi already classifies for desktop notifications (raid, sub,
+// resub, gift sub, etc. - see systemNotificationFromMessage/systemEventLabel
+// in system_notification.go), or for a cheer (a plain chat message carrying
+// a "bits" tag, which systemNotificationFromMessage never classifies since
+// it isn't a USERNOTICE). Any other plain chat message produces no activity
+// entry.
 func (m *mockShellModel) recordActivityFromMessage(message twitch.ChatMessage) {
+	at := message.Timestamp
+	if at.IsZero() {
+		at = time.Now()
+	}
+
+	if message.Bits > 0 {
+		m.appendActivity(activityEntry{
+			Kind:    activityCheer,
+			Channel: normalizeChannelName(message.Channel),
+			Text:    cheerActivityText(message),
+			At:      at,
+		})
+	}
+
 	notification, ok := systemNotificationFromMessage(message)
 	if !ok {
 		return
@@ -45,16 +70,27 @@ func (m *mockShellModel) recordActivityFromMessage(message twitch.ChatMessage) {
 	if strings.EqualFold(notification.EventID, "system") {
 		return
 	}
-	at := message.Timestamp
-	if at.IsZero() {
-		at = time.Now()
-	}
 	m.appendActivity(activityEntry{
 		Kind:    activityIRCEvent,
 		Channel: notification.Channel,
 		Text:    systemNotificationSummary(notification),
 		At:      at,
 	})
+}
+
+func cheerActivityText(message twitch.ChatMessage) string {
+	name := strings.TrimSpace(message.DisplayName)
+	if name == "" {
+		name = strings.TrimSpace(message.AuthorLogin)
+	}
+	if name == "" {
+		name = "someone"
+	}
+	unit := "bits"
+	if message.Bits == 1 {
+		unit = "bit"
+	}
+	return fmt.Sprintf("%s cheered %d %s", name, message.Bits, unit)
 }
 
 func (m *mockShellModel) appendActivity(entry activityEntry) {

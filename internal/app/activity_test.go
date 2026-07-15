@@ -39,6 +39,40 @@ func TestRecordActivityFromMessageClassifiesRaidsAndSubs(t *testing.T) {
 	}
 }
 
+func TestRecordActivityFromMessageClassifiesCheers(t *testing.T) {
+	model := newMockShellModel("example", config.Default())
+
+	model.recordActivityFromMessage(twitch.ChatMessage{
+		Channel:     "example",
+		Type:        twitch.MessageTypeChat,
+		DisplayName: "Cheerer",
+		Text:        "Cheer100 nice stream!",
+		Bits:        100,
+		Timestamp:   time.Date(2026, 7, 14, 20, 0, 0, 0, time.UTC),
+	})
+	// A plain chat message with no bits is not a cheer.
+	model.recordActivityFromMessage(twitch.ChatMessage{Channel: "example", Type: twitch.MessageTypeChat, Text: "hello"})
+
+	if len(model.activityLog) != 1 {
+		t.Fatalf("activityLog = %#v, want 1 cheer entry", model.activityLog)
+	}
+	entry := model.activityLog[0]
+	if entry.Kind != activityCheer || entry.Channel != "example" {
+		t.Fatalf("entry = %#v, want Kind=cheer in #example", entry)
+	}
+	if entry.Text != "Cheerer cheered 100 bits" {
+		t.Fatalf("entry.Text = %q, want %q", entry.Text, "Cheerer cheered 100 bits")
+	}
+}
+
+func TestRecordActivityFromMessageCheerUsesSingularBit(t *testing.T) {
+	model := newMockShellModel("example", config.Default())
+	model.recordActivityFromMessage(twitch.ChatMessage{Channel: "example", Type: twitch.MessageTypeChat, DisplayName: "Cheerer", Bits: 1})
+	if len(model.activityLog) != 1 || model.activityLog[0].Text != "Cheerer cheered 1 bit" {
+		t.Fatalf("activityLog = %#v, want singular \"1 bit\"", model.activityLog)
+	}
+}
+
 func TestApplyNewFollowerActivityEstablishesBaselineSilently(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
 	model.applyNewFollowerActivity([]twitch.Follower{

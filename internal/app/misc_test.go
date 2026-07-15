@@ -184,6 +184,34 @@ func TestMiscCreateMarkerFailureIsUserFriendlyOnMissingScope(t *testing.T) {
 	}
 }
 
+func TestMiscLoadFailureShowsNotLiveHintOnNoVideoFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error":"Not Found","status":404,"message":"Unable to find user's most recent Video/VOD ID. Please ensure you are passing the correct user ID!"}`)
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	model := newMockShellModel("example", cfg)
+	model.width, model.height = 88, 20
+	model.activeTab = tabMisc
+	model.markerManager = twitch.NewHelixMarkersClient(twitch.HelixMarkersClientConfig{Endpoint: server.URL})
+	model.selfBroadcasterID = "123"
+
+	loaded := model.scheduleMiscLoad()().(miscMarkersLoadedMsg)
+	if !twitch.IsNoVideoFound(loaded.err) {
+		t.Fatalf("loaded.err = %v, want a no-video-found error", loaded.err)
+	}
+	model = model.applyMiscLoaded(loaded)
+	if !strings.Contains(model.misc.loadErr, "not currently live") {
+		t.Fatalf("loadErr = %q, want a not-live hint", model.misc.loadErr)
+	}
+	view := model.miscView(model.layout())
+	if !strings.Contains(view, "not currently live") {
+		t.Fatalf("misc view missing not-live hint:\n%s", view)
+	}
+}
+
 func TestMoveMiscSelectionWrapsAndHandlesEmpty(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
 	model.moveMiscSelection(-1)

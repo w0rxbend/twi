@@ -155,12 +155,19 @@ func (m mockShellModel) applyMiscMarkerCreated(msg miscMarkerCreatedMsg) mockShe
 
 // miscErrorMessage mirrors streamInfoErrorMessage: a 401 from either stream
 // marker endpoint means the current token predates (or otherwise lacks)
-// channel:manage:broadcast.
+// channel:manage:broadcast. A 404 from Get/Create Stream Marker means
+// Twitch has no video to attach markers to, which in practice always means
+// the channel isn't currently live (Twitch only maintains a markers-eligible
+// video while a broadcast is in progress).
 func miscErrorMessage(err error) string {
-	if twitch.IsMissingScope(err) {
+	switch {
+	case twitch.IsMissingScope(err):
 		return "Your Twitch login is missing the channel:manage:broadcast scope (or the token expired). Run `twi login` to re-authenticate, then reopen this tab (alt+3)."
+	case twitch.IsNoVideoFound(err):
+		return "Stream markers are not available: you are not currently live. Start streaming, then reopen this tab (alt+3)."
+	default:
+		return err.Error()
 	}
-	return err.Error()
 }
 
 func (m mockShellModel) handleMiscKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

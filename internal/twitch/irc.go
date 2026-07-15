@@ -236,8 +236,24 @@ func normalizeIRCChatMessage(id, channel, channelID string, timestamp time.Time,
 		Emotes:      emotes,
 		Reply:       normalizeIRCReply(reply),
 		Type:        messageType,
+		Bits:        parseBitsTag(tags),
 		RawTags:     cloneStringMap(tags),
 	}
+}
+
+// parseBitsTag reads a PRIVMSG's "bits" tag, present only on cheer messages.
+// A missing or malformed tag is treated as 0 bits, not an error - Twitch's
+// own clients handle it the same way.
+func parseBitsTag(tags map[string]string) int {
+	raw := strings.TrimSpace(tags["bits"])
+	if raw == "" {
+		return 0
+	}
+	bits, err := strconv.Atoi(raw)
+	if err != nil || bits < 0 {
+		return 0
+	}
+	return bits
 }
 
 func normalizeIRCBadges(in map[string]int, tags map[string]string) []Badge {

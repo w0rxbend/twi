@@ -99,6 +99,7 @@ var newLiveClientOptions = func(cfg config.Config) app.ClientOptions {
 		MarkerManager:        newMarkerManager(cfg),
 		FollowerLookup:       newFollowerLookup(cfg),
 		SubscriptionLookup:   newSubscriptionLookup(cfg),
+		ClipManager:          newClipManager(cfg),
 	}
 }
 
@@ -153,6 +154,20 @@ func newMarkerManager(cfg config.Config) twitch.MarkerManager {
 		return nil
 	}
 	return twitch.NewHelixMarkersClient(twitch.HelixMarkersClientConfig{
+		HTTPClient: &http.Client{Timeout: 5 * time.Second},
+		ClientID:   cfg.Twitch.ClientID,
+		OAuthToken: cfg.Twitch.OAuthToken,
+	})
+}
+
+// newClipManager wires the /clip chat command's Create Clip calls to real
+// Twitch Helix. Requires the clips:edit scope, requested at login alongside
+// the other tab scopes; Twitch still enforces it per-request.
+func newClipManager(cfg config.Config) twitch.ClipManager {
+	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
+		return nil
+	}
+	return twitch.NewHelixClipsClient(twitch.HelixClipsClientConfig{
 		HTTPClient: &http.Client{Timeout: 5 * time.Second},
 		ClientID:   cfg.Twitch.ClientID,
 		OAuthToken: cfg.Twitch.OAuthToken,

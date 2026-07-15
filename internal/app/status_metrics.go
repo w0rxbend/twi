@@ -54,18 +54,38 @@ func (m mockShellModel) resolveStreamStatusCommand() tea.Cmd {
 	}
 }
 
+// applyStreamStatusResults updates each configured channel's live/offline
+// state from a Get Streams poll and, once a channel's status is known from a
+// prior poll, logs an activity entry for a live<->offline transition. The
+// very first poll for a channel only establishes that baseline silently, the
+// same convention applyNewFollowerActivity uses, so twi doesn't log a
+// misleading "went live" for a stream that was already live before twi
+// started.
 func (m *mockShellModel) applyStreamStatusResults(results []twitch.StreamInfo) {
 	for _, result := range results {
 		state := m.channels.ensure(result.UserLogin)
 		if state == nil {
 			continue
 		}
+		wasLive, hadKnownStatus := state.live, state.liveStatusKnown
 		state.live = result.Live
+		state.liveStatusKnown = true
 		state.viewerCount = result.ViewerCount
 		if result.Live {
 			state.liveSince = result.StartedAt
 		} else {
 			state.liveSince = time.Time{}
+		}
+		if hadKnownStatus && wasLive != result.Live {
+			text := "stream went offline"
+			if result.Live {
+				text = "stream went live"
+			}
+			m.appendActivity(activityEntry{
+				Kind:    activityStreamStatus,
+				Channel: state.name,
+				Text:    text,
+			})
 		}
 	}
 }

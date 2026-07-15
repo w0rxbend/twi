@@ -120,6 +120,26 @@ func TestHelixMarkersClientMissingScopeIsDetectable(t *testing.T) {
 	}
 }
 
+func TestHelixMarkersClientNoVideoFoundIsDetectable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"error":"Not Found","status":404,"message":"Unable to find user's most recent Video/VOD ID. Please ensure you are passing the correct user ID!"}`)
+	}))
+	defer server.Close()
+
+	client := NewHelixMarkersClient(HelixMarkersClientConfig{Endpoint: server.URL})
+	_, err := client.GetStreamMarkers(context.Background(), "123", 20)
+	if err == nil {
+		t.Fatal("GetStreamMarkers error = nil, want 404 error")
+	}
+	if !IsNoVideoFound(err) {
+		t.Fatalf("IsNoVideoFound(%v) = false, want true", err)
+	}
+	if IsMissingScope(err) {
+		t.Fatalf("IsMissingScope(%v) = true, want false for a 404", err)
+	}
+}
+
 func TestHelixMarkersClientAPIErrorsAreCredentialSafe(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)

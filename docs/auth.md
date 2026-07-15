@@ -162,6 +162,7 @@ The command requests these scopes by default:
 - `channel:manage:broadcast` (Stream Info tab: view/edit title, category, language, tags; Misc tab: create/list stream markers)
 - `moderator:read:followers` (status line: follower count)
 - `channel:read:subscriptions` (status line: subscriber count)
+- `clips:edit` (`/clip` chat command: create a clip of the active stream)
 
 On supported Unix builds, the command saves successful login results through
 the restrictive credential file fallback. On non-Unix builds, the command stops
@@ -353,6 +354,11 @@ readiness):
 
 - `moderator:read:followers`
 - `channel:read:subscriptions`
+
+`/clip` chat command scope (create a clip of the active stream; also
+unrelated to IRC readiness):
+
+- `clips:edit`
 
 Future EventSub or API chat work may require scopes such as:
 

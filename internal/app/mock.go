@@ -53,6 +53,7 @@ type ClientOptions struct {
 	MarkerManager        twitch.MarkerManager
 	FollowerLookup       twitch.FollowerLookup
 	SubscriptionLookup   twitch.SubscriptionLookup
+	ClipManager          twitch.ClipManager
 }
 
 type fdWriter interface {
@@ -127,6 +128,7 @@ type mockShellModel struct {
 	streamInfo                  streamInfoState
 	misc                        miscState
 	markerManager               twitch.MarkerManager
+	clipManager                 twitch.ClipManager
 }
 
 var _ tea.Model = mockShellModel{}
@@ -466,6 +468,7 @@ func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, cli
 		markerManager:         opts.MarkerManager,
 		followerLookup:        opts.FollowerLookup,
 		subscriptionLookup:    opts.SubscriptionLookup,
+		clipManager:           opts.ClipManager,
 		emoteEntries:          make(map[string][]assets.EmoteEntry),
 		emoteEntriesRequested: make(map[string]bool),
 		debugLogger:           opts.DebugLogger,
@@ -805,6 +808,8 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyMiscLoaded(msg), nil
 	case miscMarkerCreatedMsg:
 		return m.applyMiscMarkerCreated(msg), nil
+	case clipCreatedMsg:
+		return m.applyClipCreated(msg), nil
 	case mockAnimationTickMsg:
 		m.revealTickScheduled = false
 		active := m.activeChannelState()
@@ -2161,6 +2166,16 @@ func (m *mockShellModel) refreshActiveRevealRows() {
 func (m *mockShellModel) queueComposerSend() (tea.Model, tea.Cmd) {
 	state := m.activeChannelState()
 	draft := strings.TrimSpace(state.composerText)
+	if offsets, isClip, parseErr := parseClipCommand(draft); isClip {
+		if parseErr != nil {
+			state.sendState = composerSendFailed
+			state.sendFeedback = "clip: " + parseErr.Error()
+			return *m, nil
+		}
+		state.composerText = ""
+		state.replyTo = nil
+		return *m, m.scheduleClipCreate(state, offsets)
+	}
 	text, action := composerSendText(draft)
 	if text == "" {
 		return *m, nil

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -202,10 +203,19 @@ func (c *HelixMarkersClient) responseError(resp *http.Response, action, endpoint
 		fmt.Errorf("twitch %s returned HTTP %d%s", endpointLabel, resp.StatusCode, detail),
 		c.oauthToken,
 	)
-	if resp.StatusCode == http.StatusUnauthorized {
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusNotFound {
 		return &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
 	}
 	return wrapped
+}
+
+// IsNoVideoFound reports whether err is a 404 from Get Stream Markers,
+// Twitch's response when the broadcaster has no video/VOD at all yet (never
+// streamed to completion, or VOD storage is disabled) - not a real failure,
+// just "there are no markers because there's nothing to attach them to".
+func IsNoVideoFound(err error) bool {
+	var apiErr *ChannelAPIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound
 }
 
 func toStreamMarker(m helixMarker) StreamMarker {

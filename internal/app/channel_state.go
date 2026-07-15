@@ -36,6 +36,7 @@ type channelState struct {
 	broadcasterID          string
 	broadcasterIDRequested bool
 	live                   bool
+	liveStatusKnown        bool
 	liveSince              time.Time
 	viewerCount            int
 }

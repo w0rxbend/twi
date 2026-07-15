@@ -110,6 +110,32 @@ func TestNormalizeIRCPrivateActionMessage(t *testing.T) {
 	}
 }
 
+func TestNormalizeIRCPrivateMessageCheerParsesBits(t *testing.T) {
+	raw := `@badges=;bits=100;color=#008000;display-name=Zugren;emotes=;id=cheer-1;room-id=11148817;tmi-sent-ts=1490382456776;user-id=65897106 :zugren!zugren@zugren.tmi.twitch.tv PRIVMSG #pajlada :Cheer100 nice stream!`
+	parsed, ok := irc.ParseMessage(raw).(*irc.PrivateMessage)
+	if !ok {
+		t.Fatalf("fixture did not parse as PrivateMessage")
+	}
+
+	event := NormalizeIRCPrivateMessage(*parsed)
+	if got, want := event.Message.Bits, 100; got != want {
+		t.Fatalf("Bits = %d, want %d", got, want)
+	}
+}
+
+func TestNormalizeIRCPrivateMessageWithoutBitsTagIsZero(t *testing.T) {
+	raw := `@badges=;color=#008000;display-name=Zugren;emotes=;id=plain-1;room-id=11148817;tmi-sent-ts=1490382456776;user-id=65897106 :zugren!zugren@zugren.tmi.twitch.tv PRIVMSG #pajlada :just chatting`
+	parsed, ok := irc.ParseMessage(raw).(*irc.PrivateMessage)
+	if !ok {
+		t.Fatalf("fixture did not parse as PrivateMessage")
+	}
+
+	event := NormalizeIRCPrivateMessage(*parsed)
+	if got := event.Message.Bits; got != 0 {
+		t.Fatalf("Bits = %d, want 0", got)
+	}
+}
+
 func TestNormalizeIRCProtocolEvents(t *testing.T) {
 	at := time.Date(2026, 7, 2, 10, 30, 0, 0, time.UTC)
 	disconnectErr := errors.New("socket closed")

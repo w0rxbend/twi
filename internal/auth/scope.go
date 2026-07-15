@@ -23,6 +23,10 @@ const (
 	// broadcaster's subscriber count through Twitch Helix "Get Broadcaster
 	// Subscriptions".
 	ScopeChannelReadSubscriptions Scope = "channel:read:subscriptions"
+	// ScopeClipsEdit allows creating a clip of the authenticated
+	// broadcaster's active stream through Twitch Helix "Create Clip", used
+	// by the /clip chat command.
+	ScopeClipsEdit Scope = "clips:edit"
 )
 
 var requiredChatScopes = []Scope{ScopeChatRead, ScopeChatEdit}
@@ -30,6 +34,8 @@ var requiredChatScopes = []Scope{ScopeChatRead, ScopeChatEdit}
 var streamManageScopes = []Scope{ScopeChannelManageBroadcast}
 
 var channelMetricsScopes = []Scope{ScopeModeratorReadFollowers, ScopeChannelReadSubscriptions}
+
+var clipScopes = []Scope{ScopeClipsEdit}
 
 // ChatReadScopes returns the OAuth scopes required for read-only Twitch chat.
 func ChatReadScopes() []Scope {
@@ -60,14 +66,20 @@ func ChannelMetricsScopes() []Scope {
 	return append([]Scope(nil), channelMetricsScopes...)
 }
 
+// ClipScopes returns the OAuth scopes required for the /clip chat command.
+func ClipScopes() []Scope {
+	return append([]Scope(nil), clipScopes...)
+}
+
 // LoginScopes returns every OAuth scope `twi login` requests: the required
 // chat read/send scopes, stream info management for the Stream Info and
-// Misc tabs, and the channel metrics scopes for the status line's
-// follower/subscriber counts.
+// Misc tabs, the channel metrics scopes for the status line's
+// follower/subscriber counts, and clip creation for the /clip command.
 func LoginScopes() []Scope {
 	scopes := RequiredChatScopes()
 	scopes = append(scopes, StreamManageScopes()...)
 	scopes = append(scopes, ChannelMetricsScopes()...)
+	scopes = append(scopes, ClipScopes()...)
 	return scopes
 }
 

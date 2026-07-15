@@ -164,6 +164,7 @@ If Twitch IRC rejects the access token during login, `twi` will try one OAuth re
 - `channel:manage:broadcast` (view/edit title, category, language, and tags on the Stream Info tab; create/list stream markers on the Misc tab)
 - `moderator:read:followers` (follower count in the status line)
 - `channel:read:subscriptions` (subscriber count in the status line)
+- `clips:edit` (create clips of your active stream with the `/clip` chat command)
 
 The command needs a Twitch app client ID and client secret from environment variables or the flat config file:
 
@@ -229,7 +230,8 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Animation | Ready | A shared ~10fps clock (disabled when `animation_mode = "off"`) drives a pulsing LIVE/REC status-bar segment, a channel-switch flash, a typewriter reveal for command-palette results, and a ~2s animated startup splash (skippable by any keypress). |
 | Live status telemetry | Partial | The status bar shows real Twitch broadcast status via Helix "Get Streams" polling (LIVE + elapsed on-air time + viewer count) when `stream_status_mode` and Twitch API credentials allow it, otherwise OFFLINE; follower and subscriber counts poll Helix "Get Channel Followers"/"Get Broadcaster Subscriptions" every 2 minutes when credentials and the `moderator:read:followers`/`channel:read:subscriptions` scopes allow it; REC reflects `debug_logging`; CPU%/memory/FPS are twi's own process stats; "chat" bitrate is derived chat-message throughput, not stream encode bitrate. `--mock` simulates a fixed demo LIVE state. |
 | Emote autocomplete | Partial | `ctrl+e` opens a searchable emote picker and a persistent quick-select row (third `tab` stop) backed by real Twitch global/channel emotes when `emote_autocomplete_mode` and credentials allow it, with a built-in sample list in `--mock` mode. |
-| Activity log column | Partial | On wide terminals (140+ columns), the Chat tab shows a right-hand Activity column alongside chat (and the optional channel sidebar): raids, subs/resubs/gift subs from Twitch IRC events, and new followers (detected by polling Get Channel Followers and diffing against previously seen followers, since Twitch only pushes follow events through EventSub, not IRC or any webhook twi can receive). Hidden below 100 columns and on the Stream Info/Misc tabs. |
+| Activity log column | Partial | On wide terminals (140+ columns), the Chat tab shows a right-hand Activity column alongside chat (and the optional channel sidebar) covering every alert twi can currently detect over IRC and Helix polling: raids, subs/resubs/gift subs/gift upgrades, announcements, charity donations, and moderation actions from Twitch IRC events; cheers (detected from a chat message's "bits" tag, since Twitch sends cheers as ordinary PRIVMSGs, not a USERNOTICE); new followers (detected by polling Get Channel Followers and diffing against previously seen followers, since Twitch only pushes follow events through EventSub, not IRC or any webhook twi can receive); stream went-live/went-offline transitions (detected by polling Get Streams, the same status the LIVE/OFFLINE badge uses); and clips created with `/clip`. Alerts that only exist through EventSub (hype train, polls/predictions, channel-point redemption details) aren't available since twi has no EventSub/WebSocket connection. Hidden below 100 columns and on the Stream Info/Misc tabs. |
+| `/clip` command | Partial | Typing `/clip`, `/clip T-5m`, or `/clip T-4m T-2m` in the composer creates a clip of the current stream through Helix "Create Clip" when credentials, the `clips:edit` scope, and being live all allow it; the API has no start/end/duration parameter, so the `T-` offsets are only echoed back next to the clip's edit URL as a trim reminder, never sent to Twitch. |
 
 Manual validation evidence for the current environment is tracked in
 [docs/manual-validation.md](docs/manual-validation.md). Credentialed Twitch chat
@@ -257,6 +259,7 @@ is only claimed when that document records a complete credential set.
 | `esc` | Close inspect mode, cancel reply mode, or close an open overlay. |
 | `enter` | Send from the composer in live mode, or insert the selected emote when the emotes row/picker has focus. |
 | `/me does a thing` | Send a Twitch action message. |
+| `/clip`, `/clip T-5m`, `/clip T-4m T-2m` | Create a clip of the current stream (see [Clip Command](#clip-command)). |
 
 Mouse support is enabled by default. Set `enable_mouse = false` or `TWI_ENABLE_MOUSE=false` to keep terminal mouse reporting disabled; all workflows remain available from the keyboard.
 
@@ -296,6 +299,23 @@ creating one). Creating a marker only succeeds while you're live - Twitch
 rejects it otherwise, and that error shows in the tab. Misc uses the same
 `channel:manage:broadcast` scope and credentials as Stream Info, so no
 separate login step is needed.
+
+## Clip Command
+
+Typing `/clip` in the composer and pressing `enter` creates a Twitch clip of
+your current stream (Twitch Helix "Create Clip"), needing the `clips:edit`
+scope that `twi login` requests automatically. `/clip` only succeeds while
+you're live; that error, and a missing-scope error, both show as
+human-readable status-line text instead of raw JSON.
+
+Twitch's Create Clip API has no parameter for a start time, end time, or
+duration - it always captures approximately the last 30-60 seconds at the
+moment of the call, with no way to reach further back. `/clip T-5m` and
+`/clip T-4m T-2m` accept those offsets anyway, but only to echo the range
+you asked for back to you alongside the clip's edit URL, as a reminder of
+what to trim to in Twitch's own clip editor - the offsets are never sent to
+Twitch, since the API can't act on them. A successful clip also appears in
+the Activity log column with its edit URL.
 
 ## Configure It
 
