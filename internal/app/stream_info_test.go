@@ -3,6 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -256,5 +259,33 @@ func TestStreamInfoCategoryChangeUnknownNameFailsSave(t *testing.T) {
 	saved := cmd().(streamInfoSavedMsg)
 	if saved.err == nil {
 		t.Fatal("save error = nil, want error for unknown category")
+	}
+}
+
+func TestStreamInfoMissingScopeErrorIsUserFriendly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":"Unauthorized","status":401,"message":"Missing scope: channel:manage:broadcast"}`)
+	}))
+	defer server.Close()
+
+	cfg := config.Default()
+	model := newMockShellModel("example", cfg)
+	model.width, model.height = 88, 20
+	model.activeTab = tabStreamInfo
+	model.channelManager = twitch.NewHelixChannelsClient(twitch.HelixChannelsClientConfig{Endpoint: server.URL})
+	model.streamInfo.broadcasterID = "123"
+
+	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)
+	if !twitch.IsMissingScope(loaded.err) {
+		t.Fatalf("loaded.err = %v, want a missing-scope error", loaded.err)
+	}
+	model = model.applyStreamInfoLoaded(loaded)
+	if !strings.Contains(model.streamInfo.loadErr, "twi login") {
+		t.Fatalf("loadErr = %q, want a re-login hint instead of the raw Twitch response", model.streamInfo.loadErr)
+	}
+	view := model.streamInfoView(model.layout())
+	if !strings.Contains(view, "twi login") {
+		t.Fatalf("stream info view missing re-login hint:\n%s", view)
 	}
 }

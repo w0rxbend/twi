@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -208,11 +209,38 @@ func (c *HelixChannelsClient) responseError(resp *http.Response, action, endpoin
 	if detail != "" {
 		detail = ": " + detail
 	}
-	return credentialSafeUserError(
+	wrapped := credentialSafeUserError(
 		action,
 		fmt.Errorf("twitch %s returned HTTP %d%s", endpointLabel, resp.StatusCode, detail),
 		c.oauthToken,
 	)
+	if resp.StatusCode == http.StatusUnauthorized {
+		return &ChannelAPIError{StatusCode: resp.StatusCode, err: wrapped}
+	}
+	return wrapped
+}
+
+// ChannelAPIError wraps a Get/Modify Channel Information failure with the
+// HTTP status Twitch returned, so callers can distinguish "missing scope or
+// unauthorized token" (401) from other failures without parsing message
+// text. Twitch returns 401 for both an expired/invalid token and a token
+// missing channel:manage:broadcast (or the older equivalent scopes), so
+// IsMissingScope treats either case as "re-run `twi login`."
+type ChannelAPIError struct {
+	StatusCode int
+	err        error
+}
+
+func (e *ChannelAPIError) Error() string { return e.err.Error() }
+
+func (e *ChannelAPIError) Unwrap() error { return e.err }
+
+// IsMissingScope reports whether err is a ChannelAPIError for an
+// unauthorized (401) Twitch response - in practice always caused by the
+// token lacking channel:manage:broadcast or having expired.
+func IsMissingScope(err error) bool {
+	var apiErr *ChannelAPIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusUnauthorized
 }
 
 func (c *HelixChannelsClient) channelsURL(broadcasterID string) (string, error) {

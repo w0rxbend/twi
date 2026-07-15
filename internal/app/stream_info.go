@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -127,7 +128,7 @@ func (m mockShellModel) applyStreamInfoLoaded(msg streamInfoLoadedMsg) mockShell
 		m.streamInfo.broadcasterID = msg.broadcasterID
 	}
 	if msg.err != nil {
-		m.streamInfo.loadErr = msg.err.Error()
+		m.streamInfo.loadErr = streamInfoErrorMessage(msg.err)
 		return m
 	}
 	m.streamInfo.loadErr = ""
@@ -217,7 +218,7 @@ func (m *mockShellModel) scheduleStreamInfoSave() tea.Cmd {
 func (m mockShellModel) applyStreamInfoSaved(msg streamInfoSavedMsg) mockShellModel {
 	m.streamInfo.saving = false
 	if msg.err != nil {
-		m.streamInfo.saveErr = msg.err.Error()
+		m.streamInfo.saveErr = streamInfoErrorMessage(msg.err)
 		m.streamInfo.saveOK = false
 		return m
 	}
@@ -229,6 +230,49 @@ func (m mockShellModel) applyStreamInfoSaved(msg streamInfoSavedMsg) mockShellMo
 	m.streamInfo.language = msg.info.Language
 	m.streamInfo.tags = strings.Join(msg.info.Tags, ", ")
 	return m
+}
+
+// streamInfoErrorMessage turns a Twitch channel-info error into user-facing
+// text. A 401 from Get/Modify Channel Information means the current token
+// predates (or otherwise lacks) channel:manage:broadcast - re-running `twi
+// login` is the actual fix, so say so directly instead of showing the raw
+// Twitch JSON body.
+// wrapIndentedText greedily word-wraps text into lines no wider than width,
+// each prefixed with a leading space to match the tab's other lines. Twitch
+// API error bodies and long guidance messages can easily exceed one line at
+// typical terminal widths, so fitLine's single-line truncation would hide
+// the actionable part of the message.
+func wrapIndentedText(text string, width int) []string {
+	width = clampMin(width-1, 1)
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	var lines []string
+	current := ""
+	for _, word := range words {
+		candidate := word
+		if current != "" {
+			candidate = current + " " + word
+		}
+		if current != "" && uniseg.StringWidth(candidate) > width {
+			lines = append(lines, " "+current)
+			current = word
+			continue
+		}
+		current = candidate
+	}
+	if current != "" {
+		lines = append(lines, " "+current)
+	}
+	return lines
+}
+
+func streamInfoErrorMessage(err error) string {
+	if twitch.IsMissingScope(err) {
+		return "Your Twitch login is missing the channel:manage:broadcast scope (or the token expired). Run `twi login` to re-authenticate, then reopen this tab (alt+2)."
+	}
+	return err.Error()
 }
 
 func parseStreamInfoTags(raw string) []string {
@@ -369,13 +413,10 @@ func (m mockShellModel) streamInfoLines(width, height int) []string {
 	case m.streamInfo.loading && !m.streamInfo.loaded:
 		lines = []string{" Stream Info", " Loading current stream info..."}
 	case m.streamInfo.loadErr != "":
-		lines = []string{
-			" Stream Info",
-			" Load failed: " + m.streamInfo.loadErr,
-			" Reopen the tab (alt+2) to retry.",
-		}
+		lines = append([]string{" Stream Info"}, wrapIndentedText("Load failed: "+m.streamInfo.loadErr, width)...)
+		lines = append(lines, " Reopen the tab (alt+2) to retry.")
 	default:
-		lines = m.streamInfoFieldLines()
+		lines = m.streamInfoFieldLines(width)
 	}
 
 	out := make([]string, 0, height)
@@ -389,17 +430,18 @@ func (m mockShellModel) streamInfoLines(width, height int) []string {
 	return out
 }
 
-func (m mockShellModel) streamInfoFieldLines() []string {
-	header := " Stream Info (enter=edit, ctrl+s=save, esc=dismiss)"
+func (m mockShellModel) streamInfoFieldLines(width int) []string {
+	var lines []string
 	switch {
 	case m.streamInfo.saving:
-		header = " Stream Info (saving...)"
+		lines = []string{" Stream Info (saving...)"}
 	case m.streamInfo.saveErr != "":
-		header = " Stream Info: save failed: " + m.streamInfo.saveErr
+		lines = wrapIndentedText("Stream Info: save failed: "+m.streamInfo.saveErr, width)
 	case m.streamInfo.saveOK:
-		header = " Stream Info: saved"
+		lines = []string{" Stream Info: saved"}
+	default:
+		lines = []string{" Stream Info (enter=edit, ctrl+s=save, esc=dismiss)"}
 	}
-	lines := []string{header}
 
 	for field := streamInfoField(0); field < streamInfoFieldCount; field++ {
 		prefix := "  "

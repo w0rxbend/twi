@@ -101,6 +101,39 @@ func TestHelixChannelsClientModifyChannelInformationEmptyUpdateSkipsNetwork(t *t
 	}
 }
 
+func TestHelixChannelsClientMissingScopeIsDetectable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"error":"Unauthorized","status":401,"message":"Missing scope: user:edit:broadcast or channel:manage:broadcast or channel_editor"}`)
+	}))
+	defer server.Close()
+
+	client := NewHelixChannelsClient(HelixChannelsClientConfig{Endpoint: server.URL, OAuthToken: "oauth:access-token"})
+	_, err := client.GetChannelInformation(context.Background(), "123")
+	if err == nil {
+		t.Fatal("GetChannelInformation error = nil, want 401 error")
+	}
+	if !IsMissingScope(err) {
+		t.Fatalf("IsMissingScope(%v) = false, want true for a 401 response", err)
+	}
+
+	modifyErr := client.ModifyChannelInformation(context.Background(), "123", ChannelInfoUpdate{Title: strPtr("x")})
+	if !IsMissingScope(modifyErr) {
+		t.Fatalf("IsMissingScope(%v) = false, want true for a 401 response", modifyErr)
+	}
+}
+
+func TestIsMissingScopeFalseForOtherErrors(t *testing.T) {
+	if IsMissingScope(nil) {
+		t.Fatal("IsMissingScope(nil) = true, want false")
+	}
+	if IsMissingScope(fmt.Errorf("some other error")) {
+		t.Fatal("IsMissingScope(generic error) = true, want false")
+	}
+}
+
+func strPtr(s string) *string { return &s }
+
 func TestHelixChannelsClientAPIErrorsAreCredentialSafe(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
