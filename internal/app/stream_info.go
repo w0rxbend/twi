@@ -45,10 +45,11 @@ type streamInfoState struct {
 	broadcasterID string
 	original      twitch.ChannelInfo
 
-	title    string
-	category string
-	language string
-	tags     string // comma-separated for display/edit
+	title          string
+	category       string
+	categoryGameID string // Twitch game ID for category, set only via the category picker
+	language       string
+	tags           string // comma-separated for display/edit
 
 	selected   streamInfoField
 	editing    bool
@@ -136,15 +137,17 @@ func (m mockShellModel) applyStreamInfoLoaded(msg streamInfoLoadedMsg) mockShell
 	m.streamInfo.original = msg.info
 	m.streamInfo.title = msg.info.Title
 	m.streamInfo.category = msg.info.GameName
+	m.streamInfo.categoryGameID = msg.info.GameID
 	m.streamInfo.language = msg.info.Language
 	m.streamInfo.tags = strings.Join(msg.info.Tags, ", ")
 	return m
 }
 
 // scheduleStreamInfoSave diffs the working field values against the last
-// confirmed snapshot and sends only the changed fields to Twitch. Changing
-// the category requires resolving its Twitch game ID first (Twitch's Modify
-// Channel Information endpoint takes game_id, not a display name).
+// confirmed snapshot and sends only the changed fields to Twitch. The
+// category's Twitch game ID is always already known - it's only ever set by
+// picking a real category in the category picker (category_picker.go), never
+// typed - so no name->ID resolution is needed here.
 func (m *mockShellModel) scheduleStreamInfoSave() tea.Cmd {
 	if m.channelManager == nil || m.streamInfo.broadcasterID == "" || m.streamInfo.saving {
 		return nil
@@ -153,11 +156,11 @@ func (m *mockShellModel) scheduleStreamInfoSave() tea.Cmd {
 	original := m.streamInfo.original
 	title := strings.TrimSpace(m.streamInfo.title)
 	category := strings.TrimSpace(m.streamInfo.category)
+	categoryGameID := m.streamInfo.categoryGameID
 	language := strings.TrimSpace(m.streamInfo.language)
 	tags := parseStreamInfoTags(m.streamInfo.tags)
 	broadcasterID := m.streamInfo.broadcasterID
 	channelManager := m.channelManager
-	gameLookup := m.gameLookup
 
 	m.streamInfo.saving = true
 	m.streamInfo.saveErr = ""
@@ -183,26 +186,10 @@ func (m *mockShellModel) scheduleStreamInfoSave() tea.Cmd {
 			next.Tags = tags
 		}
 		if category != original.GameName {
-			switch {
-			case category == "":
-				empty := ""
-				update.GameID = &empty
-				next.GameID = ""
-				next.GameName = ""
-			case gameLookup == nil:
-				return streamInfoSavedMsg{err: fmt.Errorf("change category: no Twitch category lookup configured")}
-			default:
-				game, ok, err := gameLookup.GetGameByName(ctx, category)
-				if err != nil {
-					return streamInfoSavedMsg{err: fmt.Errorf("look up category %q: %w", category, err)}
-				}
-				if !ok {
-					return streamInfoSavedMsg{err: fmt.Errorf("no Twitch category named %q", category)}
-				}
-				update.GameID = &game.ID
-				next.GameID = game.ID
-				next.GameName = game.Name
-			}
+			id := categoryGameID
+			update.GameID = &id
+			next.GameID = id
+			next.GameName = category
 		}
 
 		if update.IsEmpty() {
@@ -227,6 +214,7 @@ func (m mockShellModel) applyStreamInfoSaved(msg streamInfoSavedMsg) mockShellMo
 	m.streamInfo.original = msg.info
 	m.streamInfo.title = msg.info.Title
 	m.streamInfo.category = msg.info.GameName
+	m.streamInfo.categoryGameID = msg.info.GameID
 	m.streamInfo.language = msg.info.Language
 	m.streamInfo.tags = strings.Join(msg.info.Tags, ", ")
 	return m
@@ -317,6 +305,12 @@ func (m mockShellModel) handleStreamInfoKey(msg tea.KeyMsg) (tea.Model, tea.Cmd)
 	case tea.KeyDown, tea.KeyTab:
 		m.moveStreamInfoSelection(1)
 	case tea.KeyEnter:
+		if m.streamInfo.selected == streamInfoFieldCategory {
+			if !m.streamInfo.loaded || m.streamInfo.loading {
+				return m, nil
+			}
+			return m, m.openCategoryPicker()
+		}
 		m.startStreamInfoEdit()
 	case tea.KeyCtrlS:
 		if cmd := m.scheduleStreamInfoSave(); cmd != nil {
@@ -440,7 +434,7 @@ func (m mockShellModel) streamInfoFieldLines(width int) []string {
 	case m.streamInfo.saveOK:
 		lines = []string{" Stream Info: saved"}
 	default:
-		lines = []string{" Stream Info (enter=edit, ctrl+s=save, esc=dismiss)"}
+		lines = []string{" Stream Info (enter=edit/select category, ctrl+s=save, esc=dismiss)"}
 	}
 
 	for field := streamInfoField(0); field < streamInfoFieldCount; field++ {

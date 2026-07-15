@@ -269,11 +269,13 @@ unsupported or unavailable notification commands fall back to a terminal bell.
 `twi` opens with a top tab bar; `alt+1` selects Chat (the default) and `alt+2`
 selects Stream Info, a dedicated screen for viewing and editing your own
 channel's title, category, language, and tags without leaving the terminal.
-On that tab, `up`/`down` selects a field, `enter` edits it (`enter` again
-commits, `esc` cancels), and `ctrl+s` saves every changed field to Twitch.
-Changing the category resolves the typed name to a Twitch game ID through
-Helix "Get Games" before saving; an unrecognized name fails the save with an
-error instead of silently dropping the category change.
+On that tab, `up`/`down` selects a field and `ctrl+s` saves every changed
+field to Twitch. `enter` on Title/Language/Tags edits free text (`enter`
+again commits, `esc` cancels). `enter` on Category instead opens a live
+search against Twitch's category list (Helix Search Categories): type to
+filter, `up`/`down` to pick a result, `enter` to select it, or `esc` to
+cancel - category is always a real Twitch category chosen from the API,
+never free-typed text.
 
 The Stream Info tab needs a Twitch app client ID and OAuth token (the same
 credentials live chat uses) and the `channel:manage:broadcast` scope, which

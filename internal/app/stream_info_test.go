@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
 
@@ -34,11 +35,25 @@ func (f *appFakeChannelManager) ModifyChannelInformation(_ context.Context, _ st
 
 type appFakeGameLookup struct {
 	games map[string]twitch.Game
+	err   error
 }
 
-func (f *appFakeGameLookup) GetGameByName(_ context.Context, name string) (twitch.Game, bool, error) {
-	game, ok := f.games[name]
-	return game, ok, nil
+func (f *appFakeGameLookup) SearchCategories(_ context.Context, query string, limit int) ([]twitch.Game, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	query = strings.ToLower(strings.TrimSpace(query))
+	var matches []twitch.Game
+	for name, game := range f.games {
+		if query == "" || strings.Contains(strings.ToLower(name), query) {
+			matches = append(matches, game)
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool { return matches[i].Name < matches[j].Name })
+	if limit > 0 && len(matches) > limit {
+		matches = matches[:limit]
+	}
+	return matches, nil
 }
 
 type appFakeUserLookup struct {
@@ -159,9 +174,6 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 		Tags:          []string{"Chill"},
 	}}
 	model.channelManager = channelManager
-	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{
-		"New Game": {ID: "999", Name: "New Game"},
-	}}
 	model.streamInfo.broadcasterID = "123"
 
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)
@@ -216,7 +228,7 @@ func TestStreamInfoEditAndSaveUpdatesOnlyChangedFields(t *testing.T) {
 	}
 }
 
-func TestStreamInfoCategoryChangeResolvesGameID(t *testing.T) {
+func TestStreamInfoCategoryChangeSendsPickedGameID(t *testing.T) {
 	cfg := config.Default()
 	model := newMockShellModel("example", cfg)
 	channelManager := &appFakeChannelManager{info: twitch.ChannelInfo{
@@ -224,14 +236,15 @@ func TestStreamInfoCategoryChangeResolvesGameID(t *testing.T) {
 		GameName:      "Old Game",
 	}}
 	model.channelManager = channelManager
-	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{
-		"New Game": {ID: "999", Name: "New Game"},
-	}}
 	model.streamInfo.broadcasterID = "123"
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)
 	model = model.applyStreamInfoLoaded(loaded)
 
+	// The category picker is the only way to change category, and it always
+	// sets the name and ID together (see commitCategoryPickerSelection), so
+	// save should send the already-known ID without any lookup.
 	model.streamInfo.category = "New Game"
+	model.streamInfo.categoryGameID = "999"
 	cmd := model.scheduleStreamInfoSave()
 	saved := cmd().(streamInfoSavedMsg)
 	if saved.err != nil {
@@ -245,20 +258,137 @@ func TestStreamInfoCategoryChangeResolvesGameID(t *testing.T) {
 	}
 }
 
-func TestStreamInfoCategoryChangeUnknownNameFailsSave(t *testing.T) {
+func TestCategoryPickerSearchesAndSelectsCategory(t *testing.T) {
 	cfg := config.Default()
 	model := newMockShellModel("example", cfg)
-	model.channelManager = &appFakeChannelManager{info: twitch.ChannelInfo{BroadcasterID: "123"}}
-	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{}}
+	model.width, model.height = 88, 20
+	model.activeTab = tabStreamInfo
+	model.channelManager = &appFakeChannelManager{info: twitch.ChannelInfo{
+		BroadcasterID: "123",
+		GameName:      "Old Game",
+		GameID:        "1",
+	}}
+	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{
+		"Old Game":          {ID: "1", Name: "Old Game"},
+		"Fortnite":          {ID: "33214", Name: "Fortnite"},
+		"Fortnite Creative": {ID: "509670", Name: "Fortnite Creative"},
+		"Just Chatting":     {ID: "509658", Name: "Just Chatting"},
+	}}
 	model.streamInfo.broadcasterID = "123"
 	loaded := model.scheduleStreamInfoLoad()().(streamInfoLoadedMsg)
 	model = model.applyStreamInfoLoaded(loaded)
 
-	model.streamInfo.category = "Not A Real Category"
-	cmd := model.scheduleStreamInfoSave()
-	saved := cmd().(streamInfoSavedMsg)
-	if saved.err == nil {
-		t.Fatal("save error = nil, want error for unknown category")
+	model.streamInfo.selected = streamInfoFieldCategory
+	updated, cmd := model.handleStreamInfoKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if !model.categoryPicker.open {
+		t.Fatal("categoryPicker.open = false after enter on category field, want true")
+	}
+	if cmd == nil {
+		t.Fatal("opening category picker returned nil command, want initial search command")
+	}
+	// The picker seeds its query with the current category, so the initial
+	// search (fired without debounce) already reflects it.
+	resultsMsg := cmd().(categoryPickerResultsMsg)
+	model = model.applyCategoryPickerResults(resultsMsg)
+	if len(model.categoryPicker.results) != 1 || model.categoryPicker.results[0].Name != "Old Game" {
+		t.Fatalf("initial results = %#v, want [Old Game]", model.categoryPicker.results)
+	}
+
+	// Type "fort" to search for Fortnite categories; each keystroke debounces.
+	model.categoryPicker.query = ""
+	for _, r := range "fort" {
+		updated, cmd = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		model = updated.(mockShellModel)
+		if cmd == nil {
+			t.Fatal("typing in category picker returned nil command, want debounce tick")
+		}
+	}
+	debounceMsg := cmd().(categoryPickerDebounceMsg)
+	updated, cmd = model.applyCategoryPickerDebounce(debounceMsg)
+	model = updated.(mockShellModel)
+	if cmd == nil {
+		t.Fatal("debounce tick returned nil command, want search command")
+	}
+	resultsMsg = cmd().(categoryPickerResultsMsg)
+	model = model.applyCategoryPickerResults(resultsMsg)
+	if len(model.categoryPicker.results) != 2 {
+		t.Fatalf("results = %#v, want 2 Fortnite matches", model.categoryPicker.results)
+	}
+
+	// Entry 0 is the pinned "no category" row; move to the first real result
+	// (Fortnite, alphabetically before Fortnite Creative) and select it.
+	model.moveCategoryPickerSelection(1)
+	updated, _ = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if model.categoryPicker.open {
+		t.Fatal("categoryPicker.open = true after enter, want closed")
+	}
+	if model.streamInfo.category != "Fortnite" || model.streamInfo.categoryGameID != "33214" {
+		t.Fatalf("category = %q id = %q, want Fortnite/33214", model.streamInfo.category, model.streamInfo.categoryGameID)
+	}
+}
+
+func TestCategoryPickerNoCategoryEntryClearsCategory(t *testing.T) {
+	cfg := config.Default()
+	model := newMockShellModel("example", cfg)
+	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{}}
+	model.streamInfo.category = "Old Game"
+	model.streamInfo.categoryGameID = "1"
+	model.categoryPicker = categoryPickerState{open: true}
+
+	updated, _ := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(mockShellModel)
+	if model.streamInfo.category != "" || model.streamInfo.categoryGameID != "" {
+		t.Fatalf("category = %q id = %q, want cleared", model.streamInfo.category, model.streamInfo.categoryGameID)
+	}
+}
+
+func TestCategoryPickerEscCancelsWithoutChangingCategory(t *testing.T) {
+	cfg := config.Default()
+	model := newMockShellModel("example", cfg)
+	model.streamInfo.category = "Old Game"
+	model.streamInfo.categoryGameID = "1"
+	model.categoryPicker = categoryPickerState{open: true, query: "fort"}
+
+	updated, _ := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyEsc})
+	model = updated.(mockShellModel)
+	if model.categoryPicker.open {
+		t.Fatal("categoryPicker.open = true after esc, want closed")
+	}
+	if model.streamInfo.category != "Old Game" || model.streamInfo.categoryGameID != "1" {
+		t.Fatalf("category = %q id = %q, want unchanged", model.streamInfo.category, model.streamInfo.categoryGameID)
+	}
+}
+
+func TestCategoryPickerStaleDebounceAndResultsAreDiscarded(t *testing.T) {
+	cfg := config.Default()
+	model := newMockShellModel("example", cfg)
+	model.gameLookup = &appFakeGameLookup{games: map[string]twitch.Game{
+		"Fortnite": {ID: "33214", Name: "Fortnite"},
+	}}
+	model.categoryPicker = categoryPickerState{open: true}
+
+	updated, cmd1 := model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	model = updated.(mockShellModel)
+	staleDebounce := cmd1().(categoryPickerDebounceMsg)
+
+	updated, _ = model.handleCategoryPickerKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	model = updated.(mockShellModel)
+
+	// The first keystroke's debounce tick arrives after the second keystroke
+	// already bumped the generation counter; it must be ignored, not trigger
+	// a search for the stale "f" query.
+	updated, cmd := model.applyCategoryPickerDebounce(staleDebounce)
+	model = updated.(mockShellModel)
+	if cmd != nil {
+		t.Fatal("stale debounce triggered a search command, want nil")
+	}
+
+	staleResults := categoryPickerResultsMsg{generation: staleDebounce.generation, results: []twitch.Game{{ID: "1", Name: "Stale"}}}
+	model = model.applyCategoryPickerResults(staleResults)
+	if len(model.categoryPicker.results) != 0 {
+		t.Fatalf("results = %#v after stale response, want unchanged (empty)", model.categoryPicker.results)
 	}
 }
 

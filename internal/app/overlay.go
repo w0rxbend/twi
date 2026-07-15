@@ -1,15 +1,16 @@
 package app
 
 // anyOverlayOpen reports whether a modal overlay (command palette, inspect
-// panel, theme settings, or emote picker) currently covers the chat/composer
-// view. Widgets use this instead of checking each overlay flag individually.
+// panel, theme settings, emote picker, or category picker) currently covers
+// the chat/composer view. Widgets use this instead of checking each overlay
+// flag individually.
 func (m mockShellModel) anyOverlayOpen() bool {
-	return m.palette.open || m.inspectOpen || m.themeSettings.open || m.emotePicker.open
+	return m.palette.open || m.inspectOpen || m.themeSettings.open || m.emotePicker.open || m.categoryPicker.open
 }
 
 // closeOtherOverlays closes every overlay except the one named by keep
-// ("palette", "inspect", "theme", "emotes", or "" to close all). Overlays are
-// mutually exclusive: opening one always closes the others.
+// ("palette", "inspect", "theme", "emotes", "category", or "" to close all).
+// Overlays are mutually exclusive: opening one always closes the others.
 func (m *mockShellModel) closeOtherOverlays(keep string) {
 	if keep != "palette" {
 		m.palette = commandPaletteState{}
@@ -22,5 +23,8 @@ func (m *mockShellModel) closeOtherOverlays(keep string) {
 	}
 	if keep != "emotes" {
 		m.emotePicker = emotePickerState{}
+	}
+	if keep != "category" {
+		m.categoryPicker = categoryPickerState{}
 	}
 }

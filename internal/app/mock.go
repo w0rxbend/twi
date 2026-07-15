@@ -79,6 +79,7 @@ type mockShellModel struct {
 	palette                   commandPaletteState
 	themeSettings             themeSettingsState
 	emotePicker               emotePickerState
+	categoryPicker            categoryPickerState
 	reconnectInFlight         bool
 	nextSend                  int
 	frameTickScheduled        bool
@@ -184,37 +185,40 @@ type composerReplyContext struct {
 }
 
 type mockShellLayout struct {
-	width                      int
-	tabBarHeight               int
-	statusHeight               int
-	chatHeight                 int
-	chatContentHeight          int
-	chatFramed                 bool
-	chatWidth                  int
-	sidebarWidth               int
-	sidebarContentHeight       int
-	inspectHeight              int
-	inspectContentHeight       int
-	inspectFramed              bool
-	paletteHeight              int
-	paletteContentHeight       int
-	paletteFramed              bool
-	emotePickerHeight          int
-	emotePickerContentHeight   int
-	emotePickerFramed          bool
-	themeSettingsHeight        int
-	themeSettingsContentHeight int
-	themeSettingsFramed        bool
-	streamInfoHeight           int
-	streamInfoContentHeight    int
-	streamInfoFramed           bool
-	composerHeight             int
-	composerContentHeight      int
-	composerFramed             bool
-	emotesHeight               int
-	emotesContentHeight        int
-	emotesFramed               bool
-	helpHeight                 int
+	width                       int
+	tabBarHeight                int
+	statusHeight                int
+	chatHeight                  int
+	chatContentHeight           int
+	chatFramed                  bool
+	chatWidth                   int
+	sidebarWidth                int
+	sidebarContentHeight        int
+	inspectHeight               int
+	inspectContentHeight        int
+	inspectFramed               bool
+	paletteHeight               int
+	paletteContentHeight        int
+	paletteFramed               bool
+	emotePickerHeight           int
+	emotePickerContentHeight    int
+	emotePickerFramed           bool
+	categoryPickerHeight        int
+	categoryPickerContentHeight int
+	categoryPickerFramed        bool
+	themeSettingsHeight         int
+	themeSettingsContentHeight  int
+	themeSettingsFramed         bool
+	streamInfoHeight            int
+	streamInfoContentHeight     int
+	streamInfoFramed            bool
+	composerHeight              int
+	composerContentHeight       int
+	composerFramed              bool
+	emotesHeight                int
+	emotesContentHeight         int
+	emotesFramed                bool
+	helpHeight                  int
 }
 
 type chatRowBlock struct {
@@ -553,6 +557,9 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.themeSettings.open {
 			return m.handleThemeSettingsKey(msg)
 		}
+		if m.categoryPicker.open {
+			return m.handleCategoryPickerKey(msg)
+		}
 		if m.activeTab == tabStreamInfo {
 			return m.handleStreamInfoKey(msg)
 		}
@@ -659,7 +666,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case tea.MouseMsg:
-		if m.palette.open || m.emotePicker.open || m.themeSettings.open {
+		if m.palette.open || m.emotePicker.open || m.themeSettings.open || m.categoryPicker.open {
 			return m, nil
 		}
 		return m.handleMouse(msg)
@@ -750,6 +757,10 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.applyStreamInfoLoaded(msg), nil
 	case streamInfoSavedMsg:
 		return m.applyStreamInfoSaved(msg), nil
+	case categoryPickerDebounceMsg:
+		return m.applyCategoryPickerDebounce(msg)
+	case categoryPickerResultsMsg:
+		return m.applyCategoryPickerResults(msg), nil
 	case mockAnimationTickMsg:
 		m.revealTickScheduled = false
 		active := m.activeChannelState()
@@ -798,6 +809,9 @@ func (m mockShellModel) View() string {
 	}
 	if layout.emotePickerHeight > 0 {
 		regions = append(regions, m.emotePickerView(layout))
+	}
+	if layout.categoryPickerHeight > 0 {
+		regions = append(regions, m.categoryPickerView(layout))
 	}
 	if layout.themeSettingsHeight > 0 {
 		regions = append(regions, m.themeSettingsView(layout))
@@ -1413,7 +1427,26 @@ func (m mockShellModel) layout() mockShellLayout {
 		remaining -= layout.emotePickerHeight
 	}
 
-	if !m.palette.open && !m.inspectOpen && !m.emotePicker.open && m.themeSettings.open && remaining >= 4 {
+	if !m.palette.open && !m.inspectOpen && !m.emotePicker.open && m.categoryPicker.open && remaining >= 4 {
+		layout.categoryPickerHeight = 5
+		if height >= 18 {
+			layout.categoryPickerHeight = 7
+		}
+		if layout.categoryPickerHeight > remaining-1 {
+			layout.categoryPickerHeight = remaining - 1
+		}
+		if layout.categoryPickerHeight < 3 {
+			layout.categoryPickerHeight = 0
+		}
+		layout.categoryPickerFramed = layout.categoryPickerHeight >= 3 && width >= 5
+		layout.categoryPickerContentHeight = layout.categoryPickerHeight
+		if layout.categoryPickerFramed {
+			layout.categoryPickerContentHeight = layout.categoryPickerHeight - 2
+		}
+		remaining -= layout.categoryPickerHeight
+	}
+
+	if !m.palette.open && !m.inspectOpen && !m.emotePicker.open && !m.categoryPicker.open && m.themeSettings.open && remaining >= 4 {
 		layout.themeSettingsHeight = 5
 		if height >= 18 {
 			layout.themeSettingsHeight = 7
@@ -1448,7 +1481,7 @@ func (m mockShellModel) layout() mockShellLayout {
 		layout.chatContentHeight = 0
 	}
 
-	used := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.themeSettingsHeight + layout.composerHeight + layout.emotesHeight + layout.helpHeight
+	used := layout.tabBarHeight + layout.statusHeight + layout.chatHeight + layout.paletteHeight + layout.inspectHeight + layout.emotePickerHeight + layout.categoryPickerHeight + layout.themeSettingsHeight + layout.composerHeight + layout.emotesHeight + layout.helpHeight
 	if used < height {
 		layout.chatHeight += height - used
 		if layout.chatFramed {

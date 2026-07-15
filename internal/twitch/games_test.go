@@ -5,52 +5,69 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
-func TestHelixGamesClientGetGameByName(t *testing.T) {
+func TestHelixGamesClientSearchCategories(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("name"); got != "Just Chatting" {
-			t.Fatalf("name = %q, want Just Chatting", got)
+		if got := r.URL.Query().Get("query"); got != "fort" {
+			t.Fatalf("query = %q, want fort", got)
 		}
-		fmt.Fprint(w, `{"data":[{"id":"509658","name":"Just Chatting"}]}`)
+		if got := r.URL.Query().Get("first"); got != "20" {
+			t.Fatalf("first = %q, want 20", got)
+		}
+		fmt.Fprint(w, `{"data":[{"id":"33214","name":"Fortnite"},{"id":"509670","name":"Fortnite Creative"}]}`)
 	}))
 	defer server.Close()
 
 	client := NewHelixGamesClient(HelixGamesClientConfig{Endpoint: server.URL})
-	game, ok, err := client.GetGameByName(context.Background(), "Just Chatting")
+	games, err := client.SearchCategories(context.Background(), "fort", 0)
 	if err != nil {
-		t.Fatalf("GetGameByName error = %v", err)
+		t.Fatalf("SearchCategories error = %v", err)
 	}
-	if !ok {
-		t.Fatal("ok = false, want true")
-	}
-	if game.ID != "509658" || game.Name != "Just Chatting" {
-		t.Fatalf("game = %#v, want id 509658 name Just Chatting", game)
+	want := []Game{{ID: "33214", Name: "Fortnite"}, {ID: "509670", Name: "Fortnite Creative"}}
+	if !reflect.DeepEqual(games, want) {
+		t.Fatalf("games = %#v, want %#v", games, want)
 	}
 }
 
-func TestHelixGamesClientGetGameByNameNotFound(t *testing.T) {
+func TestHelixGamesClientSearchCategoriesClampsLimit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("first"); got != "100" {
+			t.Fatalf("first = %q, want 100", got)
+		}
+		fmt.Fprint(w, `{"data":[]}`)
+	}))
+	defer server.Close()
+
+	client := NewHelixGamesClient(HelixGamesClientConfig{Endpoint: server.URL})
+	if _, err := client.SearchCategories(context.Background(), "x", 500); err != nil {
+		t.Fatalf("SearchCategories error = %v", err)
+	}
+}
+
+func TestHelixGamesClientSearchCategoriesNoMatches(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"data":[]}`)
 	}))
 	defer server.Close()
 
 	client := NewHelixGamesClient(HelixGamesClientConfig{Endpoint: server.URL})
-	_, ok, err := client.GetGameByName(context.Background(), "Nonexistent Category")
+	games, err := client.SearchCategories(context.Background(), "zzzznonexistent", 20)
 	if err != nil {
-		t.Fatalf("GetGameByName error = %v", err)
+		t.Fatalf("SearchCategories error = %v", err)
 	}
-	if ok {
-		t.Fatal("ok = true, want false for unmatched category")
+	if len(games) != 0 {
+		t.Fatalf("games = %#v, want empty", games)
 	}
 }
 
-func TestHelixGamesClientEmptyNameSkipsNetwork(t *testing.T) {
+func TestHelixGamesClientEmptyQuerySkipsNetwork(t *testing.T) {
 	client := NewHelixGamesClient(HelixGamesClientConfig{Endpoint: "http://unused.invalid"})
-	_, ok, err := client.GetGameByName(context.Background(), "   ")
-	if err != nil || ok {
-		t.Fatalf("GetGameByName(empty) = (ok=%v, err=%v), want (false, nil)", ok, err)
+	games, err := client.SearchCategories(context.Background(), "   ", 20)
+	if err != nil || games != nil {
+		t.Fatalf("SearchCategories(empty) = (%#v, %v), want (nil, nil)", games, err)
 	}
 }
 
@@ -65,9 +82,9 @@ func TestHelixGamesClientAPIErrorsAreCredentialSafe(t *testing.T) {
 		Endpoint:   server.URL,
 		OAuthToken: "oauth:access-token",
 	})
-	_, _, err := client.GetGameByName(context.Background(), "Some Game")
+	_, err := client.SearchCategories(context.Background(), "Some Game", 20)
 	if err == nil {
-		t.Fatal("GetGameByName error = nil, want API error")
+		t.Fatal("SearchCategories error = nil, want API error")
 	}
 	assertTokenValidatorErrorDoesNotLeak(t, err, "oauth:access-token", "access-token", "Bearer bearer-secret", "bearer-secret")
 }

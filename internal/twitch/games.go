@@ -6,10 +6,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
-const defaultHelixGamesURL = "https://api.twitch.tv/helix/games"
+const (
+	defaultHelixSearchCategoriesURL = "https://api.twitch.tv/helix/search/categories"
+	defaultCategorySearchLimit      = 20
+	maxCategorySearchLimit          = 100
+)
 
 // Game identifies a Twitch category/game.
 type Game struct {
@@ -17,16 +22,18 @@ type Game struct {
 	Name string
 }
 
-// GameLookup resolves a Twitch category/game by its exact display name, the
-// form Twitch Helix "Modify Channel Information" requires for changing a
-// channel's category.
+// GameLookup searches Twitch categories/games by a user-typed query, so the
+// Stream Info tab can offer a select-from-API picker instead of free-text
+// category entry (Twitch's Modify Channel Information endpoint requires a
+// game_id, not a display name, and only real categories are valid).
 type GameLookup interface {
-	GetGameByName(ctx context.Context, name string) (Game, bool, error)
+	SearchCategories(ctx context.Context, query string, limit int) ([]Game, error)
 }
 
-// HelixGamesClientConfig configures the Twitch Helix Get Games adapter.
-// Endpoint and HTTPClient are injectable for deterministic fake HTTP tests;
-// zero values use Twitch's production endpoint and the default HTTP client.
+// HelixGamesClientConfig configures the Twitch Helix category search
+// adapter. Endpoint and HTTPClient are injectable for deterministic fake
+// HTTP tests; zero values use Twitch's production endpoint and the default
+// HTTP client.
 type HelixGamesClientConfig struct {
 	Endpoint   string
 	HTTPClient *http.Client
@@ -34,7 +41,8 @@ type HelixGamesClientConfig struct {
 	OAuthToken string
 }
 
-// HelixGamesClient resolves Twitch categories/games through Helix Get Games.
+// HelixGamesClient searches Twitch categories/games through Helix Search
+// Categories.
 type HelixGamesClient struct {
 	endpoint   string
 	httpClient *http.Client
@@ -45,11 +53,11 @@ type HelixGamesClient struct {
 var _ GameLookup = (*HelixGamesClient)(nil)
 
 // NewHelixGamesClient creates a GameLookup backed by Twitch Helix HTTP. The
-// returned client performs no network I/O until GetGameByName is called.
+// returned client performs no network I/O until SearchCategories is called.
 func NewHelixGamesClient(cfg HelixGamesClientConfig) *HelixGamesClient {
 	endpoint := strings.TrimSpace(cfg.Endpoint)
 	if endpoint == "" {
-		endpoint = defaultHelixGamesURL
+		endpoint = defaultHelixSearchCategoriesURL
 	}
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
@@ -63,30 +71,37 @@ func NewHelixGamesClient(cfg HelixGamesClientConfig) *HelixGamesClient {
 	}
 }
 
-// GetGameByName performs one Helix Get Games request for the exact category
-// name. The bool result reports whether a matching category was found; a
-// false result with a nil error means Twitch has no category with that exact
-// name.
-func (c *HelixGamesClient) GetGameByName(ctx context.Context, name string) (Game, bool, error) {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return Game{}, false, nil
+// SearchCategories performs one Helix Search Categories request for query,
+// returning up to limit fuzzy-matched categories in Twitch's relevance
+// order. A blank query skips network I/O and returns no results, since
+// Twitch's search endpoint requires a non-empty query.
+func (c *HelixGamesClient) SearchCategories(ctx context.Context, query string, limit int) ([]Game, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
 	}
 	if err := ctx.Err(); err != nil {
-		return Game{}, false, err
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = defaultCategorySearchLimit
+	}
+	if limit > maxCategorySearchLimit {
+		limit = maxCategorySearchLimit
 	}
 
 	parsed, err := url.Parse(c.endpoint)
 	if err != nil {
-		return Game{}, false, credentialSafeUserError("create Twitch category lookup request", err, c.oauthToken)
+		return nil, credentialSafeUserError("create Twitch category search request", err, c.oauthToken)
 	}
-	query := parsed.Query()
-	query.Set("name", name)
-	parsed.RawQuery = query.Encode()
+	q := parsed.Query()
+	q.Set("query", query)
+	q.Set("first", strconv.Itoa(limit))
+	parsed.RawQuery = q.Encode()
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
-		return Game{}, false, credentialSafeUserError("create Twitch category lookup request", err, c.oauthToken)
+		return nil, credentialSafeUserError("create Twitch category search request", err, c.oauthToken)
 	}
 	if c.clientID != "" {
 		httpReq.Header.Set("Client-Id", c.clientID)
@@ -98,35 +113,39 @@ func (c *HelixGamesClient) GetGameByName(ctx context.Context, name string) (Game
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return Game{}, false, credentialSafeUserError("lookup Twitch category", err, c.oauthToken)
+		return nil, credentialSafeUserError("search Twitch categories", err, c.oauthToken)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		detail, readErr := readSmallBody(resp.Body)
 		if readErr != nil {
-			return Game{}, false, credentialSafeUserError("read Twitch category lookup response", readErr, c.oauthToken)
+			return nil, credentialSafeUserError("read Twitch category search response", readErr, c.oauthToken)
 		}
 		if detail != "" {
 			detail = ": " + detail
 		}
-		return Game{}, false, credentialSafeUserError(
-			"lookup Twitch category",
-			fmt.Errorf("twitch Get Games returned HTTP %d%s", resp.StatusCode, detail),
+		return nil, credentialSafeUserError(
+			"search Twitch categories",
+			fmt.Errorf("twitch Search Categories returned HTTP %d%s", resp.StatusCode, detail),
 			c.oauthToken,
 		)
 	}
 
 	var decoded helixGamesResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
-		return Game{}, false, credentialSafeUserError("decode Twitch category lookup response", err, c.oauthToken)
+		return nil, credentialSafeUserError("decode Twitch category search response", err, c.oauthToken)
 	}
+	games := make([]Game, 0, len(decoded.Data))
 	for _, item := range decoded.Data {
-		if strings.EqualFold(strings.TrimSpace(item.Name), name) {
-			return Game{ID: strings.TrimSpace(item.ID), Name: strings.TrimSpace(item.Name)}, true, nil
+		id := strings.TrimSpace(item.ID)
+		name := strings.TrimSpace(item.Name)
+		if id == "" || name == "" {
+			continue
 		}
+		games = append(games, Game{ID: id, Name: name})
 	}
-	return Game{}, false, nil
+	return games, nil
 }
 
 type helixGamesResponse struct {
