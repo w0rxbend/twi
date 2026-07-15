@@ -36,14 +36,8 @@ type TwitchConfig struct {
 }
 
 type FeatureConfig struct {
-	EnableKittyImages     bool
 	EnableMouse           bool
-	ImageMode             string
 	AvatarMode            string
-	EmojiMode             string
-	EmojiProvider         string
-	EmojiURLTemplate      string
-	EmoteMode             string
 	AnimationMode         string
 	ThemeName             string
 	ThemeCustom           theme.Palette
@@ -123,13 +117,8 @@ func LoadEnvOnly(environ []string, overrides Overrides) (Config, error) {
 func Default() Config {
 	return Config{
 		Features: FeatureConfig{
-			EnableKittyImages:     true,
 			EnableMouse:           true,
-			ImageMode:             "auto",
 			AvatarMode:            "initials",
-			EmojiMode:             "image",
-			EmojiProvider:         "twemoji",
-			EmoteMode:             "image",
 			AnimationMode:         "fast",
 			ThemeName:             "claude",
 			StreamStatusMode:      "auto",
@@ -167,13 +156,8 @@ func WriteNonSecretFile(path string, cfg Config) error {
 		"twitch_client_id":        quote(strings.TrimSpace(cfg.Twitch.ClientID)),
 		"twitch_redirect_url":     quote(strings.TrimSpace(cfg.Twitch.RedirectURL)),
 		"default_channels":        quote(strings.Join(normalizeChannels(cfg.DefaultChannels), ",")),
-		"enable_kitty_images":     strconv.FormatBool(cfg.Features.EnableKittyImages),
 		"enable_mouse":            strconv.FormatBool(cfg.Features.EnableMouse),
-		"image_mode":              quote(strings.TrimSpace(cfg.Features.ImageMode)),
 		"avatar_mode":             quote(strings.TrimSpace(cfg.Features.AvatarMode)),
-		"emoji_mode":              quote(strings.TrimSpace(cfg.Features.EmojiMode)),
-		"emoji_provider":          quote(strings.TrimSpace(cfg.Features.EmojiProvider)),
-		"emote_mode":              quote(strings.TrimSpace(cfg.Features.EmoteMode)),
 		"animation_mode":          quote(strings.TrimSpace(cfg.Features.AnimationMode)),
 		"theme_name":              quote(strings.TrimSpace(cfg.Features.ThemeName)),
 		"theme_background":        quote(strings.TrimSpace(cfg.Features.ThemeCustom.Background)),
@@ -193,13 +177,8 @@ func WriteNonSecretFile(path string, cfg Config) error {
 		"twitch_client_id",
 		"twitch_redirect_url",
 		"default_channels",
-		"enable_kitty_images",
 		"enable_mouse",
-		"image_mode",
 		"avatar_mode",
-		"emoji_mode",
-		"emoji_provider",
-		"emote_mode",
 		"animation_mode",
 		"theme_name",
 		"theme_background",
@@ -314,14 +293,8 @@ func (c Config) RedactedString() string {
 		"twitch_client_secret = " + quote(redact(c.Twitch.ClientSecret)),
 		"twitch_redirect_url = " + quote(redactUnsafe(c.Twitch.RedirectURL)),
 		"default_channels = " + quote(strings.Join(c.DefaultChannels, ",")),
-		"enable_kitty_images = " + strconv.FormatBool(c.Features.EnableKittyImages),
 		"enable_mouse = " + strconv.FormatBool(c.Features.EnableMouse),
-		"image_mode = " + quote(c.Features.ImageMode),
 		"avatar_mode = " + quote(c.Features.AvatarMode),
-		"emoji_mode = " + quote(c.Features.EmojiMode),
-		"emoji_provider = " + quote(c.Features.EmojiProvider),
-		"emoji_url_template = " + quote(redactUnsafe(c.Features.EmojiURLTemplate)),
-		"emote_mode = " + quote(c.Features.EmoteMode),
 		"animation_mode = " + quote(c.Features.AnimationMode),
 		"theme_name = " + quote(c.Features.ThemeName),
 		"theme_background = " + quote(c.Features.ThemeCustom.Background),
@@ -443,22 +416,10 @@ func applyEnv(cfg *Config, environ []string) {
 			cfg.Twitch.RedirectURL = value
 		case "TWI_DEFAULT_CHANNELS":
 			cfg.DefaultChannels = splitList(value)
-		case "TWI_ENABLE_KITTY_IMAGES":
-			cfg.Features.EnableKittyImages = parseBool(value, cfg.Features.EnableKittyImages)
 		case "TWI_ENABLE_MOUSE":
 			cfg.Features.EnableMouse = parseBool(value, cfg.Features.EnableMouse)
-		case "TWI_IMAGE_MODE":
-			cfg.Features.ImageMode = value
 		case "TWI_AVATAR_MODE":
 			cfg.Features.AvatarMode = value
-		case "TWI_EMOJI_MODE":
-			cfg.Features.EmojiMode = value
-		case "TWI_EMOJI_PROVIDER":
-			cfg.Features.EmojiProvider = value
-		case "TWI_EMOJI_URL_TEMPLATE":
-			cfg.Features.EmojiURLTemplate = value
-		case "TWI_EMOTE_MODE":
-			cfg.Features.EmoteMode = value
 		case "TWI_ANIMATION_MODE":
 			cfg.Features.AnimationMode = value
 		case "TWI_THEME_NAME":
@@ -518,22 +479,10 @@ func applyKey(cfg *Config, key, value string) {
 		cfg.Twitch.RedirectURL = value
 	case "default_channels":
 		cfg.DefaultChannels = splitList(value)
-	case "enable_kitty_images":
-		cfg.Features.EnableKittyImages = parseBool(value, cfg.Features.EnableKittyImages)
 	case "enable_mouse":
 		cfg.Features.EnableMouse = parseBool(value, cfg.Features.EnableMouse)
-	case "image_mode":
-		cfg.Features.ImageMode = value
 	case "avatar_mode":
 		cfg.Features.AvatarMode = value
-	case "emoji_mode":
-		cfg.Features.EmojiMode = value
-	case "emoji_provider":
-		cfg.Features.EmojiProvider = value
-	case "emoji_url_template":
-		cfg.Features.EmojiURLTemplate = value
-	case "emote_mode":
-		cfg.Features.EmoteMode = value
 	case "animation_mode":
 		cfg.Features.AnimationMode = value
 	case "theme_name":

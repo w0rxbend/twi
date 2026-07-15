@@ -11,7 +11,6 @@ import (
 	"strings"
 
 	"github.com/worxbend/twi/internal/app"
-	"github.com/worxbend/twi/internal/assets"
 	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/debuglog"
@@ -147,11 +146,5 @@ func closeDebugLogFileWithError(file *os.File, err error) (*os.File, error) {
 
 func withDebugLogger(opts app.ClientOptions, logger debuglog.Logger) app.ClientOptions {
 	opts.DebugLogger = logger
-	if resolver, ok := opts.AssetResolver.(*assets.Resolver); ok {
-		resolver.Logger = logger
-		if downloader, ok := resolver.Downloader.(*assets.PublicImageDownloader); ok {
-			downloader.Options.Logger = logger
-		}
-	}
 	return opts
 }

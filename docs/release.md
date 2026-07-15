@@ -204,7 +204,6 @@ The release dry-run does not prove:
 
 - Credentialed Twitch IRC read/send/reconnect behavior.
 - Browser-based `twi login` against a real Twitch app.
-- Real Kitty/Ghostty inline image drawing in a compatible terminal.
 - Interactive pointer behavior in a physical terminal.
 - Registry publishing, signing, notarization, or package-manager installs.
 
@@ -214,7 +213,8 @@ document the skip reason instead of claiming support.
 
 Current release-candidate evidence is credential-free. The T004 manual matrix
 covered PTY mock chat, resize, keyboard workflows, setup/login dry-run,
-doctor/config smokes, debug-log privacy, and non-Kitty fallbacks. Credentialed
-Twitch, exact Docker CLI smokes on a Docker-enabled host, and real Kitty/Ghostty
-inline image drawing remain the release-specific checks to complete before
+doctor/config smokes, debug-log privacy, and text-fallback rendering (avatars,
+badges, emotes, and emoji always render as text, so there is no image-drawing
+check to complete). Credentialed Twitch and exact Docker CLI smokes on a
+Docker-enabled host remain the release-specific checks to complete before
 making broader support claims.

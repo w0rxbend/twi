@@ -310,7 +310,7 @@ func TestAppDebugLogsSanitizeConnectionStateAndSendResult(t *testing.T) {
 			auth.NewSecret("explicit-send-secret"),
 		},
 	})
-	model := newLiveShellModelWithOptionsAndCapability("example", config.Default(), NewFakeChatClient(1), ClientOptions{DebugLogger: logger}, deterministicImageCapability(config.Default()))
+	model := newLiveShellModelWithClockAndOptions("example", config.Default(), NewFakeChatClient(1), nil, ClientOptions{DebugLogger: logger})
 
 	state := ConnectionState{
 		Status:  ConnectionFailed,

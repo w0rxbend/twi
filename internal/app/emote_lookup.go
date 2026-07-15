@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/worxbend/twi/internal/assets"
+	"github.com/worxbend/twi/internal/twitch"
 )
 
 type broadcasterIDResolvedMsg struct {
@@ -20,12 +21,12 @@ type emoteIndexResolvedMsg struct {
 }
 
 // scheduleBroadcasterIDLookup resolves the active channel's broadcaster user
-// ID via the same AvatarResolver already wired for author avatars, so
-// channel-specific emote lookup (which Twitch Helix keys by broadcaster ID,
-// not login) needs no separate credential plumbing. A missing/failed lookup
-// just means emote search falls back to global emotes only.
+// ID via the shared Twitch user lookup, so channel-specific emote lookup
+// (which Twitch Helix keys by broadcaster ID, not login) needs no separate
+// credential plumbing. A missing/failed lookup just means emote search falls
+// back to global emotes only.
 func (m *mockShellModel) scheduleBroadcasterIDLookup() tea.Cmd {
-	if m.avatarResolver == nil {
+	if m.userLookup == nil {
 		return nil
 	}
 	channel := m.activeChannelName()
@@ -34,14 +35,14 @@ func (m *mockShellModel) scheduleBroadcasterIDLookup() tea.Cmd {
 		return nil
 	}
 	state.broadcasterIDRequested = true
-	resolver := m.avatarResolver
+	lookup := m.userLookup
 	key := channelKey(channel)
 	return func() tea.Msg {
-		results, err := resolver.ResolveAvatars(context.Background(), []assets.AvatarRequest{{UserLogin: channel}})
+		results, err := lookup.GetUsers(context.Background(), twitch.UserLookupRequest{UserLogins: []string{channel}})
 		var userID string
 		if err == nil {
 			for _, result := range results {
-				if strings.EqualFold(result.UserLogin, channel) && result.UserID != "" {
+				if strings.EqualFold(result.Login, channel) && result.UserID != "" {
 					userID = result.UserID
 					break
 				}

@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,7 +17,6 @@ import (
 	"github.com/worxbend/twi/internal/auth"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/debuglog"
-	"github.com/worxbend/twi/internal/render"
 	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
@@ -31,7 +29,6 @@ Usage:
   twi config show
   twi config path
   twi doctor
-  twi image-smoke [--force]
   twi login [--dry-run]
   twi profile list|show|set <name>
   twi setup
@@ -50,14 +47,8 @@ Environment:
   TWITCH_CLIENT_SECRET
   TWITCH_REDIRECT_URL
   TWI_DEFAULT_CHANNELS
-  TWI_ENABLE_KITTY_IMAGES
   TWI_ENABLE_MOUSE
-  TWI_IMAGE_MODE
   TWI_AVATAR_MODE
-  TWI_EMOJI_MODE
-  TWI_EMOJI_PROVIDER
-  TWI_EMOJI_URL_TEMPLATE
-  TWI_EMOTE_MODE
   TWI_ANIMATION_MODE
   TWI_THEME_NAME
   TWI_THEME_BACKGROUND
@@ -99,13 +90,13 @@ func liveIRCTransportFactory(cfg config.Config, logger debuglog.Logger, credenti
 }
 
 var newLiveClientOptions = func(cfg config.Config) app.ClientOptions {
-	opts := liveClientOptions(cfg, os.Environ(), "")
-	opts.StreamStatusResolver = newStreamStatusResolver(cfg)
-	opts.EmoteIndex = newEmoteIndex(cfg)
-	opts.ChannelManager = newChannelManager(cfg)
-	opts.GameLookup = newGameLookup(cfg)
-	opts.SelfUserLookup = newSelfUserLookup(cfg)
-	return opts
+	return app.ClientOptions{
+		StreamStatusResolver: newStreamStatusResolver(cfg),
+		EmoteIndex:           newEmoteIndex(cfg),
+		ChannelManager:       newChannelManager(cfg),
+		GameLookup:           newGameLookup(cfg),
+		UserLookup:           newUserLookup(cfg),
+	}
 }
 
 // newChannelManager wires the Stream Info tab's Get/Modify Channel
@@ -137,10 +128,10 @@ func newGameLookup(cfg config.Config) twitch.GameLookup {
 	})
 }
 
-// newSelfUserLookup resolves the logged-in user's own Twitch user ID (the
-// broadcaster_id Stream Info's Helix calls need), independent of whether
-// avatar images are enabled.
-func newSelfUserLookup(cfg config.Config) twitch.UserLookup {
+// newUserLookup resolves Twitch user IDs by login: the logged-in user's own
+// ID for Stream Info's Helix calls, and any active channel's broadcaster ID
+// for channel-specific emote autocomplete.
+func newUserLookup(cfg config.Config) twitch.UserLookup {
 	if strings.TrimSpace(cfg.Twitch.ClientID) == "" || strings.TrimSpace(cfg.Twitch.OAuthToken) == "" {
 		return nil
 	}
@@ -152,9 +143,8 @@ func newSelfUserLookup(cfg config.Config) twitch.UserLookup {
 }
 
 // newEmoteIndex wires Ctrl+E emote search / the quick-select row to real
-// Twitch Helix emote data. Independent of the image/asset stack decision
-// like newStreamStatusResolver: EmoteIndex is in-memory only and needs no
-// cache or image capability, just Client ID/OAuth token.
+// Twitch Helix emote data. EmoteIndex is in-memory only and needs no cache,
+// just Client ID/OAuth token.
 func newEmoteIndex(cfg config.Config) *assets.EmoteIndex {
 	if strings.EqualFold(strings.TrimSpace(cfg.Features.EmoteAutocompleteMode), "off") {
 		return nil
@@ -170,9 +160,7 @@ func newEmoteIndex(cfg config.Config) *assets.EmoteIndex {
 }
 
 // newStreamStatusResolver wires the real Twitch Helix "Get Streams" LIVE
-// indicator. It is independent of the image/asset stack decision (Get
-// Streams needs no cache or image capability), gated only on
-// stream_status_mode and Twitch API credentials.
+// indicator, gated only on stream_status_mode and Twitch API credentials.
 func newStreamStatusResolver(cfg config.Config) app.StreamStatusResolver {
 	if strings.EqualFold(strings.TrimSpace(cfg.Features.StreamStatusMode), "off") {
 		return nil
@@ -246,8 +234,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return runConfig(args[1:], stdout, stderr)
 	case "doctor":
 		return runDoctor(args[1:], stdout, stderr)
-	case "image-smoke":
-		return runImageSmoke(args[1:], stdout, stderr)
 	case "login":
 		return runLogin(args[1:], stdout, stderr)
 	case "profile":
@@ -359,122 +345,6 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 	}
 	logger.Log(context.Background(), "cli.chat.complete", slog.Bool("mock", false))
 	return 0
-}
-
-func liveClientOptions(cfg config.Config, environ []string, cacheDir string) app.ClientOptions {
-	decision := app.DecideLiveImageStack(cfg, environ, cacheDir)
-	if !decision.Ready {
-		return app.ClientOptions{}
-	}
-
-	cache := storage.NewDiskAssetCache(decision.CacheDir)
-	helixHTTPClient := &http.Client{Timeout: 2 * time.Second}
-	downloadHTTPClient := &http.Client{Timeout: 4 * time.Second}
-
-	var userLookup assets.AvatarLookup
-	var identityLookup assets.IdentityLookup
-	if decision.Supports(assets.KindAvatar) {
-		userLookup = twitch.NewHelixUsersClient(twitch.HelixUsersClientConfig{
-			HTTPClient: helixHTTPClient,
-			ClientID:   cfg.Twitch.ClientID,
-			OAuthToken: cfg.Twitch.OAuthToken,
-		})
-		identityLookup = liveIdentityLookup{lookup: userLookup}
-	}
-
-	var twitchMetadata assets.MetadataLookup
-	if decision.Supports(assets.KindBadge) || decision.Supports(assets.KindTwitchEmote) {
-		twitchMetadata = &assets.TwitchMetadataResolver{
-			Lookup: twitch.NewHelixChatAssetsClient(twitch.HelixChatAssetsClientConfig{
-				HTTPClient: helixHTTPClient,
-				ClientID:   cfg.Twitch.ClientID,
-				OAuthToken: cfg.Twitch.OAuthToken,
-			}),
-			Cache: cache,
-		}
-	}
-
-	var emojiMetadata assets.MetadataLookup
-	if decision.Supports(assets.KindEmoji) {
-		emojiMetadata = assets.NewEmojiMetadataProvider(assets.EmojiProviderConfig{
-			Provider:    cfg.Features.EmojiProvider,
-			URLTemplate: cfg.Features.EmojiURLTemplate,
-			Cache:       cache,
-		})
-	}
-
-	opts := app.ClientOptions{
-		AssetResolver: &assets.Resolver{
-			Identity: identityLookup,
-			Metadata: liveMetadataLookup{
-				twitch: twitchMetadata,
-				emoji:  emojiMetadata,
-			},
-			Downloader: assets.NewPublicImageDownloader(assets.PublicImageDownloaderOptions{
-				HTTPClient:  downloadHTTPClient,
-				DownloadDir: filepath.Join(decision.CacheDir, "downloads"),
-			}),
-			Cache: cache,
-		},
-		AssetKinds:    decision.SupportedKindSet(),
-		ImagePreparer: render.NewPNGImagePreparer(render.ImagePrepareOptions{PreparedCache: cache}),
-		ImageRenderer: render.NewKittyRenderer(decision.Capability),
-	}
-	if userLookup != nil {
-		opts.AvatarResolver = &assets.AvatarBatchResolver{
-			Lookup: userLookup,
-			Cache:  cache,
-		}
-	}
-	return opts
-}
-
-type liveIdentityLookup struct {
-	lookup assets.AvatarLookup
-}
-
-func (l liveIdentityLookup) LookupIdentity(ctx context.Context, req assets.IdentityRequest) (assets.Identity, error) {
-	if l.lookup == nil {
-		return assets.Identity{}, nil
-	}
-	users, err := l.lookup.GetUsers(ctx, twitch.UserLookupRequest{
-		UserIDs:    []string{req.UserID},
-		UserLogins: []string{req.UserLogin},
-	})
-	if err != nil || len(users) == 0 {
-		return assets.Identity{}, err
-	}
-	user := users[0]
-	return assets.Identity{
-		UserID:      user.UserID,
-		Login:       user.Login,
-		DisplayName: user.DisplayName,
-		AvatarURL:   user.ProfileImageURL,
-	}, nil
-}
-
-type liveMetadataLookup struct {
-	twitch assets.MetadataLookup
-	emoji  assets.MetadataLookup
-}
-
-func (l liveMetadataLookup) LookupMetadata(ctx context.Context, req assets.MetadataRequest) (assets.Metadata, error) {
-	switch req.Ref.Kind {
-	case assets.KindBadge, assets.KindTwitchEmote:
-		if l.twitch != nil {
-			return l.twitch.LookupMetadata(ctx, req)
-		}
-	case assets.KindEmoji:
-		if l.emoji != nil {
-			return l.emoji.LookupMetadata(ctx, req)
-		}
-	}
-	return assets.Metadata{
-		Ref:         req.Ref,
-		URL:         req.Ref.URL,
-		WidthCells:  0,
-		HeightCells: 0,
-	}, nil
 }
 
 func validateLiveChatConfig(cfg config.Config) error {

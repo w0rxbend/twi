@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/worxbend/twi/internal/config"
-	"github.com/worxbend/twi/internal/render"
 	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
@@ -78,10 +77,7 @@ func DoctorWithOptions(ctx context.Context, cfg config.Config, opts DoctorOption
 		terminalCheck(opts.Environ),
 		colorCheck(opts.Environ),
 		mouseCheck(opts.Environ),
-		kittyGraphicsCheck(cfg, opts.Environ),
 		cacheCheck(opts.CacheDir),
-		imageCapabilityCheck(cfg, opts.Environ, opts.CacheDir),
-		imageStackCheck(cfg, opts.Environ, opts.CacheDir),
 		cachePruningCheck(ctx, opts.CacheDir),
 		featureModesCheck(cfg.Features),
 		streamStatusCheck(cfg),
@@ -276,23 +272,6 @@ func mouseCheck(environ []string) DoctorCheck {
 	return okCheck("terminal mouse", "terminal advertises interactive capabilities; mouse behavior remains optional")
 }
 
-func kittyGraphicsCheck(cfg config.Config, environ []string) DoctorCheck {
-	if !cfg.Features.EnableKittyImages || strings.EqualFold(strings.TrimSpace(cfg.Features.ImageMode), "off") {
-		return okCheck("kitty graphics", "disabled by config; text fallbacks active")
-	}
-	env := envMap(environ)
-	switch {
-	case env["KITTY_WINDOW_ID"] != "":
-		return okCheck("kitty graphics", "Kitty signal detected via KITTY_WINDOW_ID")
-	case strings.Contains(env["TERM"], "xterm-kitty"):
-		return okCheck("kitty graphics", "Kitty signal detected via TERM")
-	case strings.EqualFold(env["TERM_PROGRAM"], "ghostty"):
-		return okCheck("kitty graphics", "Kitty-compatible signal detected via TERM_PROGRAM=ghostty")
-	default:
-		return warnCheck("kitty graphics", "no Kitty/Ghostty signal detected; image fallbacks active")
-	}
-}
-
 func cacheCheck(cacheDir string) DoctorCheck {
 	if strings.TrimSpace(cacheDir) == "" {
 		defaultDir, err := config.DefaultCacheDir()
@@ -307,49 +286,6 @@ func cacheCheck(cacheDir string) DoctorCheck {
 	return okCheck("cache directory", cacheDir+" writable")
 }
 
-func imageCapabilityCheck(cfg config.Config, environ []string, cacheDir string) DoctorCheck {
-	decision, cacheErr := imageCapabilityDecision(cfg, environ, cacheDir)
-	detail := decision.Summary()
-	if cacheErr != nil {
-		detail += "; cache probe: " + cacheErr.Error()
-	}
-	switch decision.Status {
-	case render.ImageCapabilityEnabled, render.ImageCapabilityDisabled:
-		return okCheck("image capability", detail)
-	default:
-		return warnCheck("image capability", detail)
-	}
-}
-
-func imageCapabilityDecision(cfg config.Config, environ []string, cacheDir string) (render.ImageCapabilityDecision, error) {
-	writable, err := imageCacheWritable(cacheDir)
-	return render.DecideImageCapabilities(cfg.Features, render.DetectTerminalImageSignals(environ), writable), err
-}
-
-func imageStackCheck(cfg config.Config, environ []string, cacheDir string) DoctorCheck {
-	decision := DecideLiveImageStack(cfg, environ, cacheDir)
-	switch decision.Status {
-	case ImageStackEnabled, ImageStackDisabled:
-		return okCheck("image stack", decision.Detail)
-	default:
-		return warnCheck("image stack", decision.Detail)
-	}
-}
-
-func imageCacheWritable(cacheDir string) (bool, error) {
-	if strings.TrimSpace(cacheDir) == "" {
-		defaultDir, err := config.DefaultCacheDir()
-		if err != nil {
-			return false, err
-		}
-		cacheDir = defaultDir
-	}
-	if err := storage.ProbeWritableDir(cacheDir); err != nil {
-		return false, err
-	}
-	return true, nil
-}
-
 func cachePruningCheck(ctx context.Context, cacheDir string) DoctorCheck {
 	assetDir, err := assetCacheDir(cacheDir)
 	if err != nil {
@@ -362,7 +298,7 @@ func cachePruningCheck(ctx context.Context, cacheDir string) DoctorCheck {
 	report, err := storage.NewDiskAssetCache(assetDir).Prune(pruneCtx, storage.PruneOptions{})
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return warnCheck("asset cache pruning", fmt.Sprintf("%s cleanup timed out: %v; chat can still start with image fallbacks", assetDir, err))
+			return warnCheck("asset cache pruning", fmt.Sprintf("%s cleanup timed out: %v; chat can still start", assetDir, err))
 		}
 		return warnCheck("asset cache pruning", fmt.Sprintf("%s cleanup failed: %v; fix cache directory permissions or remove stale cache files", assetDir, err))
 	}
@@ -387,17 +323,12 @@ func assetCacheDir(cacheDir string) (string, error) {
 
 func featureModesCheck(features config.FeatureConfig) DoctorCheck {
 	detail := fmt.Sprintf(
-		"image=%s avatar=%s emoji=%s emoji_provider=%s emote=%s animation=%s theme=%s stream_status=%s emote_autocomplete=%s kitty=%t mouse=%t",
-		features.ImageMode,
+		"avatar=%s animation=%s theme=%s stream_status=%s emote_autocomplete=%s mouse=%t",
 		features.AvatarMode,
-		features.EmojiMode,
-		features.EmojiProvider,
-		features.EmoteMode,
 		features.AnimationMode,
 		features.ThemeName,
 		features.StreamStatusMode,
 		features.EmoteAutocompleteMode,
-		features.EnableKittyImages,
 		features.EnableMouse,
 	)
 	if unknown := unknownFeatureModes(features); len(unknown) > 0 {
@@ -408,20 +339,8 @@ func featureModesCheck(features config.FeatureConfig) DoctorCheck {
 
 func unknownFeatureModes(features config.FeatureConfig) []string {
 	var unknown []string
-	if !oneOf(features.ImageMode, "auto", "off", "small", "normal", "large") {
-		unknown = append(unknown, "image="+features.ImageMode)
-	}
-	if !oneOf(features.AvatarMode, "off", "initials", "image") {
+	if !oneOf(features.AvatarMode, "off", "initials") {
 		unknown = append(unknown, "avatar="+features.AvatarMode)
-	}
-	if !oneOf(features.EmojiMode, "unicode", "image") {
-		unknown = append(unknown, "emoji="+features.EmojiMode)
-	}
-	if strings.TrimSpace(features.EmojiProvider) != "" && !oneOf(features.EmojiProvider, "twemoji", "custom") {
-		unknown = append(unknown, "emoji_provider="+features.EmojiProvider)
-	}
-	if !oneOf(features.EmoteMode, "text", "image") {
-		unknown = append(unknown, "emote="+features.EmoteMode)
 	}
 	if !oneOf(features.AnimationMode, "off", "reduced", "fast") {
 		unknown = append(unknown, "animation="+features.AnimationMode)

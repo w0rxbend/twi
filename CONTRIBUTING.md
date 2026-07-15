@@ -55,7 +55,7 @@ Use isolated `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` directories and clear all `T
 
 ## Manual Checks
 
-Use [docs/manual-validation.md](docs/manual-validation.md) as the evidence log for terminal behavior that automated tests cannot prove. Record terminal name/version, viewport size, command, observed behavior, and skipped checks with the exact environment reason. Credentialed Twitch chat, real Kitty/Ghostty inline image drawing, and exact Docker daemon checks are environment-dependent and must not be claimed without evidence.
+Use [docs/manual-validation.md](docs/manual-validation.md) as the evidence log for terminal behavior that automated tests cannot prove. Record terminal name/version, viewport size, command, observed behavior, and skipped checks with the exact environment reason. Credentialed Twitch chat and exact Docker daemon checks are environment-dependent and must not be claimed without evidence.
 
 ## Secret Handling
 
@@ -69,5 +69,5 @@ Use redaction helpers for every user-facing error, diagnostic line, debug record
 - Tests cover the changed behavior or the manual evidence explains why automation is not possible.
 - `go fmt`, relevant `go test`, and `git diff --check` pass.
 - New docs link to related docs with relative `.md` paths.
-- README, docs, and code comments do not overclaim Windows, credentialed Twitch, Docker, or Kitty/Ghostty support.
+- README, docs, and code comments do not overclaim Windows, credentialed Twitch, or Docker support.
 - No real secrets appear in commits, logs, fixtures, screenshots, or copied output.

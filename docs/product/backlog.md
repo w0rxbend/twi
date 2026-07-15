@@ -8,12 +8,11 @@ Progress as of the initial swarm pass:
 - Done: Phase 0 requirements matrix, risk register, backlog, and six ADRs.
 - Done: Go module bootstrap, CLI shell, config precedence/redaction tests, normalized message model skeleton, Bubble Tea mock chat shell, module tool directives for `govulncheck`/`staticcheck`, Twitch IRC read adapter, the active-channel composer send queue, selected-message replies, `/me` action sends, and per-channel live routing.
 - Current status labels: mock chat and diagnostics are ready; multi-channel live IRC read/send,
-  multi-channel UX, redacted debug logging, inline image plumbing,
+  multi-channel UX, redacted debug logging,
   OAuth login, setup, release binary/container packaging, and Unix restrictive
   credential-file persistence are partial or current for their documented
   paths, including refreshed-token persistence through the supported credential
-  store. Credentialed Twitch release validation and manual Kitty/Ghostty image
-  validation remain environment-dependent.
+  store. Credentialed Twitch release validation remains environment-dependent.
   Active live IRC reconnect restart and per-channel local filters are
   implemented.
 - Credential rule: Twitch username/token values currently come from
@@ -21,8 +20,14 @@ Progress as of the initial swarm pass:
   supported Unix platforms; environment and flat config values take precedence over
   saved credentials, and CLI overrides cover channel and config path.
 - Remaining validation limits are environment-dependent: credentialed Twitch
-  release checks, exact Docker CLI smokes on a Docker-enabled host, and manual
-  Kitty/Ghostty inline image drawing.
+  release checks and exact Docker CLI smokes on a Docker-enabled host.
+- Terminal-image rendering (Kitty graphics, for avatars/badges/emotes/emoji)
+  was designed, implemented, and later removed as a deliberate product
+  decision; avatars, badges, emotes, and emoji now always render as text with
+  no image mode to configure. See
+  [adr/0003-use-kitty-graphics-as-first-image-protocol.md](../adr/0003-use-kitty-graphics-as-first-image-protocol.md)
+  (superseded). The historical Phase 2/Phase 3 task entries below describe
+  that now-reverted work and are kept only for background.
 
 Each task is intended to fit one implementation loop. Agents should keep write scope to
 the listed files where possible and use fakes before network-dependent code.
@@ -74,7 +79,7 @@ Goal: Load credentials and options safely from flags, env, and config.
 Context: MVP requires credentials and modes from env/config plus CLI channel/config-path overrides with no secret leakage.
 Files likely touched: `internal/config`, `cmd/twi`.
 Implementation notes: Implement precedence flags > env > file > defaults. Add redaction before any config output or error formatting.
-Acceptance criteria: Username, token, channels, image modes, and animation mode resolve predictably; token is never printed.
+Acceptance criteria: Username, token, channels, avatar mode, and animation mode resolve predictably; token is never printed.
 Verification: Unit tests for precedence and redaction; `go test ./internal/config`.
 Risks: Early CLI shape may change; keep config package independent.
 Follow-ups: Add `twi config show` and `twi config path`.
@@ -151,29 +156,31 @@ Owner lane: Rendering engineer.
 Goal: Render readable chat rows with stable fallback behavior.
 Context: Rich rendering depends on fragments for text, mentions, badges, emoji, emotes, avatars, replies, and moderation state.
 Files likely touched: `internal/render`, `internal/theme`, `internal/app`.
-Implementation notes: Use width-aware layout, contrast-correct username colors, stable image placeholders, and golden snapshots.
+Implementation notes: Use width-aware layout, contrast-correct username colors, stable text-fallback placeholders, and golden snapshots.
 Acceptance criteria: Normal, mention, reply, badge, emoji, emote-token, notice, deleted, and partially revealed rows render cleanly at multiple widths.
 Verification: Golden tests for narrow/normal/wide rows; `go test ./internal/render`.
 Risks: Unicode width mismatches across terminals.
-Follow-ups: Add image-backed asset rendering.
+Follow-ups: Image-backed asset rendering was later built and then removed;
+avatars, badges, emotes, and emoji stay text-only going forward.
 
 ## Task 11
 
 Task: Add asset pipeline interfaces and text fallback tests.
 Owner lane: Asset/image engineer.
 Goal: Prepare avatars, emotes, emoji, and badges without blocking MVP.
-Context: Image rendering is core later scope, but MVP must define fallback contracts early.
+Context: Image rendering was core later scope at the time; MVP needed fallback contracts early, and those text fallbacks remain the permanent behavior after the image pipeline was later removed.
 Files likely touched: `internal/assets`, `internal/storage`, `internal/render`.
 Implementation notes: Completed initially in T015 with renderer placeholder
 widths, context-aware storage cache contracts, and no-image fallback snapshots.
 Later slices added public image downloading, disk cache write-through, bounded
-PNG/JPEG/GIF preparation, Kitty-compatible renderer plumbing, visible-row asset
-events, and default live resolver wiring. Manual Kitty/Ghostty drawing evidence
-remains future work. Do not download assets in `View`.
+PNG/JPEG/GIF preparation, a Kitty-compatible renderer, and visible-row asset
+event wiring; that entire image pipeline was subsequently removed as a
+deliberate product decision, and avatars, badges, emotes, and emoji now always
+render as text. Do not download assets in `View`.
 Acceptance criteria: Renderer can request asset placeholders and render fallbacks when assets are missing, disabled, or unsupported.
 Verification: Fake cache/renderer tests; fallback golden snapshots; code search for I/O in render/view paths.
 Risks: Designing too much before real assets; keep interfaces minimal.
-Follow-ups: Add Helix avatar lookup and Kitty renderer.
+Follow-ups: None; the image pipeline these follow-ups targeted was removed.
 
 ## Task 12
 
@@ -182,7 +189,7 @@ Owner lane: QA/release engineer.
 Goal: Give users and agents a single command for setup visibility.
 Context: OAuth token validation is now wired into `twi doctor`; diagnostics reduce support ambiguity without requiring login/setup.
 Files likely touched: `internal/app`, `internal/config`, `internal/cli`.
-Implementation notes: Completed in T016 with config path state, credential presence without values, token identity/expiry/scope validation, Twitch IRC reachability, terminal env hints, Kitty/Ghostty signals, cache writability, feature modes, and redacted output.
+Implementation notes: Completed in T016 with config path state, credential presence without values, token identity/expiry/scope validation, Twitch IRC reachability, terminal env hints, cache writability, feature modes, and redacted output.
 Acceptance criteria: `twi doctor` runs without Twitch credentials and never prints secrets.
 Verification: Unit tests for diagnostic redaction; manual `go run ./cmd/twi doctor`.
 Risks: Terminal feature detection may be incomplete initially.
@@ -193,8 +200,9 @@ Follow-ups: Add interactive auth recovery for failed live-chat credentials.
 Status: Updated after the initial MVP slices. The current app already has a
 Bubble Tea chat shell, deterministic mock mode, multi-channel Twitch IRC
 read/send routing, replies, `/me` actions, typed reveal animation, config
-precedence/redaction, diagnostics, normalized Twitch events, and text-only
-asset fallbacks plus partial image metadata/cache/event plumbing. The
+precedence/redaction, diagnostics, normalized Twitch events, and always-on
+text-only avatar/badge/emote/emoji rendering (the image metadata/cache/event
+pipeline that once backed an optional image mode was removed). The
 remaining plan below focuses on turning planned extension points into runnable
 vertical slices.
 
@@ -202,18 +210,20 @@ vertical slices.
 
 Task: Reconcile documentation and runtime behavior.
 Owner lane: QA/release engineer.
-Goal: Make README, quickstart, config, auth, Docker, terminal image docs, and
+Goal: Make README, quickstart, config, auth, Docker, and
 the product requirements describe the same shipped behavior.
 Context: Several docs mention planned work that is now partially implemented,
-while image drawing evidence and credentialed Twitch evidence remain
-environment-dependent. Non-Unix saved credentials are out of scope.
+while credentialed Twitch evidence remains environment-dependent. Non-Unix
+saved credentials are out of scope. Terminal-image rendering was later removed
+entirely, so `docs/terminal-images.md` was deleted; avatars, badges, emotes,
+and emoji always render as text now.
 Files likely touched: `README.md`, `docs/quickstart.md`, `docs/auth.md`,
-`docs/config.md`, `docs/development.md`, `docs/terminal-images.md`,
+`docs/config.md`, `docs/development.md`,
 `docs/product/requirements.md`.
 Implementation notes: Prefer explicit status labels: ready, partial, planned.
 Do not document secrets or credential examples that look real.
 Acceptance criteria: Users can identify the supported commands, required
-credentials, config precedence, Docker modes, and image limitations without
+credentials, config precedence, and Docker modes without
 reading source.
 Verification: `go run ./cmd/twi --help`; `go run ./cmd/twi config show`;
 `go run ./cmd/twi doctor`; docs link/read-through check.
@@ -277,152 +287,22 @@ targeted race test if timing code changes.
 Risks: Snapshot tests can become brittle if they assert decorative styling.
 Follow-ups: Add a local stress/smoke command only if unit tests are not enough.
 
-### Phase 2: Asset Metadata And Cache Pipeline
+### Phase 2/3: Asset Metadata, Cache Pipeline, And Terminal Image Rendering (historical, reverted)
 
-Task: Create `internal/assets` service boundaries.
-Owner lane: Asset/image engineer.
-Goal: Define asynchronous asset resolution for avatars, emotes, emoji, and
-badges without coupling render or Bubble Tea views to network/file I/O.
-Context: `internal/storage.AssetCache` and `render.ImageRenderer` exist, but
-no resolver package fills assets yet.
-Files likely touched: `internal/assets`, `internal/storage`,
-`internal/render`, `internal/app`, `docs/development.md`.
-Implementation notes: Use small interfaces for identity lookup, metadata
-lookup, download, cache, and app-facing asset events. Render paths should
-consume already-known fallback or image cells only.
-Acceptance criteria: Fake resolver tests can simulate cache hit, cache miss,
-download failure, and cancellation; app views do not perform blocking I/O.
-Verification: Targeted tests for `internal/assets`, `internal/storage`,
-`internal/render`, and `internal/app`; search `internal/app` and
-`internal/render` for blocking file or network calls.
-Risks: Overdesign before real assets; keep the first service minimal and
-driven by avatar/emote needs.
-Follow-ups: Add persistent disk cache.
-
-Task: Implement persistent bounded asset cache.
-Owner lane: Storage engineer.
-Goal: Store image files and metadata under the user cache directory with TTL,
-size bounds, and context-aware operations.
-Context: Current cache storage is in-memory and test-only.
-Files likely touched: `internal/storage`, `internal/config`,
-`docs/terminal-images.md`, `docs/config.md`.
-Implementation notes: Use deterministic paths by asset kind and ID. Store
-metadata separately from bytes. Never store OAuth tokens, client secrets, or
-credential-bearing URLs.
-Acceptance criteria: Cache reads/writes are cancellable, survive process
-restart, respect TTL, and prune by age or size.
-Verification: Temp-dir tests; permission-failure tests; targeted tests for
-`internal/storage` and `internal/config`.
-Risks: Filesystem permissions vary; doctor should surface cache writability
-without failing chat.
-Follow-ups: Add ETag/Last-Modified support where providers expose it.
-
-Task: Resolve Twitch avatars through Helix Get Users.
-Owner lane: Twitch integration engineer.
-Goal: Populate `profile_image_url` metadata for visible chat authors in
-batches and cache it.
-Context: `ChatMessage.AvatarURL` exists, but IRC messages do not provide it.
-Files likely touched: `internal/twitch`, `internal/assets`, `internal/app`,
-`internal/render`, `docs/terminal-images.md`.
-Implementation notes: Batch by login/user ID, debounce visible-message
-requests, cache positive and temporary failure results, and respect context
-cancellation.
-Acceptance criteria: Avatar fallback remains stable before/after lookup;
-resolved metadata can be handed to the image pipeline.
-Verification: Helix HTTP fake tests; app fake asset event tests; targeted
-tests for `internal/twitch`, `internal/assets`, `internal/app`, and
-`internal/render`.
-Risks: Helix rate limits and missing users; avoid per-message lookup.
-Follow-ups: Use token validation identity client where possible.
-
-Task: Resolve Twitch emote and badge metadata.
-Owner lane: Twitch integration engineer.
-Goal: Convert IRC emote positions and badge IDs into cached asset references
-with readable fallback text.
-Context: Emote tokens and compact badge fallbacks render today; images and
-provider metadata are missing.
-Files likely touched: `internal/twitch`, `internal/assets`,
-`internal/render`, `docs/terminal-images.md`.
-Implementation notes: Keep IRC emote position parsing byte/rune-safe for
-Twitch tag semantics and preserve fallback tokens exactly.
-Acceptance criteria: Known emote IDs and badge set IDs resolve to image asset
-refs; fallback rows do not corrupt Unicode text.
-Verification: Unit tests for emote positions, badge metadata fixtures, cache
-failures, and golden fallback rows.
-Risks: Twitch emote URL templates and badge APIs differ by global/channel
-scope.
-Follow-ups: Add animated emote policy after static rendering works.
-
-Task: Add emoji grapheme asset mapping.
-Owner lane: Rendering engineer.
-Goal: Detect standard emoji grapheme clusters and map them to optional image
-assets while preserving native Unicode fallback.
-Context: Reveal and wrapping are grapheme-safe, but image-backed emoji are not
-implemented.
-Files likely touched: `internal/assets`, `internal/render`,
-`internal/animation`, `docs/terminal-images.md`.
-Implementation notes: Use a maintained Unicode-aware approach if a dependency
-is justified; otherwise keep this to detection and provider-independent asset
-keys.
-Acceptance criteria: Emoji clusters, modifiers, and ZWJ sequences remain intact
-in fallback and reveal modes.
-Verification: Unicode fixture tests; golden rows with emoji clusters; targeted
-tests for `internal/render`, `internal/animation`, and `internal/assets`.
-Risks: Unicode data maintenance can become a project of its own.
-Follow-ups: Decide provider or local asset pack for image files.
-
-### Phase 3: Terminal Image Rendering
-
-Task: Implement terminal capability detection.
-Owner lane: Terminal/platform engineer.
-Goal: Decide when image rendering should be enabled, disabled, or degraded.
-Context: `twi doctor` reports environment hints, but the app does not yet use
-full capability decisions.
-Files likely touched: `internal/app`, `internal/config`, `internal/render`,
-`docs/terminal-images.md`.
-Implementation notes: Combine config modes, terminal environment, true color
-hints, cache writability, and explicit off/auto behavior. Do not require image
-support for chat.
-Acceptance criteria: `auto`, `off`, and explicit image modes produce
-predictable app and doctor states.
-Verification: Env matrix tests; doctor tests; manual Kitty/Ghostty/non-Kitty
-checks.
-Risks: Terminal detection is imperfect; users need an override.
-Follow-ups: Add a visible degraded-mode status line when useful.
-
-Task: Add Kitty-compatible image renderer.
-Owner lane: Terminal/image engineer.
-Goal: Render fixed-cell avatars, emotes, and emoji through the Kitty graphics
-protocol when supported.
-Context: `render.ImageRenderer` exists as an interface only.
-Files likely touched: `internal/render`, `internal/assets`, `internal/app`,
-`docs/terminal-images.md`.
-Implementation notes: Render through asynchronous Bubble Tea commands and
-cache returned terminal cells. Keep placeholders stable while images load or
-fail.
-Acceptance criteria: Image-capable terminals display avatars/emotes/emoji;
-unsupported terminals keep initials/tokens/Unicode without layout shift.
-Verification: Unit tests with fake renderer; manual Kitty/Ghostty image smoke;
-non-Kitty fallback smoke.
-Risks: Protocol behavior varies across terminals and multiplexers.
-Follow-ups: Add image invalidation and resize handling refinements.
-
-Task: Integrate asset events into the chat model.
-Owner lane: Core TUI engineer.
-Goal: Refresh visible rows as assets resolve without blocking input or
-destroying scroll/composer state.
-Context: Current rows are rendered from message state and fallback options
-only.
-Files likely touched: `internal/app`, `internal/render`,
-`internal/assets`, `internal/animation`.
-Implementation notes: Treat asset updates like normal app messages. Avoid
-rerendering hidden history more than necessary.
-Acceptance criteria: Late avatar/emote/emoji resolution updates visible rows
-without scroll jumps or composer loss.
-Verification: Fake resolver integration tests; resize and scroll tests;
-manual image-mode smoke.
-Risks: Excessive rerenders can make busy chats sluggish.
-Follow-ups: Add viewport-aware prefetching.
+Status: This phase was fully implemented across several iterations — an
+`internal/assets` resolver boundary, a persistent bounded disk asset cache,
+Helix-backed avatar/emote/badge metadata resolution, emoji grapheme asset
+mapping, terminal graphics capability detection, a Kitty-compatible image
+renderer, and visible-row asset event integration into the chat model — and
+was then removed in full as a deliberate product decision. Avatars, badges,
+Twitch emotes, and standard emoji now always render as text (`[XY]` initials
+chips, compact badge labels, matched emote tokens, native Unicode glyphs) with
+no image mode, image cache/download path, or terminal-graphics dependency.
+`avatar_mode` (`off` or `initials`) is the only surviving config knob from this
+work. See
+[adr/0003-use-kitty-graphics-as-first-image-protocol.md](../adr/0003-use-kitty-graphics-as-first-image-protocol.md)
+(superseded) for the original decision record. No further tasks remain open
+from this phase.
 
 ### Phase 4: Multi-Channel And Interaction UX
 
@@ -579,7 +459,7 @@ Follow-ups: Config migration helper.
 
 Task: Add first-run setup wizard.
 Owner lane: UX/platform engineer.
-Goal: Guide new users through channel, auth, image mode, animation mode, and
+Goal: Guide new users through channel, auth, avatar mode, animation mode, and
 login/storage handoff.
 Context: Manual config is workable but not friendly. The implemented setup
 command writes non-secret flat config values and can hand off to `twi login` or
@@ -589,7 +469,7 @@ Implementation notes: Keep noninteractive flags/env viable for automation and
 Docker. Never prompt for OAuth tokens, refresh tokens, callback codes, OAuth
 state, authorization URLs, or client secrets.
 Acceptance criteria: A new user can create or update username, client ID,
-channels, image modes, mouse mode, and animation mode from prompts or
+channels, avatar mode, mouse mode, and animation mode from prompts or
 noninteractive flags, then explicitly hand off to login/storage.
 Verification: CLI prompt tests with fake stdin/stdout; noninteractive setup
 smoke; manual first-run smoke.
@@ -664,7 +544,7 @@ Follow-ups: Add structured bug-report bundle only after privacy review.
 - Keep `internal/app` free of concrete Twitch IRC or Helix client types.
 - Keep network and filesystem work out of Bubble Tea `Update` and `View`
   paths unless it is explicitly asynchronous and cancellable.
-- Preserve text fallbacks for every image and asset feature.
+- Keep avatars, badges, emotes, and emoji text-only; do not reintroduce an image rendering path.
 - Redact OAuth tokens, refresh tokens, client secrets, and credential-looking
   values in errors, config output, doctor output, logs, tests, and snapshots.
 - Prefer `go fmt ./...`, `go vet ./...`, and `go test ./...` as the default

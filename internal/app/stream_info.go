@@ -86,7 +86,7 @@ func (m *mockShellModel) scheduleStreamInfoLoad() tea.Cmd {
 	m.streamInfo.loadErr = ""
 
 	channelManager := m.channelManager
-	userLookup := m.selfUserLookup
+	userLookup := m.userLookup
 	username := strings.TrimSpace(m.effectiveConfig.Twitch.Username)
 	knownID := m.streamInfo.broadcasterID
 
@@ -232,11 +232,6 @@ func (m mockShellModel) applyStreamInfoSaved(msg streamInfoSavedMsg) mockShellMo
 	return m
 }
 
-// streamInfoErrorMessage turns a Twitch channel-info error into user-facing
-// text. A 401 from Get/Modify Channel Information means the current token
-// predates (or otherwise lacks) channel:manage:broadcast - re-running `twi
-// login` is the actual fix, so say so directly instead of showing the raw
-// Twitch JSON body.
 // wrapIndentedText greedily word-wraps text into lines no wider than width,
 // each prefixed with a leading space to match the tab's other lines. Twitch
 // API error bodies and long guidance messages can easily exceed one line at
@@ -268,6 +263,11 @@ func wrapIndentedText(text string, width int) []string {
 	return lines
 }
 
+// streamInfoErrorMessage turns a Twitch channel-info error into user-facing
+// text. A 401 from Get/Modify Channel Information means the current token
+// predates (or otherwise lacks) channel:manage:broadcast - re-running `twi
+// login` is the actual fix, so say so directly instead of showing the raw
+// Twitch JSON body.
 func streamInfoErrorMessage(err error) string {
 	if twitch.IsMissingScope(err) {
 		return "Your Twitch login is missing the channel:manage:broadcast scope (or the token expired). Run `twi login` to re-authenticate, then reopen this tab (alt+2)."

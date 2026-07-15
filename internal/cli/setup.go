@@ -15,14 +15,11 @@ import (
 
 const setupUsage = `Usage:
   twi setup [--config path] [--non-interactive] [--username login] [--client-id id] [--channel name]...
-            [--enable-kitty-images bool] [--enable-mouse bool]
-            [--image-mode mode] [--avatar-mode mode] [--emoji-mode mode]
-            [--emoji-provider provider] [--emote-mode mode] [--animation-mode mode]
+            [--enable-mouse bool] [--avatar-mode mode] [--animation-mode mode]
             [--login | --login-dry-run]
 
 Creates or updates the flat config file with non-secret settings: username,
-client ID, default channels, image modes, emoji provider, mouse mode, and
-animation mode.
+client ID, default channels, avatar mode, mouse mode, and animation mode.
 
 Setup does not ask for or write OAuth tokens, refresh tokens, callback codes,
 OAuth state, authorization URLs, or client secrets. Use the login handoff to
@@ -42,11 +39,7 @@ const (
 )
 
 var (
-	setupImageModes     = []string{"auto", "off", "small", "normal", "large"}
-	setupAvatarModes    = []string{"off", "initials", "image"}
-	setupEmojiModes     = []string{"unicode", "image"}
-	setupEmojiProviders = []string{"twemoji", "custom"}
-	setupEmoteModes     = []string{"text", "image"}
+	setupAvatarModes    = []string{"off", "initials"}
 	setupAnimationModes = []string{"off", "reduced", "fast"}
 )
 
@@ -56,13 +49,8 @@ type setupFlagOptions struct {
 	username       optionalTextFlag
 	clientID       optionalTextFlag
 	channels       channelFlags
-	enableKitty    optionalBoolFlag
 	enableMouse    optionalBoolFlag
-	imageMode      enumFlag
 	avatarMode     enumFlag
-	emojiMode      enumFlag
-	emojiProvider  enumFlag
-	emoteMode      enumFlag
 	animationMode  enumFlag
 	login          bool
 	loginDryRun    bool
@@ -70,11 +58,7 @@ type setupFlagOptions struct {
 
 func runSetup(args []string, stdout, stderr io.Writer) int {
 	opts := setupFlagOptions{
-		imageMode:     newEnumFlag("image mode", setupImageModes),
 		avatarMode:    newEnumFlag("avatar mode", setupAvatarModes),
-		emojiMode:     newEnumFlag("emoji mode", setupEmojiModes),
-		emojiProvider: newEnumFlag("emoji provider", setupEmojiProviders),
-		emoteMode:     newEnumFlag("emote mode", setupEmoteModes),
 		animationMode: newEnumFlag("animation mode", setupAnimationModes),
 	}
 	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
@@ -84,13 +68,8 @@ func runSetup(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&opts.username, "username", "Twitch login name to write to config")
 	fs.Var(&opts.clientID, "client-id", "Twitch app client ID to write to config")
 	fs.Var(&opts.channels, "channel", "default Twitch channel; repeat for multiple channels")
-	fs.Var(&opts.enableKitty, "enable-kitty-images", "enable Kitty protocol image support")
 	fs.Var(&opts.enableMouse, "enable-mouse", "enable terminal mouse support")
-	fs.Var(&opts.imageMode, "image-mode", "image mode: auto, off, small, normal, or large")
-	fs.Var(&opts.avatarMode, "avatar-mode", "avatar mode: off, initials, or image")
-	fs.Var(&opts.emojiMode, "emoji-mode", "emoji mode: unicode or image")
-	fs.Var(&opts.emojiProvider, "emoji-provider", "emoji image provider: twemoji or custom")
-	fs.Var(&opts.emoteMode, "emote-mode", "emote mode: text or image")
+	fs.Var(&opts.avatarMode, "avatar-mode", "avatar mode: off or initials")
 	fs.Var(&opts.animationMode, "animation-mode", "animation mode: off, reduced, or fast")
 	fs.BoolVar(&opts.login, "login", false, "run twi login after writing non-secret config")
 	fs.BoolVar(&opts.loginDryRun, "login-dry-run", false, "run twi login --dry-run after writing non-secret config")
@@ -183,26 +162,11 @@ func applySetupFlagOptions(cfg *config.Config, opts setupFlagOptions) {
 	if len(opts.channels) > 0 {
 		cfg.DefaultChannels = append([]string(nil), opts.channels...)
 	}
-	if opts.enableKitty.set {
-		cfg.Features.EnableKittyImages = opts.enableKitty.value
-	}
 	if opts.enableMouse.set {
 		cfg.Features.EnableMouse = opts.enableMouse.value
 	}
-	if opts.imageMode.set {
-		cfg.Features.ImageMode = opts.imageMode.value
-	}
 	if opts.avatarMode.set {
 		cfg.Features.AvatarMode = opts.avatarMode.value
-	}
-	if opts.emojiMode.set {
-		cfg.Features.EmojiMode = opts.emojiMode.value
-	}
-	if opts.emojiProvider.set {
-		cfg.Features.EmojiProvider = opts.emojiProvider.value
-	}
-	if opts.emoteMode.set {
-		cfg.Features.EmoteMode = opts.emoteMode.value
 	}
 	if opts.animationMode.set {
 		cfg.Features.AnimationMode = opts.animationMode.value
@@ -211,19 +175,7 @@ func applySetupFlagOptions(cfg *config.Config, opts setupFlagOptions) {
 
 func validateAndNormalizeSetupConfig(cfg *config.Config) error {
 	var err error
-	if cfg.Features.ImageMode, err = normalizeSetupEnum("image mode", cfg.Features.ImageMode, setupImageModes); err != nil {
-		return err
-	}
 	if cfg.Features.AvatarMode, err = normalizeSetupEnum("avatar mode", cfg.Features.AvatarMode, setupAvatarModes); err != nil {
-		return err
-	}
-	if cfg.Features.EmojiMode, err = normalizeSetupEnum("emoji mode", cfg.Features.EmojiMode, setupEmojiModes); err != nil {
-		return err
-	}
-	if cfg.Features.EmojiProvider, err = normalizeSetupEnum("emoji provider", cfg.Features.EmojiProvider, setupEmojiProviders); err != nil {
-		return err
-	}
-	if cfg.Features.EmoteMode, err = normalizeSetupEnum("emote mode", cfg.Features.EmoteMode, setupEmoteModes); err != nil {
 		return err
 	}
 	if cfg.Features.AnimationMode, err = normalizeSetupEnum("animation mode", cfg.Features.AnimationMode, setupAnimationModes); err != nil {
@@ -268,41 +220,11 @@ func (w setupWizard) Run(cfg *config.Config, defaultAction setupCredentialAction
 	}
 	cfg.DefaultChannels = channels
 
-	enableKitty, err := w.promptBool("Enable Kitty images", cfg.Features.EnableKittyImages)
-	if err != nil {
-		return "", err
-	}
-	cfg.Features.EnableKittyImages = enableKitty
-
-	imageMode, err := w.promptEnum("Image mode", cfg.Features.ImageMode, setupImageModes)
-	if err != nil {
-		return "", err
-	}
-	cfg.Features.ImageMode = imageMode
-
 	avatarMode, err := w.promptEnum("Avatar mode", cfg.Features.AvatarMode, setupAvatarModes)
 	if err != nil {
 		return "", err
 	}
 	cfg.Features.AvatarMode = avatarMode
-
-	emojiMode, err := w.promptEnum("Emoji mode", cfg.Features.EmojiMode, setupEmojiModes)
-	if err != nil {
-		return "", err
-	}
-	cfg.Features.EmojiMode = emojiMode
-
-	emojiProvider, err := w.promptEnum("Emoji provider", cfg.Features.EmojiProvider, setupEmojiProviders)
-	if err != nil {
-		return "", err
-	}
-	cfg.Features.EmojiProvider = emojiProvider
-
-	emoteMode, err := w.promptEnum("Emote mode", cfg.Features.EmoteMode, setupEmoteModes)
-	if err != nil {
-		return "", err
-	}
-	cfg.Features.EmoteMode = emoteMode
 
 	animationMode, err := w.promptEnum("Animation mode", cfg.Features.AnimationMode, setupAnimationModes)
 	if err != nil {

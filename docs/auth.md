@@ -37,8 +37,8 @@ The implemented config sources are, from highest to lowest priority:
 5. Defaults.
 
 `twi setup` is the current guided path for non-secret local configuration. It
-can write username, Twitch app client ID, default channels, image modes, mouse
-mode, emoji provider, and animation mode to `config.toml`, then either stop,
+can write username, Twitch app client ID, default channels, avatar mode, mouse
+mode, and animation mode to `config.toml`, then either stop,
 run `twi login`, or run `twi login --dry-run`.
 
 Suggested environment variables:

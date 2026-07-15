@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/worxbend/twi/internal/assets"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -14,7 +13,6 @@ func (m mockShellModel) debugAppStart(source string, channels int) {
 		slog.String("source", source),
 		slog.Int("channels", channels),
 		slog.String("animation_mode", m.animationMode),
-		slog.String("image_mode", m.imageMode),
 		slog.Bool("mouse_enabled", m.mouseEnabled),
 	)
 }
@@ -25,37 +23,6 @@ func (m mockShellModel) debugChatMessage(event string, msg twitch.ChatMessage) {
 
 func (m mockShellModel) debugConnectionState(event string, state ConnectionState) {
 	m.debugLogger.Log(context.Background(), event, connectionStateDebugAttrs(state)...)
-}
-
-func (m mockShellModel) debugAvatarLookupStart(count int) {
-	m.debugLogger.Log(context.Background(), "app.avatar_lookup.start", slog.Int("request_count", count))
-}
-
-func (m mockShellModel) debugAvatarLookupComplete(results []assets.AvatarResult, err error) {
-	found := 0
-	for _, result := range results {
-		if result.Found {
-			found++
-		}
-	}
-	attrs := []slog.Attr{
-		slog.Int("result_count", len(results)),
-		slog.Int("found_count", found),
-		slog.Bool("has_error", err != nil),
-	}
-	if err != nil {
-		attrs = append(attrs, slog.String("error", err.Error()))
-	}
-	m.debugLogger.Log(context.Background(), "app.avatar_lookup.complete", attrs...)
-}
-
-func (m mockShellModel) debugAssetBatchStart(count int) {
-	m.debugLogger.Log(context.Background(), "app.asset_batch.start", slog.Int("request_count", count))
-}
-
-func (m mockShellModel) debugAssetBatchComplete(results []assetPreparedMsg) {
-	attrs := assetBatchDebugAttrs(results)
-	m.debugLogger.Log(context.Background(), "app.asset_batch.complete", attrs...)
 }
 
 func (m mockShellModel) debugSendQueued(send queuedComposerSend) {
@@ -260,38 +227,4 @@ func sendResultDebugAttrs(result SendResult, err error) []slog.Attr {
 		attrs = append(attrs, slog.String("error", err.Error()))
 	}
 	return attrs
-}
-
-func assetBatchDebugAttrs(results []assetPreparedMsg) []slog.Attr {
-	var cacheHits, downloaded, canceled, failed, permanent, rendered int
-	for _, result := range results {
-		switch result.event.Kind {
-		case assets.EventCacheHit:
-			cacheHits++
-		case assets.EventDownloaded:
-			downloaded++
-		case assets.EventCanceled:
-			canceled++
-		case assets.EventFailed:
-			failed++
-		}
-		if result.permanent || isPermanentAssetFailure(result) {
-			permanent++
-		}
-		if result.err != nil || result.event.Err != nil {
-			failed++
-		}
-		if result.cell.Text != "" {
-			rendered++
-		}
-	}
-	return []slog.Attr{
-		slog.Int("result_count", len(results)),
-		slog.Int("cache_hit_count", cacheHits),
-		slog.Int("downloaded_count", downloaded),
-		slog.Int("canceled_count", canceled),
-		slog.Int("failed_count", failed),
-		slog.Int("permanent_failure_count", permanent),
-		slog.Int("rendered_count", rendered),
-	}
 }

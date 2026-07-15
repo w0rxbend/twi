@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted for MVP.
+Superseded. Kitty graphics image rendering was removed; twi now always renders text fallbacks (initials chips, badge labels, emote/emoji text). This record is kept for historical context and is no longer accurate as a description of current behavior.
 
 ## Context
 

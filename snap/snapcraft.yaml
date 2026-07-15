@@ -6,9 +6,8 @@ adopt-info: twi
 summary: Terminal Twitch chat client
 description: |
   twi is a terminal Twitch IRC chat client built with Bubble Tea. It supports
-  live multi-channel chat, inline terminal images (Kitty/Ghostty graphics
-  protocol), 13 built-in themes plus custom hex palettes, emote autocomplete,
-  and Twitch OAuth login.
+  live multi-channel chat, 13 built-in themes plus custom hex palettes, emote
+  autocomplete, and Twitch OAuth login.
 
   Run `twi chat --mock` for a credential-free demo, or `twi setup` for a
   guided path to live chat.

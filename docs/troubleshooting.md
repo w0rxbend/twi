@@ -36,9 +36,14 @@ http://localhost:1337/api/connect/twitch/callback
 
 Register that redirect URI on the Twitch app. On non-Unix builds, saved credentials are unsupported and login stops before opening the browser. Use environment variables or a private flat config file if you manually build for an unsupported platform.
 
-## Images Render As Text
+## Avatars, Badges, Emotes, And Emoji Render As Text
 
-Text fallbacks are expected when image mode is off, the terminal is not Kitty/Ghostty-compatible, cache paths are not writable, credentials for Twitch-backed assets are missing, downloads fail, image preparation fails, or manual Kitty/Ghostty validation has not been recorded for the environment.
+This is expected and is the only supported rendering mode: `twi` has no
+terminal-image rendering path. Avatars always show as an `[XY]` initials chip
+derived from the author's display name (or nothing when `avatar_mode =
+"off"`), badges as compact labels such as `[mod]`/`[sub]`/`[vip]`, Twitch
+emotes as their matched text token, and standard emoji as the native Unicode
+glyph.
 
 Use:
 
@@ -46,7 +51,8 @@ Use:
 go run ./cmd/twi doctor
 ```
 
-Look for terminal image capability, cache writability, live image-stack readiness, and configured image/avatar/emoji/emote modes.
+Look for the `avatar_mode` value under the reported feature modes; `off` and
+`initials` are the only accepted values.
 
 ## Docker Cannot Reach Twitch Credentials
 

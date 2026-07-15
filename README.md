@@ -15,7 +15,7 @@
 
 `twi` is a terminal Twitch chat client with taste. It is keyboard-first, fast to launch, friendly to low-drama terminals, and allergic to leaking your OAuth token.
 
-The project is currently an MVP-shaped Go app for Unix-like terminals and Docker: mock chat and diagnostics are ready without needing Twitch credentials; live Twitch IRC read/send, redacted debug logging, multi-channel UX, focus-aware Twitch event notifications, inline image plumbing, OAuth login, setup, and Unix restrictive credential-file persistence are shipped for their documented paths. Release binary/container packaging is available through the dry-run workflow. Credentialed Twitch release validation and manual Kitty/Ghostty image validation remain environment-dependent. Current manual terminal evidence is recorded in [docs/manual-validation.md](docs/manual-validation.md).
+The project is currently an MVP-shaped Go app for Unix-like terminals and Docker: mock chat and diagnostics are ready without needing Twitch credentials; live Twitch IRC read/send, redacted debug logging, multi-channel UX, focus-aware Twitch event notifications, text-based avatar/badge/emote/emoji rendering, OAuth login, setup, and Unix restrictive credential-file persistence are shipped for their documented paths. Release binary/container packaging is available through the dry-run workflow. Credentialed Twitch release validation remains environment-dependent. Current manual terminal evidence is recorded in [docs/manual-validation.md](docs/manual-validation.md).
 
 ```text
         +---------------------------------------------+
@@ -35,8 +35,8 @@ What makes this project different:
 
 - A real TUI shell with mock mode, multi-channel state, command palette, selected-message inspect, reply context, local filters, and resize-aware layouts.
 - Live Twitch IRC read/send plumbing behind internal interfaces, with startup token validation and redacted auth-refresh behavior.
-- Fallback-first rendering for avatars, badges, emotes, emoji, replies, mentions, moderation notices, and system events.
-- Async asset plumbing for Twitch/emoji metadata, downloads, cache records, image preparation, and Kitty-compatible rendering without blocking the UI.
+- Text-first rendering for avatars, badges, emotes, emoji, replies, mentions, moderation notices, and system events: initials chips, compact badge labels, matched emote tokens, and native Unicode emoji glyphs, with no inline-image rendering path.
+- Async asset plumbing for Twitch avatar/emote/badge metadata without blocking the UI.
 - A security posture that keeps OAuth tokens, refresh tokens, client secrets, callback values, and private config out of normal output and debug logs.
 
 ## Documentation
@@ -82,13 +82,6 @@ Check your setup:
 ```sh
 go run ./cmd/twi doctor
 docker run --rm twi:local doctor
-```
-
-In a Kitty/Ghostty-compatible graphics terminal, probe inline image drawing
-without Twitch credentials:
-
-```sh
-go run ./cmd/twi image-smoke
 ```
 
 Run the credential-free release packaging dry-run:
@@ -137,10 +130,10 @@ go run ./cmd/twi setup
 go run ./cmd/twi setup --non-interactive --username your_twitch_login --channel somechannel
 ```
 
-Setup updates username, Twitch app client ID, default channels, image modes,
-emoji provider, mouse mode, and animation mode. It does not ask for or write
-OAuth tokens, refresh tokens, callback codes, OAuth state, authorization URLs,
-or client secrets.
+Setup updates username, Twitch app client ID, default channels, avatar mode,
+mouse mode, and animation mode. It does not ask for or write OAuth tokens,
+refresh tokens, callback codes, OAuth state, authorization URLs, or client
+secrets.
 
 ```sh
 export TWI_TWITCH_USERNAME="your_twitch_login"
@@ -223,13 +216,13 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 | Mock chat | Ready | `twi chat --mock [--channel demo]` runs without Twitch credentials or network access. |
 | Multi-channel live IRC read/send | Partial | `twi chat --channel <channel> [--channel other]` validates startup credentials when Twitch OAuth validation is reachable, then can read, send, reply, and send `/me` actions for configured channels when env/config credentials or saved credentials on supported Unix platforms are present; broader live manual evidence remains future work. |
 | Config commands | Ready | `twi config show` prints effective flat config with secrets redacted; `twi config path` shows the default config path. |
-| Diagnostics | Ready | `twi doctor` checks config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache writability/pruning, image capability, live image-stack readiness, and feature modes. Live chat also preflights token validation before IRC startup when validation is reachable. |
+| Diagnostics | Ready | `twi doctor` checks config path, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, Twitch IRC reachability, terminal hints, cache writability/pruning, and feature modes. Live chat also preflights token validation before IRC startup when validation is reachable. |
 | Debug logging | Ready | Redacted JSON debug logs can be enabled with `debug_logging = true`, `TWI_DEBUG_LOG=true`, or `--debug-log` on chat, login, and doctor. Logs use curated fields for auth, transport, send, asset, and render diagnostics instead of raw struct or raw tag dumps. |
-| Avatar metadata | Partial | When live chat runs with `avatar_mode = "image"` plus Twitch API credentials, a writable cache, and Kitty-compatible image capability, visible author avatar URLs are batched through Helix Get Users, downloaded, prepared, and rendered through async asset events while initials remain stable on every failure path. |
-| Emote/badge metadata | Partial | Live startup can wire Twitch IRC fragment CDN URLs for emotes, Helix-backed fallback emote/badge metadata, the public downloader, disk cache, PNG preparer, and Kitty renderer behind config, cache, credential, and terminal gates while keeping compact badge labels and exact emote-token fallbacks stable. |
+| Avatar metadata | Partial | When live chat runs with `avatar_mode = "initials"` (the default) plus Twitch API credentials and a writable cache, visible author display names are batched through Helix Get Users to render a per-author `[XY]` initials chip; `avatar_mode = "off"` hides the chip. There is no image rendering path. |
+| Emote/badge metadata | Partial | Live startup can wire Twitch IRC fragment data for emotes and Helix-backed fallback emote/badge metadata behind config, cache, credential, and terminal gates, always rendering compact badge labels (for example `[mod]`, `[sub]`, `[vip]`) and matched emote text tokens (for example `Kappa`). |
 | Login/setup | Partial | `twi setup` creates or updates non-secret flat config values and can hand off to `twi login`; on supported Unix builds, `twi login` saves through the restrictive credential-file fallback. Non-Unix builds keep env/config credentials as the supported path. |
 | Multi-channel UX | Partial | Messages, unread counts, scroll, drafts, replies, sends, and local view filters are per-channel. Normal and wide terminals show a keyboard-first channel sidebar with connection indicators, unread counts, and filter markers; `ctrl+p` opens a keyboard command palette for common actions, panel toggles, channel switching, local filters, local clear, and live reconnect restart. Optional mouse support can scroll chat, click channels, focus the composer, and select messages. Twitch `USERNOTICE` events such as raids carry normalized event IDs; when the relevant chat is not active, the terminal is blurred, or another panel has focus, `twi` attempts a desktop system notification, falls back to a terminal bell, and shows a status-line notification summary. Selected messages can be inspected in a redacted diagnostics panel even when filters hide them from the chat view. Narrow terminals collapse channel state into the status line. Twitch IRC connect/reconnect/disconnect callbacks are connection-level and are shown on configured channel states rather than as independent per-channel transport events. Manual reconnect tears down the active live IRC transport before creating a fresh one while preserving per-channel UI state. |
-| Inline terminal images | Partial | Live startup installs the concrete resolver/downloader/disk-cache/emoji-provider/Twitch-metadata/preparer/Kitty-renderer stack when config, cache writability, terminal capability, and any API credentials required by the selected asset kinds allow it. IRC fragment-backed emotes use public CDN URLs without Twitch API credentials; avatars, badges, and fallback metadata still require their documented dependencies. Disabled, unsupported, missing-dependency, degraded, resolver failure, downloader failure, preparation failure, and render failure paths keep initials, badge labels, emote tokens, and Unicode emoji fallbacks. Manual Kitty/Ghostty validation remains pending. |
+| Text-only asset rendering | Ready | Avatars, badges, emotes, and emoji always render as text: `[XY]` initials chips (or nothing when `avatar_mode = "off"`), compact badge labels, matched emote text tokens, and native Unicode emoji glyphs. There is no image decode, cache, or terminal-graphics rendering path; missing metadata, missing credentials, or lookup failures simply keep the text fallback. |
 | Theming | Ready | 13 built-in presets (Claude, Codex, Btop, Nord, Dracula, Gruvbox, Solarized Dark, Monokai, One Dark, Tokyo Night, Catppuccin Mocha, Rose Pine, Mono) plus a custom hex palette apply across every widget, including the full terminal background. `ctrl+t` opens a btop-style settings view that live-previews a theme as you move the selection and persists it with `enter` (`esc` reverts); `twi profile list\|show\|set` manages the same setting from the CLI. |
 | Animation | Ready | A shared ~10fps clock (disabled when `animation_mode = "off"`) drives a pulsing LIVE/REC status-bar segment, a channel-switch flash, a typewriter reveal for command-palette results, and a ~2s animated startup splash (skippable by any keypress). |
 | Live status telemetry | Partial | The status bar shows real Twitch broadcast status via Helix "Get Streams" polling (LIVE + elapsed on-air time + viewer count) when `stream_status_mode` and Twitch API credentials allow it, otherwise OFFLINE; REC reflects `debug_logging`; CPU%/memory/FPS are twi's own process stats; "chat" bitrate is derived chat-message throughput, not stream encode bitrate. `--mock` simulates a fixed demo LIVE state. |
@@ -237,8 +230,7 @@ Do not paste real tokens into commits, screenshots, issue comments, terminal rec
 
 Manual validation evidence for the current environment is tracked in
 [docs/manual-validation.md](docs/manual-validation.md). Credentialed Twitch chat
-and real Kitty/Ghostty inline image drawing are only claimed when that document
-records a complete credential set or a compatible graphics terminal session.
+is only claimed when that document records a complete credential set.
 
 ## Controls
 
@@ -298,9 +290,6 @@ export TWI_DEFAULT_CHANNELS="somechannel"
 export TWI_ANIMATION_MODE="fast"
 export TWI_ENABLE_MOUSE="true"
 export TWI_AVATAR_MODE="initials"
-export TWI_EMOJI_MODE="image"
-export TWI_EMOJI_PROVIDER="twemoji"
-export TWI_EMOTE_MODE="image"
 export TWI_THEME_NAME="claude"
 export TWI_STREAM_STATUS_MODE="auto"
 export TWI_EMOTE_AUTOCOMPLETE_MODE="auto"
@@ -315,7 +304,7 @@ twi config path
 
 For a guided path, run `twi setup`. For automation or CI, use
 `twi setup --non-interactive` with flags such as `--username`, `--channel`,
-`--image-mode`, `--emoji-provider`, and `--animation-mode`.
+`--avatar-mode`, and `--animation-mode`.
 
 Example:
 
@@ -327,14 +316,8 @@ twitch_client_id = ""
 twitch_client_secret = ""
 twitch_redirect_url = ""
 default_channels = "somechannel"
-enable_kitty_images = true
 enable_mouse = true
-image_mode = "auto"
 avatar_mode = "initials"
-emoji_mode = "image"
-emoji_provider = "twemoji"
-emoji_url_template = ""
-emote_mode = "image"
 animation_mode = "fast"
 theme_name = "claude"
 theme_background = ""
@@ -418,8 +401,6 @@ claimed:
   real Twitch app, username, token set, and manual validation evidence.
 - Exact Docker CLI smokes need a Docker-enabled host; Podman-equivalent smokes
   do not replace the final Docker check.
-- Kitty/Ghostty inline image drawing is not claimed until a compatible graphics
-  terminal session is recorded in [docs/manual-validation.md](docs/manual-validation.md).
 - Refreshed IRC tokens are persisted only when the supported credential store
   is available; otherwise they remain in memory for the current process with a
   redacted warning.
@@ -485,9 +466,8 @@ go run ./cmd/twi config show
 git diff --check origin/main...HEAD
 ```
 
-Credentialed Twitch chat, Docker-only checks, and Kitty/Ghostty inline-image
-validation are manual or release-specific checks, not part of the default pull
-request gate.
+Credentialed Twitch chat and Docker-only checks are manual or release-specific
+checks, not part of the default pull request gate.
 
 If your PR targets a different base branch, replace `origin/main` with that
 branch. Use plain `git diff --check` for uncommitted local changes.
@@ -507,7 +487,7 @@ GOTOOLCHAIN=local GOCACHE=/tmp/twi-gocache GOMODCACHE=/tmp/twi-gomodcache go tes
 
 ## Project Direction
 
-Near-term work is focused on release evidence, credentialed Twitch validation when credentials are available, and manual Kitty/Ghostty image validation when a compatible graphics terminal is available. The product source of truth lives in [docs/index.md](docs/index.md) and the product docs under `docs/product/`.
+Near-term work is focused on release evidence and credentialed Twitch validation when credentials are available. The product source of truth lives in [docs/index.md](docs/index.md) and the product docs under `docs/product/`.
 
 ## License
 

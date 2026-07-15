@@ -86,7 +86,7 @@ go run ./cmd/twi setup
 Automation-friendly setup:
 
 ```sh
-go run ./cmd/twi setup --non-interactive --username your_twitch_login --channel somechannel --image-mode auto --emoji-provider twemoji --animation-mode fast
+go run ./cmd/twi setup --non-interactive --username your_twitch_login --channel somechannel --avatar-mode initials --animation-mode fast
 ```
 
 Setup does not ask for or write OAuth tokens, refresh tokens, callback codes,
@@ -165,11 +165,7 @@ twitch_username = "your_twitch_login"
 twitch_oauth_token = ""
 twitch_refresh_token = ""
 default_channels = "somechannel"
-enable_kitty_images = true
-image_mode = "auto"
 avatar_mode = "initials"
-emoji_mode = "image"
-emote_mode = "image"
 animation_mode = "fast"
 ```
 
@@ -194,7 +190,7 @@ Docker:
 docker run --rm twi:local doctor
 ```
 
-`doctor` reports config, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, terminal hints, image fallback state, cache writability, and Twitch IRC reachability. It does not print raw OAuth tokens or client secrets.
+`doctor` reports config, credential presence, Twitch OAuth identity/expiry/scope validation, refresh availability, username mismatch, terminal hints, cache writability, and Twitch IRC reachability. It does not print raw OAuth tokens or client secrets.
 
 ## 7. Use The Dotfile Shape
 
@@ -232,4 +228,4 @@ go build -o bin/twi ./cmd/twi
 
 Twitch IRC connection status is connection-level: Multi-channel live mode joins each configured channel, but Twitch IRC connect, reconnect, and disconnect callbacks are not independent per-channel events.
 
-Images look like text: Expected when image mode is disabled, unsupported by the terminal, degraded, missing dependencies, still loading, or failed. Inline terminal image plumbing is partial and live resolver wiring is current, but manual Kitty/Ghostty validation is still planned; current rendering keeps stable text, initials, Unicode, badge, and emote-token fallbacks.
+Avatars, badges, emotes, and emoji look like text: this is expected and is the only rendering mode. `twi` has no terminal-image rendering path, so authors always show a `[XY]` initials chip (or nothing when `avatar_mode = "off"`), badges show compact labels, Twitch emotes show their matched text token, and standard emoji show the native Unicode glyph.

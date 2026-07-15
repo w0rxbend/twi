@@ -112,64 +112,22 @@ func TestLoadDebugLoggingFromFileEnvAndOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadEmojiProviderConfigAndRedactsUnsafeTemplate(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "config.toml")
-	content := strings.Join([]string{
-		`emoji_provider = "custom"`,
-		`emoji_url_template = "https://emoji.example/assets/{id}.png"`,
-	}, "\n")
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg, err := Load([]string{
-		"TWI_EMOJI_PROVIDER=twemoji",
-		"TWI_EMOJI_URL_TEMPLATE=https://cdn.example/{id}.png?access_token=secret",
-	}, Overrides{ConfigPath: path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Features.EmojiProvider != "twemoji" {
-		t.Fatalf("EmojiProvider = %q, want env override twemoji", cfg.Features.EmojiProvider)
-	}
-	if cfg.Features.EmojiURLTemplate != "https://cdn.example/{id}.png?access_token=secret" {
-		t.Fatalf("EmojiURLTemplate = %q, want env override", cfg.Features.EmojiURLTemplate)
-	}
-	output := cfg.RedactedString()
-	if !strings.Contains(output, `emoji_provider = "twemoji"`) {
-		t.Fatalf("redacted config missing emoji provider:\n%s", output)
-	}
-	if strings.Contains(output, "access_token=secret") {
-		t.Fatalf("redacted config leaked unsafe emoji URL template:\n%s", output)
-	}
-	if !strings.Contains(output, `emoji_url_template = "[redacted]"`) {
-		t.Fatalf("redacted config did not redact unsafe emoji URL template:\n%s", output)
-	}
-
-	cfg.Features.EmojiURLTemplate = "https://user:secret@emoji.example/{id}.png"
-	if output := cfg.RedactedString(); strings.Contains(output, "user:secret") || !strings.Contains(output, `emoji_url_template = "[redacted]"`) {
-		t.Fatalf("redacted config did not redact URL userinfo:\n%s", output)
-	}
-}
-
 func TestRedactedStringDoesNotLeakSecrets(t *testing.T) {
 	cfg := Default()
 	cfg.Path = filepath.Join(t.TempDir(), "config.toml?state=path-state-secret&code=path-code-secret")
 	cfg.Twitch.OAuthToken = "oauth:secret"
 	cfg.Twitch.RefreshToken = "refresh-secret"
 	cfg.Twitch.ClientSecret = "client-secret"
-	cfg.Features.EmojiURLTemplate = "https://cdn.example/{id}.png?client_secret=secret&authorization_code=auth-code-secret&state=state-secret&code=code-secret"
 
 	output := cfg.RedactedString()
 
-	for _, secret := range []string{"oauth:secret", "refresh-secret", "client-secret", "client_secret=secret", "auth-code-secret", "state-secret", "code-secret", "path-state-secret", "path-code-secret"} {
+	for _, secret := range []string{"oauth:secret", "refresh-secret", "client-secret", "path-state-secret", "path-code-secret"} {
 		if strings.Contains(output, secret) {
 			t.Fatalf("redacted output leaked %q: %s", secret, output)
 		}
 	}
-	if strings.Count(output, redacted) != 5 {
-		t.Fatalf("redacted output = %q, want five redactions", output)
+	if strings.Count(output, redacted) != 4 {
+		t.Fatalf("redacted output = %q, want four redactions", output)
 	}
 }
 
@@ -329,13 +287,8 @@ func TestWriteNonSecretFileCreatesConfigWithoutSecrets(t *testing.T) {
 	cfg.Twitch.ClientID = "client-id"
 	cfg.Twitch.ClientSecret = "client-private"
 	cfg.DefaultChannels = []string{"one", "#two"}
-	cfg.Features.EnableKittyImages = false
 	cfg.Features.EnableMouse = false
-	cfg.Features.ImageMode = "normal"
-	cfg.Features.AvatarMode = "image"
-	cfg.Features.EmojiMode = "image"
-	cfg.Features.EmojiProvider = "custom"
-	cfg.Features.EmoteMode = "image"
+	cfg.Features.AvatarMode = "off"
 	cfg.Features.AnimationMode = "reduced"
 
 	if err := WriteNonSecretFile(path, cfg); err != nil {
@@ -350,13 +303,8 @@ func TestWriteNonSecretFileCreatesConfigWithoutSecrets(t *testing.T) {
 		`twitch_username = "viewer"`,
 		`twitch_client_id = "client-id"`,
 		`default_channels = "one,two"`,
-		`enable_kitty_images = false`,
 		`enable_mouse = false`,
-		`image_mode = "normal"`,
-		`avatar_mode = "image"`,
-		`emoji_mode = "image"`,
-		`emoji_provider = "custom"`,
-		`emote_mode = "image"`,
+		`avatar_mode = "off"`,
 		`animation_mode = "reduced"`,
 	} {
 		if !strings.Contains(output, want) {
@@ -500,7 +448,6 @@ func TestWriteNonSecretFileUpdatesAllowedKeysAndPreservesExistingSecrets(t *test
 		`unknown_key = "kept"`,
 		`twitch_client_id = "client-id"`,
 		`default_channels = "newchan"`,
-		`emoji_provider = "twemoji"`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("updated config missing %q:\n%s", want, output)

@@ -2,12 +2,9 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
-	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,7 +15,6 @@ import (
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/debuglog"
 	"github.com/worxbend/twi/internal/render"
-	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
 	"golang.org/x/term"
@@ -29,24 +25,12 @@ const (
 	defaultMockHeight  = 22
 	mockIncomingDelay  = 650 * time.Millisecond
 	mockRevealDelay    = 20 * time.Millisecond
-	avatarLookupDelay  = 50 * time.Millisecond
-	assetLookupDelay   = 35 * time.Millisecond
-	assetWorkTimeout   = 10 * time.Second
-	assetWorkQueueMax  = 24
-	assetWorkParallel  = 4
-	assetFailureRetry  = 5 * time.Minute
 	sidebarMinWidth    = 72
 	sidebarNormalSize  = 18
 	sidebarWideSize    = 24
 	sceneFlashDuration = 180 * time.Millisecond
 	splashDuration     = 2 * time.Second
 )
-
-// AvatarResolver is the app-facing boundary for batched author avatar
-// metadata. Implementations must not perform network work from View.
-type AvatarResolver interface {
-	ResolveAvatars(context.Context, []assets.AvatarRequest) ([]assets.AvatarResult, error)
-}
 
 // StreamStatusResolver is the app-facing boundary for real Twitch broadcast
 // status (Twitch Helix "Get Streams"). Implementations must not perform
@@ -56,18 +40,13 @@ type StreamStatusResolver interface {
 }
 
 type ClientOptions struct {
-	AvatarResolver       AvatarResolver
-	AssetResolver        assets.EventResolver
-	AssetKinds           map[string]bool
-	ImagePreparer        render.ImagePreparer
-	ImageRenderer        render.ImageRenderer
 	SystemNotifier       SystemNotifier
 	StreamStatusResolver StreamStatusResolver
 	EmoteIndex           *assets.EmoteIndex
 	DebugLogger          debuglog.Logger
 	ChannelManager       twitch.ChannelManager
 	GameLookup           twitch.GameLookup
-	SelfUserLookup       twitch.UserLookup
+	UserLookup           twitch.UserLookup
 }
 
 type fdWriter interface {
@@ -82,18 +61,9 @@ type mockShellModel struct {
 	mentionLogin              string
 	animationMode             string
 	mouseEnabled              bool
-	imageMode                 string
 	avatarMode                string
-	emojiMode                 string
-	emoteMode                 string
-	imageCapability           render.ImageCapabilityDecision
 	sourceDetail              string
 	client                    ChatClient
-	avatarResolver            AvatarResolver
-	assetResolver             assets.EventResolver
-	assetKinds                map[string]bool
-	imagePreparer             render.ImagePreparer
-	imageRenderer             render.ImageRenderer
 	systemNotifier            SystemNotifier
 	debugLogger               debuglog.Logger
 	incoming                  []twitch.ChatMessage
@@ -129,16 +99,6 @@ type mockShellModel struct {
 	memoryMB                  float64
 	chatByteSamples           []chatByteSample
 	revealTickScheduled       bool
-	avatarLookupScheduled     bool
-	avatarLookupInFlight      bool
-	avatarRequested           map[string]bool
-	assetLookupScheduled      bool
-	assetLookupInFlight       bool
-	assetRetryScheduled       bool
-	assetRequested            map[string]bool
-	assetRetryAfter           map[string]time.Time
-	assetPermanentFailure     map[assetPermanentFailureKey]struct{}
-	imageCells                map[render.ImageCellKey]render.ImageCell
 	emoteIndex                *assets.EmoteIndex
 	emoteEntries              map[string][]assets.EmoteEntry
 	emoteEntriesRequested     map[string]bool
@@ -146,7 +106,7 @@ type mockShellModel struct {
 	activeTab                 shellTab
 	channelManager            twitch.ChannelManager
 	gameLookup                twitch.GameLookup
-	selfUserLookup            twitch.UserLookup
+	userLookup                twitch.UserLookup
 	streamInfo                streamInfoState
 }
 
@@ -270,46 +230,6 @@ type mockIncomingMessageMsg struct {
 
 type mockAnimationTickMsg struct{}
 
-type avatarLookupTickMsg struct{}
-
-type avatarLookupResolvedMsg struct {
-	results []assets.AvatarResult
-	err     error
-}
-
-type assetLookupTickMsg struct{}
-
-type assetPreparedMsg struct {
-	event      assets.Event
-	spec       render.ImageSpec
-	cell       render.ImageCell
-	err        error
-	permanent  bool
-	failureKey assetPermanentFailureKey
-}
-
-type assetPreparedBatchMsg struct {
-	results []assetPreparedMsg
-}
-
-type assetPermanentFailureKey struct {
-	AssetKind             string
-	AssetID               string
-	ChannelIdentity       string
-	RecordKind            string
-	RecordID              string
-	RecordUnsafe          bool
-	PayloadIdentity       string
-	PayloadIdentityUnsafe bool
-	MediaType             string
-	MediaTypeUnsafe       bool
-	RecordWidthCells      int
-	RecordHeightCells     int
-	FetchedAtUnixNano     int64
-	RequestedWidthCells   int
-	RequestedHeightCells  int
-}
-
 type chatClientMessageMsg struct {
 	message twitch.ChatMessage
 	ok      bool
@@ -347,7 +267,7 @@ func RunMockWithOptions(w io.Writer, cfg config.Config, opts ClientOptions) erro
 		channel = cfg.DefaultChannels[0]
 	}
 
-	model := newMockShellModelWithCapability(channel, cfg, runtimeImageCapability(cfg))
+	model := newMockShellModelWithClock(channel, cfg, nil)
 	model.debugLogger = opts.DebugLogger
 	model.debugAppStart("mock", len(configuredChannels(channel, cfg.DefaultChannels)))
 	if !isInteractiveTerminal(w) {
@@ -391,7 +311,7 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 	if interactive && opts.SystemNotifier == nil {
 		opts.SystemNotifier = newDefaultSystemNotifier(w)
 	}
-	model := newLiveShellModelWithOptionsAndCapability(channel, cfg, client, opts, runtimeImageCapability(cfg))
+	model := newLiveShellModelWithClockAndOptions(channel, cfg, client, nil, opts)
 	model.debugAppStart("live", len(configuredChannels(channel, cfg.DefaultChannels)))
 	if !interactive {
 		_, err := fmt.Fprintln(w, model.View())
@@ -430,14 +350,6 @@ func newMockShellModel(channel string, cfg config.Config) mockShellModel {
 }
 
 func newMockShellModelWithClock(channel string, cfg config.Config, clock animation.Clock) mockShellModel {
-	return newMockShellModelWithClockAndCapability(channel, cfg, clock, deterministicImageCapability(cfg))
-}
-
-func newMockShellModelWithCapability(channel string, cfg config.Config, capability render.ImageCapabilityDecision) mockShellModel {
-	return newMockShellModelWithClockAndCapability(channel, cfg, nil, capability)
-}
-
-func newMockShellModelWithClockAndCapability(channel string, cfg config.Config, clock animation.Clock, capability render.ImageCapabilityDecision) mockShellModel {
 	connectedAt := time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)
 	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
 	channels := newChannelStateSet(configuredChannels(channel, cfg.DefaultChannels), animationConfig, clock)
@@ -464,11 +376,7 @@ func newMockShellModelWithClockAndCapability(channel string, cfg config.Config, 
 		mentionLogin:    cfg.Twitch.Username,
 		animationMode:   string(animationConfig.Mode),
 		mouseEnabled:    cfg.Features.EnableMouse,
-		imageMode:       capability.Mode,
-		avatarMode:      capability.Avatar.Mode,
-		emojiMode:       capability.Emoji.Mode,
-		emoteMode:       capability.Emote.Mode,
-		imageCapability: capability,
+		avatarMode:      cfg.Features.AvatarMode,
 		sourceDetail:    "mock source: no network",
 		incoming:        incomingMockMessages(channels.activeName(), connectedAt),
 		width:           defaultMockWidth,
@@ -501,15 +409,7 @@ func newLiveShellModelWithClock(channel string, cfg config.Config, client ChatCl
 	return newLiveShellModelWithClockAndOptions(channel, cfg, client, clock, ClientOptions{})
 }
 
-func newLiveShellModelWithOptionsAndCapability(channel string, cfg config.Config, client ChatClient, opts ClientOptions, capability render.ImageCapabilityDecision) mockShellModel {
-	return newLiveShellModelWithClockOptionsAndCapability(channel, cfg, client, nil, opts, capability)
-}
-
 func newLiveShellModelWithClockAndOptions(channel string, cfg config.Config, client ChatClient, clock animation.Clock, opts ClientOptions) mockShellModel {
-	return newLiveShellModelWithClockOptionsAndCapability(channel, cfg, client, clock, opts, deterministicImageCapability(cfg))
-}
-
-func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.Config, client ChatClient, clock animation.Clock, opts ClientOptions, capability render.ImageCapabilityDecision) mockShellModel {
 	animationConfig := mockAnimationConfig(cfg.Features.AnimationMode)
 	channels := newChannelStateSet(configuredChannels(channel, cfg.DefaultChannels), animationConfig, clock)
 	active := channels.activeState()
@@ -525,32 +425,18 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		mentionLogin:          cfg.Twitch.Username,
 		animationMode:         string(animationConfig.Mode),
 		mouseEnabled:          cfg.Features.EnableMouse,
-		imageMode:             capability.Mode,
-		avatarMode:            capability.Avatar.Mode,
-		emojiMode:             capability.Emoji.Mode,
-		emoteMode:             capability.Emote.Mode,
-		imageCapability:       capability,
+		avatarMode:            cfg.Features.AvatarMode,
 		sourceDetail:          "live IRC",
 		client:                client,
-		avatarResolver:        opts.AvatarResolver,
-		assetResolver:         opts.AssetResolver,
-		assetKinds:            cloneAssetKinds(opts.AssetKinds),
-		imagePreparer:         opts.ImagePreparer,
-		imageRenderer:         opts.ImageRenderer,
 		systemNotifier:        opts.SystemNotifier,
 		streamStatusResolver:  opts.StreamStatusResolver,
 		emoteIndex:            opts.EmoteIndex,
 		channelManager:        opts.ChannelManager,
 		gameLookup:            opts.GameLookup,
-		selfUserLookup:        opts.SelfUserLookup,
+		userLookup:            opts.UserLookup,
 		emoteEntries:          make(map[string][]assets.EmoteEntry),
 		emoteEntriesRequested: make(map[string]bool),
 		debugLogger:           opts.DebugLogger,
-		avatarRequested:       make(map[string]bool),
-		assetRequested:        make(map[string]bool),
-		assetRetryAfter:       make(map[string]time.Time),
-		assetPermanentFailure: make(map[assetPermanentFailureKey]struct{}),
-		imageCells:            make(map[render.ImageCellKey]render.ImageCell),
 		width:                 defaultMockWidth,
 		height:                defaultMockHeight,
 		focus:                 mockFocusChat,
@@ -558,19 +444,6 @@ func newLiveShellModelWithClockOptionsAndCapability(channel string, cfg config.C
 		debugRecording:        cfg.Debug.Enabled,
 		effectiveConfig:       cfg,
 	}
-}
-
-func runtimeImageCapability(cfg config.Config) render.ImageCapabilityDecision {
-	cacheWritable := false
-	cacheDir, err := config.DefaultCacheDir()
-	if err == nil && storage.ProbeWritableDir(cacheDir) == nil {
-		cacheWritable = true
-	}
-	return render.DecideImageCapabilities(cfg.Features, render.DetectTerminalImageSignals(os.Environ()), cacheWritable)
-}
-
-func deterministicImageCapability(cfg config.Config) render.ImageCapabilityDecision {
-	return render.DecideImageCapabilities(cfg.Features, render.TerminalImageSignals{}, true)
 }
 
 func seededMockMessages(channel string, startedAt time.Time) []twitch.ChatMessage {
@@ -889,43 +762,6 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if result.Changed {
 			return m.withAsyncAssetCommands(nil)
 		}
-	case avatarLookupTickMsg:
-		m.avatarLookupScheduled = false
-		requests := m.pendingAvatarRequests()
-		if len(requests) == 0 || m.avatarResolver == nil {
-			return m, nil
-		}
-		m.debugAvatarLookupStart(len(requests))
-		m.markAvatarRequests(requests)
-		m.avatarLookupInFlight = true
-		return m, m.resolveAvatarCommand(requests)
-	case avatarLookupResolvedMsg:
-		m.avatarLookupInFlight = false
-		m.applyAvatarResults(msg.results)
-		m.debugAvatarLookupComplete(msg.results, msg.err)
-		m.clampScroll()
-		if msg.err != nil {
-			return m, nil
-		}
-		return m.withAsyncAssetCommands(nil)
-	case assetLookupTickMsg:
-		m.assetLookupScheduled = false
-		m.assetRetryScheduled = false
-		requests := m.pendingAssetRequests()
-		if len(requests) == 0 || m.assetResolver == nil || m.imageRenderer == nil {
-			return m, nil
-		}
-		m.debugAssetBatchStart(len(requests))
-		m.markAssetRequests(requests)
-		m.assetLookupInFlight = true
-		return m, m.resolveAssetsCommand(requests)
-	case assetPreparedBatchMsg:
-		m.assetLookupInFlight = false
-		m.applyAssetResults(msg.results)
-		m.debugAssetBatchComplete(msg.results)
-		m.refreshActiveRevealRows()
-		m.clampScroll()
-		return m.withAsyncAssetCommands(nil)
 	}
 	return m, nil
 }
@@ -1009,7 +845,7 @@ func (m mockShellModel) statusLine(width int) string {
 	}
 	right := ""
 	if width >= 64 {
-		right = fmt.Sprintf(" focus=%s animation=%s images=%s", m.focusName(), m.animationMode, m.imageMode)
+		right = fmt.Sprintf(" focus=%s animation=%s", m.focusName(), m.animationMode)
 	} else if width >= 42 {
 		right = fmt.Sprintf(" focus=%s", m.focusName())
 	}
@@ -2121,13 +1957,10 @@ func (m *mockShellModel) scheduleRevealTick() tea.Cmd {
 	})
 }
 
+// withAsyncAssetCommands schedules the async lookups that keep channel
+// emote autocomplete current (broadcaster ID, then that channel's emote
+// index) alongside whatever other commands the caller already produced.
 func (m *mockShellModel) withAsyncAssetCommands(cmds ...tea.Cmd) (tea.Model, tea.Cmd) {
-	if cmd := m.scheduleAvatarLookup(); cmd != nil {
-		cmds = append(cmds, cmd)
-	}
-	if cmd := m.scheduleAssetLookup(); cmd != nil {
-		cmds = append(cmds, cmd)
-	}
 	if cmd := m.scheduleBroadcasterIDLookup(); cmd != nil {
 		cmds = append(cmds, cmd)
 	}
@@ -2148,722 +1981,6 @@ func batchNonNil(cmds ...tea.Cmd) tea.Cmd {
 		return nil
 	}
 	return tea.Batch(nonNil...)
-}
-
-func (m *mockShellModel) scheduleAvatarLookup() tea.Cmd {
-	if m.avatarResolver == nil || m.avatarLookupScheduled || m.avatarLookupInFlight || !m.imageCapability.Avatar.Active {
-		return nil
-	}
-	if len(m.pendingAvatarRequests()) == 0 {
-		return nil
-	}
-	m.avatarLookupScheduled = true
-	return tea.Tick(avatarLookupDelay, func(time.Time) tea.Msg {
-		return avatarLookupTickMsg{}
-	})
-}
-
-func (m mockShellModel) resolveAvatarCommand(requests []assets.AvatarRequest) tea.Cmd {
-	resolver := m.avatarResolver
-	return func() tea.Msg {
-		results, err := resolver.ResolveAvatars(context.Background(), requests)
-		return avatarLookupResolvedMsg{results: results, err: err}
-	}
-}
-
-func (m *mockShellModel) markAvatarRequests(requests []assets.AvatarRequest) {
-	if m.avatarRequested == nil {
-		m.avatarRequested = make(map[string]bool)
-	}
-	for _, req := range requests {
-		if key := avatarRequestKey(req); key != "" {
-			m.avatarRequested[key] = true
-		}
-	}
-}
-
-func (m mockShellModel) pendingAvatarRequests() []assets.AvatarRequest {
-	if m.avatarResolver == nil || !m.imageCapability.Avatar.Active {
-		return nil
-	}
-	seen := make(map[string]bool)
-	requests := []assets.AvatarRequest{}
-	for _, message := range m.visibleAvatarMessages() {
-		if strings.TrimSpace(message.AvatarURL) != "" {
-			continue
-		}
-		req := assets.AvatarRequest{
-			UserID:      message.AuthorID,
-			UserLogin:   message.AuthorLogin,
-			DisplayName: message.DisplayName,
-		}
-		key := avatarRequestKey(req)
-		if key == "" || seen[key] || m.avatarRequested[key] {
-			continue
-		}
-		seen[key] = true
-		requests = append(requests, req)
-	}
-	return requests
-}
-
-func (m mockShellModel) visibleAvatarMessages() []twitch.ChatMessage {
-	active := m.activeChannelState()
-	layout := m.layout()
-	if layout.chatContentHeight <= 0 {
-		return nil
-	}
-	blocks := m.visibleChatRowBlocks(layout)
-	totalRows := chatRowBlockCount(blocks)
-
-	start := totalRows - layout.chatContentHeight - active.scrollOffset
-	if start < 0 {
-		start = 0
-	}
-	end := start + layout.chatContentHeight
-	messages := make([]twitch.ChatMessage, 0, layout.chatContentHeight)
-	cursor := 0
-	for _, block := range blocks {
-		next := cursor + chatRowBlockRowCount(block)
-		if rangesOverlap(cursor, next, start, end) {
-			messages = append(messages, block.message)
-		}
-		cursor = next
-	}
-	return messages
-}
-
-func rangesOverlap(startA, endA, startB, endB int) bool {
-	return startA < endB && startB < endA
-}
-
-func (m *mockShellModel) applyAvatarResults(results []assets.AvatarResult) {
-	for _, result := range results {
-		if !result.Found || strings.TrimSpace(result.AvatarURL) == "" {
-			continue
-		}
-		for _, state := range m.channels.states {
-			for i := range state.messages {
-				applyAvatarToMessage(&state.messages[i], result)
-			}
-			for id, message := range state.activeMessages {
-				applyAvatarToMessage(&message, result)
-				state.activeMessages[id] = message
-			}
-		}
-	}
-}
-
-func applyAvatarToMessage(message *twitch.ChatMessage, result assets.AvatarResult) {
-	if message == nil || strings.TrimSpace(message.AvatarURL) != "" {
-		return
-	}
-	if !avatarResultMatchesMessage(result, *message) {
-		return
-	}
-	message.AvatarURL = result.AvatarURL
-	if strings.TrimSpace(message.AuthorID) == "" {
-		message.AuthorID = result.UserID
-	}
-}
-
-func avatarResultMatchesMessage(result assets.AvatarResult, message twitch.ChatMessage) bool {
-	if result.UserID != "" && message.AuthorID != "" {
-		return result.UserID == message.AuthorID
-	}
-	if result.UserLogin != "" && message.AuthorLogin != "" {
-		return strings.EqualFold(result.UserLogin, message.AuthorLogin)
-	}
-	if result.DisplayName != "" && message.DisplayName != "" {
-		return strings.EqualFold(result.DisplayName, message.DisplayName)
-	}
-	return false
-}
-
-func avatarRequestKey(req assets.AvatarRequest) string {
-	key := assets.AvatarCacheKey(req)
-	if key.ID == "" {
-		return ""
-	}
-	return key.Kind + "\x00" + key.ID
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func (m *mockShellModel) scheduleAssetLookup() tea.Cmd {
-	if m.assetResolver == nil || m.imageRenderer == nil || m.assetLookupScheduled || m.assetLookupInFlight {
-		return nil
-	}
-	requests, retryAt := m.pendingAssetRequestsAt(time.Now())
-	if len(requests) == 0 {
-		if !retryAt.IsZero() && !m.assetRetryScheduled {
-			delay := time.Until(retryAt)
-			if delay < assetLookupDelay {
-				delay = assetLookupDelay
-			}
-			m.assetRetryScheduled = true
-			return tea.Tick(delay, func(time.Time) tea.Msg {
-				return assetLookupTickMsg{}
-			})
-		}
-		return nil
-	}
-	m.assetLookupScheduled = true
-	return tea.Tick(assetLookupDelay, func(time.Time) tea.Msg {
-		return assetLookupTickMsg{}
-	})
-}
-
-func (m mockShellModel) resolveAssetsCommand(requests []assets.Request) tea.Cmd {
-	resolver := m.assetResolver
-	preparer := m.imagePreparer
-	renderer := m.imageRenderer
-	permanentFailures := cloneAssetPermanentFailures(m.assetPermanentFailure)
-	requests = boundedAssetRequests(requests, assetWorkQueueMax)
-	return func() tea.Msg {
-		results := resolveAssetRequests(context.Background(), requests, resolver, preparer, renderer, permanentFailures)
-		return assetPreparedBatchMsg{results: results}
-	}
-}
-
-func resolveAssetRequests(ctx context.Context, requests []assets.Request, resolver assets.EventResolver, preparer render.ImagePreparer, renderer render.ImageRenderer, permanentFailures map[assetPermanentFailureKey]struct{}) []assetPreparedMsg {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	requests = boundedAssetRequests(requests, assetWorkQueueMax)
-	if len(requests) == 0 {
-		return nil
-	}
-	results := make([]assetPreparedMsg, len(requests))
-	jobs := make(chan int)
-	var wg sync.WaitGroup
-	for i := 0; i < assetWorkerCount(len(requests)); i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for index := range jobs {
-				results[index] = resolveAssetRequest(ctx, requests[index], resolver, preparer, renderer, permanentFailures)
-			}
-		}()
-	}
-	for i := range requests {
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
-	return results
-}
-
-func resolveAssetRequest(ctx context.Context, request assets.Request, resolver assets.EventResolver, preparer render.ImagePreparer, renderer render.ImageRenderer, permanentFailures map[assetPermanentFailureKey]struct{}) assetPreparedMsg {
-	workCtx, cancel := context.WithTimeout(ctx, assetWorkTimeout)
-	defer cancel()
-
-	event := resolver.Resolve(workCtx, request)
-	spec := imageSpecFromAssetRequest(request, event)
-	result := assetPreparedMsg{event: event, spec: spec}
-	if event.Kind != assets.EventCacheHit && event.Kind != assets.EventDownloaded {
-		return result
-	}
-	if key, ok := assetPermanentFailureKeyForEvent(event, spec); ok {
-		if _, failed := permanentFailures[key]; failed {
-			result.permanent = true
-			result.failureKey = key
-			return result
-		}
-	}
-	record := event.Record
-	if preparer != nil {
-		prepared, err := preparer.PrepareImage(workCtx, record, spec)
-		if err != nil {
-			result.err = err
-			return result
-		}
-		record = prepared
-	}
-	cell, err := renderer.RenderImage(workCtx, record, spec)
-	result.cell = cell
-	result.err = err
-	return result
-}
-
-func boundedAssetRequests(requests []assets.Request, limit int) []assets.Request {
-	if limit <= 0 || len(requests) <= limit {
-		return requests
-	}
-	return requests[:limit]
-}
-
-func assetWorkerCount(requestCount int) int {
-	if requestCount <= 0 {
-		return 0
-	}
-	if requestCount < assetWorkParallel {
-		return requestCount
-	}
-	return assetWorkParallel
-}
-
-func imageSpecFromAssetRequest(request assets.Request, event assets.Event) render.ImageSpec {
-	ref := event.Ref
-	if ref.Kind == "" && event.Record.Key.Kind != "" {
-		ref.Kind = event.Record.Key.Kind
-		ref.ID = event.Record.Key.ID
-	}
-	if ref.Kind == "" {
-		ref = request.Ref
-	}
-	return render.ImageSpec{
-		Ref:         ref,
-		Channel:     request.Channel,
-		ChannelID:   request.ChannelID,
-		WidthCells:  request.WidthCells,
-		HeightCells: request.HeightCells,
-		Fallback:    request.Fallback,
-	}
-}
-
-func (m *mockShellModel) markAssetRequests(requests []assets.Request) {
-	if m.assetRequested == nil {
-		m.assetRequested = make(map[string]bool)
-	}
-	for _, request := range requests {
-		if request.ID != "" {
-			m.assetRequested[request.ID] = true
-		}
-	}
-}
-
-func (m mockShellModel) pendingAssetRequests() []assets.Request {
-	requests, _ := m.pendingAssetRequestsAt(time.Now())
-	return requests
-}
-
-func (m mockShellModel) pendingAssetRequestsAt(now time.Time) ([]assets.Request, time.Time) {
-	if m.assetResolver == nil || m.imageRenderer == nil || !m.imageCapabilityHasActiveAssets() {
-		return nil, time.Time{}
-	}
-	layout := m.layout()
-	if layout.chatContentHeight <= 0 {
-		return nil, time.Time{}
-	}
-	rowWidth := m.chatRowWidth(layout)
-
-	seen := make(map[string]bool)
-	requests := []assets.Request{}
-	var nextRetry time.Time
-visibleMessages:
-	for _, message := range m.visibleAssetMessages() {
-		for _, row := range render.Rows(message, m.renderOptions(rowWidth)) {
-			for _, fragment := range row.Fragments {
-				request, ok := m.assetRequestForFragment(message, fragment)
-				if !ok || seen[request.ID] {
-					continue
-				}
-				if m.assetRequested[request.ID] {
-					retryAt, hasRetry := m.assetRetryAfter[request.ID]
-					if !hasRetry || now.Before(retryAt) {
-						if hasRetry {
-							nextRetry = earliestNonZeroTime(nextRetry, retryAt)
-						}
-						continue
-					}
-				}
-				seen[request.ID] = true
-				requests = append(requests, request)
-				if len(requests) >= assetWorkQueueMax {
-					break visibleMessages
-				}
-			}
-		}
-	}
-	return requests, nextRetry
-}
-
-func (m mockShellModel) assetRequestForFragment(message twitch.ChatMessage, fragment render.Fragment) (assets.Request, bool) {
-	if !m.assetFragmentEnabled(fragment) {
-		return assets.Request{}, false
-	}
-	key, ok := render.ImageCellKeyForRefInChannel(fragment.Ref, message.ChannelID, message.Channel)
-	if !ok {
-		return assets.Request{}, false
-	}
-	if _, ok := m.imageCells[key]; ok {
-		if cell := m.imageCells[key]; cell.Text != "" && cell.WidthCells == fragment.Width() {
-			return assets.Request{}, false
-		}
-	}
-	widthCells := fragment.Width()
-	request := assets.Request{
-		ID:          assetRequestID(fragment.Ref, message.ChannelID, message.Channel, widthCells, 1),
-		Ref:         fragment.Ref,
-		Channel:     message.Channel,
-		ChannelID:   strings.TrimSpace(message.ChannelID),
-		UserID:      message.AuthorID,
-		UserLogin:   message.AuthorLogin,
-		Fallback:    fragment.Text,
-		WidthCells:  widthCells,
-		HeightCells: 1,
-	}
-	if request.ID == "" || request.WidthCells <= 0 {
-		return assets.Request{}, false
-	}
-	return request, true
-}
-
-func (m mockShellModel) assetFragmentEnabled(fragment render.Fragment) bool {
-	if !m.assetKindEnabled(fragment.Ref.Kind) {
-		return false
-	}
-	switch fragment.Kind {
-	case render.FragmentAvatar:
-		return m.imageCapability.Avatar.Active
-	case render.FragmentBadge:
-		return m.imageCapability.Status == render.ImageCapabilityEnabled || m.imageCapability.Status == render.ImageCapabilityDegraded
-	case render.FragmentEmojiFallback:
-		return m.imageCapability.Emoji.Active
-	case render.FragmentEmoteFallback:
-		return m.imageCapability.Emote.Active
-	default:
-		return false
-	}
-}
-
-func (m mockShellModel) assetKindEnabled(kind string) bool {
-	if len(m.assetKinds) == 0 {
-		return true
-	}
-	return m.assetKinds[kind]
-}
-
-func (m mockShellModel) imageCapabilityHasActiveAssets() bool {
-	return m.imageCapability.Avatar.Active ||
-		m.imageCapability.Emoji.Active ||
-		m.imageCapability.Emote.Active ||
-		m.imageCapability.Status == render.ImageCapabilityEnabled ||
-		m.imageCapability.Status == render.ImageCapabilityDegraded
-}
-
-func (m mockShellModel) visibleAssetMessages() []twitch.ChatMessage {
-	return m.visibleAvatarMessages()
-}
-
-func assetRequestID(ref twitch.AssetRef, channelID, channel string, dimensions ...int) string {
-	key, ok := render.ImageCellKeyForRefInChannel(ref, channelID, channel)
-	if !ok {
-		return ""
-	}
-	if unsafeAssetStateIdentity(key.Kind) || unsafeAssetStateIdentity(key.ID) || unsafeAssetStateIdentity(key.ChannelIdentity) {
-		return ""
-	}
-	id := key.Kind + "\x00" + key.ID
-	if key.ChannelIdentity != "" {
-		id = key.Kind + "\x00" + key.ChannelIdentity + "\x00" + key.ID
-	}
-	if len(dimensions) == 0 {
-		return id
-	}
-	width := dimensions[0]
-	height := 1
-	if len(dimensions) > 1 {
-		height = dimensions[1]
-	}
-	if width <= 0 || height <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("%s\x00cells:%dx%d", id, width, height)
-}
-
-func (m *mockShellModel) applyAssetResults(results []assetPreparedMsg) {
-	if len(results) == 0 {
-		return
-	}
-	if m.imageCells == nil {
-		m.imageCells = make(map[render.ImageCellKey]render.ImageCell)
-	}
-	for _, result := range results {
-		if result.permanent || result.err != nil || (result.event.Kind != assets.EventCacheHit && result.event.Kind != assets.EventDownloaded) {
-			if m.recordPermanentAssetFailure(result) {
-				continue
-			}
-			m.forgetAssetRequest(result.event.RequestID)
-			continue
-		}
-		if result.cell.Text == "" {
-			continue
-		}
-		key, ok := imageCellKeyFromAssetEvent(result.event, result.spec)
-		if !ok {
-			continue
-		}
-		m.imageCells[key] = result.cell
-		m.clearAssetRequestRetry(result.event.RequestID)
-	}
-}
-
-func (m *mockShellModel) recordPermanentAssetFailure(result assetPreparedMsg) bool {
-	if !result.permanent && !isPermanentAssetFailure(result) {
-		return false
-	}
-	key := result.failureKey
-	if key == (assetPermanentFailureKey{}) {
-		var ok bool
-		key, ok = assetPermanentFailureKeyForEvent(result.event, result.spec)
-		if !ok {
-			return false
-		}
-	}
-	if m.assetPermanentFailure == nil {
-		m.assetPermanentFailure = make(map[assetPermanentFailureKey]struct{})
-	}
-	m.assetPermanentFailure[key] = struct{}{}
-	if result.event.RequestID != "" {
-		if m.assetRetryAfter == nil {
-			m.assetRetryAfter = make(map[string]time.Time)
-		}
-		m.assetRetryAfter[result.event.RequestID] = time.Now().Add(assetFailureRetry)
-	}
-	return true
-}
-
-func isPermanentAssetFailure(result assetPreparedMsg) bool {
-	err := result.err
-	if err == nil {
-		err = result.event.Err
-	}
-	return render.IsPermanentImageFailure(err) ||
-		errors.Is(err, storage.ErrUnsafeAssetKey) ||
-		errors.Is(err, storage.ErrUnsafeAssetPath)
-}
-
-func assetPermanentFailureKeyForEvent(event assets.Event, spec render.ImageSpec) (assetPermanentFailureKey, bool) {
-	assetKey, ok := render.ImageCellKeyForRefInChannel(spec.Ref, spec.ChannelID, spec.Channel)
-	if !ok {
-		assetKey, ok = imageCellKeyFromAssetEvent(event, spec)
-	}
-	if !ok {
-		return assetPermanentFailureKey{}, false
-	}
-	if unsafeAssetStateIdentity(assetKey.Kind) || unsafeAssetStateIdentity(assetKey.ID) || unsafeAssetStateIdentity(assetKey.ChannelIdentity) {
-		return assetPermanentFailureKey{}, false
-	}
-
-	key := assetPermanentFailureKey{
-		AssetKind:            assetKey.Kind,
-		AssetID:              assetKey.ID,
-		ChannelIdentity:      assetKey.ChannelIdentity,
-		RecordWidthCells:     event.Record.WidthCells,
-		RecordHeightCells:    event.Record.HeightCells,
-		FetchedAtUnixNano:    unixNanoOrZero(event.Record.FetchedAt),
-		RequestedWidthCells:  firstPositiveInt(spec.WidthCells, event.Record.WidthCells, 1),
-		RequestedHeightCells: firstPositiveInt(spec.HeightCells, event.Record.HeightCells, 1),
-	}
-	if kind, id, unsafe, ok := safeRecordIdentity(event.Record.Key); ok {
-		key.RecordKind = kind
-		key.RecordID = id
-		key.RecordUnsafe = unsafe
-	}
-	if identity, unsafe, ok := safePayloadIdentity(event.Record.PayloadIdentity); ok {
-		key.PayloadIdentity = identity
-		key.PayloadIdentityUnsafe = unsafe
-	}
-	if mediaType, ok := safeAssetFailureText(event.Record.MediaType); ok {
-		key.MediaType = mediaType
-	} else {
-		key.MediaTypeUnsafe = true
-	}
-	return key, true
-}
-
-func safeRecordIdentity(recordKey storage.AssetKey) (kind, id string, unsafe, ok bool) {
-	kind = strings.TrimSpace(recordKey.Kind)
-	id = strings.TrimSpace(recordKey.ID)
-	if kind == "" && id == "" {
-		return "", "", false, false
-	}
-	if unsafeAssetStateIdentity(kind) || unsafeAssetStateIdentity(id) {
-		return "", "", true, true
-	}
-	return kind, id, false, true
-}
-
-func safePayloadIdentity(value string) (identity string, unsafe, ok bool) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", false, false
-	}
-	if !safePayloadDigestIdentity(value) {
-		return "", true, true
-	}
-	return value, false, true
-}
-
-func safePayloadDigestIdentity(value string) bool {
-	const prefix = "sha256:"
-	if !strings.HasPrefix(value, prefix) || len(value) != len(prefix)+64 {
-		return false
-	}
-	for _, r := range value[len(prefix):] {
-		if r < '0' || r > '9' {
-			if r < 'a' || r > 'f' {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func safeAssetFailureText(value string) (string, bool) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return "", true
-	}
-	if semicolon := strings.IndexByte(value, ';'); semicolon >= 0 {
-		value = strings.TrimSpace(value[:semicolon])
-	}
-	if containsUnsafeAssetStateText(value) {
-		return "", false
-	}
-	return value, true
-}
-
-func unsafeAssetStateIdentity(value string) bool {
-	return containsUnsafeAssetStateText(value) || looksLikeLocalPath(value)
-}
-
-func containsUnsafeAssetStateText(value string) bool {
-	lower := strings.ToLower(strings.TrimSpace(value))
-	if lower == "" {
-		return false
-	}
-	if strings.Contains(lower, "://") {
-		return true
-	}
-	markers := []string{
-		"oauth:",
-		"oauth_token=",
-		"access_token=",
-		"refresh_token=",
-		"client_secret=",
-		"client-secret=",
-		"authorization=",
-		"authorization: bearer",
-		"bearer ",
-	}
-	for _, marker := range markers {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
-}
-
-func looksLikeLocalPath(value string) bool {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return false
-	}
-	lower := strings.ToLower(value)
-	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, "~/") || strings.HasPrefix(value, "./") || value == "." || value == ".." {
-		return true
-	}
-	if strings.Contains(value, "\\") {
-		return true
-	}
-	if len(value) >= 3 && value[1] == ':' && ((value[2] == '/') || (value[2] == '\\')) && ((value[0] >= 'A' && value[0] <= 'Z') || (value[0] >= 'a' && value[0] <= 'z')) {
-		return true
-	}
-	if strings.HasPrefix(value, "../") || strings.Contains(value, "/../") || strings.HasSuffix(value, "/..") {
-		return true
-	}
-	if strings.Contains(value, "/") {
-		last := value[strings.LastIndex(value, "/")+1:]
-		for _, suffix := range []string{".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".bin", ".tmp"} {
-			if strings.HasSuffix(lower, suffix) || strings.HasSuffix(strings.ToLower(last), suffix) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func cloneAssetPermanentFailures(src map[assetPermanentFailureKey]struct{}) map[assetPermanentFailureKey]struct{} {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make(map[assetPermanentFailureKey]struct{}, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
-	return dst
-}
-
-func cloneAssetKinds(src map[string]bool) map[string]bool {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make(map[string]bool, len(src))
-	for key, value := range src {
-		dst[key] = value
-	}
-	return dst
-}
-
-func (m *mockShellModel) clearAssetRequestRetry(id string) {
-	if id == "" || m.assetRetryAfter == nil {
-		return
-	}
-	delete(m.assetRetryAfter, id)
-}
-
-func earliestNonZeroTime(current, candidate time.Time) time.Time {
-	if candidate.IsZero() {
-		return current
-	}
-	if current.IsZero() || candidate.Before(current) {
-		return candidate
-	}
-	return current
-}
-
-func unixNanoOrZero(t time.Time) int64 {
-	if t.IsZero() {
-		return 0
-	}
-	return t.UnixNano()
-}
-
-func firstPositiveInt(values ...int) int {
-	for _, value := range values {
-		if value > 0 {
-			return value
-		}
-	}
-	return 0
-}
-
-func (m *mockShellModel) forgetAssetRequest(id string) {
-	if id == "" || m.assetRequested == nil {
-		return
-	}
-	delete(m.assetRequested, id)
-	m.clearAssetRequestRetry(id)
-}
-
-func imageCellKeyFromAssetEvent(event assets.Event, spec render.ImageSpec) (render.ImageCellKey, bool) {
-	if key, ok := render.ImageCellKeyForRefInChannel(event.Ref, spec.ChannelID, spec.Channel); ok {
-		return key, true
-	}
-	if event.Record.Key.Kind != "" && event.Record.Key.ID != "" {
-		return render.ImageCellKeyForRefInChannel(twitch.AssetRef{Kind: event.Record.Key.Kind, ID: event.Record.Key.ID}, spec.ChannelID, spec.Channel)
-	}
-	return render.ImageCellKey{}, false
 }
 
 func (m *mockShellModel) refreshActiveRevealRows() {
@@ -3201,10 +2318,8 @@ func mockAnimationConfig(mode string) animation.Config {
 func (m mockShellModel) renderOptions(width int) render.Options {
 	opts := render.DefaultOptions(width)
 	opts.Palette = m.theme
-	opts.Assets = m.imageCapability.AssetOptions()
-	if len(m.imageCells) > 0 {
-		opts.Assets.ImageCells = m.imageCells
-	}
+	opts.Assets = render.FallbackAssetOptions()
+	opts.Assets.ShowAvatars = m.avatarMode != "off"
 	return opts
 }
 

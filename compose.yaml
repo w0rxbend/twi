@@ -6,11 +6,7 @@ x-twi: &twi
   image: twi:local
   environment:
     TERM: ${TERM:-xterm-256color}
-    TWI_ENABLE_KITTY_IMAGES: ${TWI_ENABLE_KITTY_IMAGES:-true}
-    TWI_IMAGE_MODE: ${TWI_IMAGE_MODE:-auto}
     TWI_AVATAR_MODE: ${TWI_AVATAR_MODE:-initials}
-    TWI_EMOJI_MODE: ${TWI_EMOJI_MODE:-unicode}
-    TWI_EMOTE_MODE: ${TWI_EMOTE_MODE:-text}
     TWI_ANIMATION_MODE: ${TWI_ANIMATION_MODE:-fast}
 
 services:
@@ -28,11 +24,7 @@ services:
         required: false
     environment:
       TERM: ${TERM:-xterm-256color}
-      TWI_ENABLE_KITTY_IMAGES: ${TWI_ENABLE_KITTY_IMAGES:-true}
-      TWI_IMAGE_MODE: ${TWI_IMAGE_MODE:-auto}
       TWI_AVATAR_MODE: ${TWI_AVATAR_MODE:-initials}
-      TWI_EMOJI_MODE: ${TWI_EMOJI_MODE:-unicode}
-      TWI_EMOTE_MODE: ${TWI_EMOTE_MODE:-text}
       TWI_ANIMATION_MODE: ${TWI_ANIMATION_MODE:-fast}
     stdin_open: true
     tty: true

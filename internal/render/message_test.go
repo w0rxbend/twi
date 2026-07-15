@@ -1,8 +1,6 @@
 package render
 
 import (
-	"context"
-	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -12,8 +10,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
-	"github.com/worxbend/twi/internal/config"
-	"github.com/worxbend/twi/internal/storage"
 	"github.com/worxbend/twi/internal/theme"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -447,164 +443,6 @@ func TestRowsReserveStableAssetFallbackWidths(t *testing.T) {
 		if fragment.Ref != check.ref {
 			t.Fatalf("%s ref = %#v, want %#v", check.kind, fragment.Ref, check.ref)
 		}
-	}
-}
-
-func TestRowsImageOffAndAutoUnsupportedKeepTextFallbacksStable(t *testing.T) {
-	msg := assetHeavyMessage()
-	features := config.Default().Features
-	features.AvatarMode = "image"
-	features.EmojiMode = "image"
-	features.EmoteMode = "image"
-
-	unsupportedDecision := DecideImageCapabilities(features, DetectTerminalImageSignals([]string{"TERM=xterm-256color", "COLORTERM=truecolor"}), true)
-	offFeatures := features
-	offFeatures.ImageMode = "off"
-	offDecision := DecideImageCapabilities(offFeatures, DetectTerminalImageSignals([]string{"TERM=xterm-kitty", "KITTY_WINDOW_ID=42", "COLORTERM=truecolor"}), true)
-
-	want := []string{"[VF] 20:00 [moderator] viewer_fan: Kappa 😀"}
-	for _, decision := range []ImageCapabilityDecision{unsupportedDecision, offDecision} {
-		opts := DefaultOptions(80)
-		opts.Assets = decision.AssetOptions()
-		rows := Rows(msg, opts)
-		if got := rowsToPlain(rows); !reflect.DeepEqual(got, want) {
-			t.Fatalf("%s fallback rows mismatch\n got: %#v\nwant: %#v", decision.Status, got, want)
-		}
-		if rows[0].Width() != textWidth(rows[0].Plain()) {
-			t.Fatalf("%s row width = %d, plain width = %d", decision.Status, rows[0].Width(), textWidth(rows[0].Plain()))
-		}
-	}
-}
-
-func TestRowsImageCapableModeReservesPlaceholderWidthBeforeCellsReady(t *testing.T) {
-	msg := assetHeavyMessage()
-	features := config.Default().Features
-	features.ImageMode = "normal"
-	features.AvatarMode = "image"
-	features.EmojiMode = "image"
-	features.EmoteMode = "image"
-	decision := DecideImageCapabilities(features, DetectTerminalImageSignals([]string{"TERM=xterm-kitty", "KITTY_WINDOW_ID=42", "COLORTERM=truecolor"}), true)
-	opts := DefaultOptions(80)
-	opts.Assets = decision.AssetOptions()
-
-	rows := Rows(msg, opts)
-	want := []string{"[VF] 20:00 [mod] viewer_fan: Kappa  😀"}
-	if got := rowsToPlain(rows); !reflect.DeepEqual(got, want) {
-		t.Fatalf("placeholder fallback rows mismatch\n got: %#v\nwant: %#v", got, want)
-	}
-	for _, check := range []struct {
-		kind FragmentKind
-		want int
-	}{
-		{FragmentAvatar, 5},
-		{FragmentBadge, 6},
-		{FragmentEmoteFallback, 6},
-		{FragmentEmojiFallback, 2},
-	} {
-		fragment, ok := firstKind(rows, check.kind)
-		if !ok {
-			t.Fatalf("rows missing %s: %#v", check.kind, rows)
-		}
-		if got := fragment.Width(); got != check.want {
-			t.Fatalf("%s width = %d, want %d: %#v", check.kind, got, check.want, fragment)
-		}
-		if fragment.ImageReady {
-			t.Fatalf("%s image cell is ready before asset render: %#v", check.kind, fragment)
-		}
-	}
-	if rows[0].TerminalString() == "" {
-		t.Fatal("terminal string is empty for fallback-only placeholder row")
-	}
-}
-
-func TestRowsUsePreparedImageCellWithoutChangingFallbackLayout(t *testing.T) {
-	msg := assetHeavyMessage()
-	features := config.Default().Features
-	features.ImageMode = "normal"
-	features.EmoteMode = "image"
-	decision := DecideImageCapabilities(features, DetectTerminalImageSignals([]string{"TERM=xterm-kitty", "KITTY_WINDOW_ID=42", "COLORTERM=truecolor"}), true)
-	asset := storage.AssetRecord{
-		Key:         storage.AssetKey{Kind: "twitch_emote", ID: "25"},
-		Path:        writeTinyPNG(t),
-		MediaType:   "image/png",
-		WidthCells:  6,
-		HeightCells: 1,
-	}
-	spec := ImageSpec{
-		Ref:         twitch.AssetRef{Kind: "twitch_emote", ID: "25"},
-		WidthCells:  6,
-		HeightCells: 1,
-		Fallback:    "Kappa",
-	}
-	cell, err := NewKittyRenderer(decision).RenderImage(context.Background(), asset, spec)
-	if err != nil {
-		t.Fatalf("RenderImage returned error: %v", err)
-	}
-
-	opts := DefaultOptions(80)
-	opts.Assets = decision.AssetOptions()
-	before := Rows(msg, opts)
-	key, ok := ImageCellKeyForRef(spec.Ref)
-	if !ok {
-		t.Fatal("missing image cell key")
-	}
-	opts.Assets.ImageCells = map[ImageCellKey]ImageCell{key: cell}
-	after := Rows(msg, opts)
-
-	if !reflect.DeepEqual(rowsToPlain(after), rowsToPlain(before)) {
-		t.Fatalf("fallback rows changed after prepared cell\nbefore: %#v\nafter:  %#v", rowsToPlain(before), rowsToPlain(after))
-	}
-	if after[0].Width() != before[0].Width() {
-		t.Fatalf("row width changed after prepared cell: before=%d after=%d", before[0].Width(), after[0].Width())
-	}
-	if terminal := after[0].TerminalString(); !strings.Contains(terminal, "\x1b_G") {
-		t.Fatalf("terminal row missing prepared Kitty cell: %q", terminal)
-	}
-	fragment, ok := firstKind(after, FragmentEmoteFallback)
-	if !ok || !fragment.ImageReady {
-		t.Fatalf("prepared emote fragment = %#v, ok=%v; want image-ready", fragment, ok)
-	}
-}
-
-func TestRowsRenderFailureCellKeepsFallbackLayout(t *testing.T) {
-	msg := assetHeavyMessage()
-	features := config.Default().Features
-	features.ImageMode = "normal"
-	features.EmoteMode = "image"
-	decision := DecideImageCapabilities(features, DetectTerminalImageSignals([]string{"TERM=xterm-kitty", "KITTY_WINDOW_ID=42", "COLORTERM=truecolor"}), true)
-	spec := ImageSpec{
-		Ref:         twitch.AssetRef{Kind: "twitch_emote", ID: "25"},
-		WidthCells:  6,
-		HeightCells: 1,
-		Fallback:    "Kappa",
-	}
-	cell, err := NewKittyRenderer(decision).RenderImage(context.Background(), storage.AssetRecord{
-		Key:       storage.AssetKey{Kind: "twitch_emote", ID: "25"},
-		Path:      "missing.png",
-		MediaType: "image/png",
-	}, spec)
-	if !errors.Is(err, ErrImageRenderFailed) {
-		t.Fatalf("RenderImage error = %v, want ErrImageRenderFailed", err)
-	}
-
-	opts := DefaultOptions(80)
-	opts.Assets = decision.AssetOptions()
-	before := Rows(msg, opts)
-	key, ok := ImageCellKeyForRef(spec.Ref)
-	if !ok {
-		t.Fatal("missing image cell key")
-	}
-	opts.Assets.ImageCells = map[ImageCellKey]ImageCell{key: cell}
-	after := Rows(msg, opts)
-
-	if !reflect.DeepEqual(rowsToPlain(after), rowsToPlain(before)) {
-		t.Fatalf("fallback rows changed after render failure\nbefore: %#v\nafter:  %#v", rowsToPlain(before), rowsToPlain(after))
-	}
-	if after[0].Width() != before[0].Width() {
-		t.Fatalf("row width changed after render failure: before=%d after=%d", before[0].Width(), after[0].Width())
-	}
-	if terminal := after[0].TerminalString(); strings.Contains(terminal, "\x1b_G") || !strings.Contains(terminal, "Kappa ") {
-		t.Fatalf("terminal row should keep fallback failed cell: %q", terminal)
 	}
 }
 

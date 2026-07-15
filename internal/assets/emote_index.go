@@ -19,9 +19,7 @@ type EmoteEntry struct {
 }
 
 // EmoteLister resolves the full available emote set for a channel, for
-// autocomplete search. This is distinct from TwitchChatMetadataLookup's
-// per-message lazy metadata lookups, which only resolve emotes already seen
-// in chat rather than the complete available set.
+// autocomplete search.
 type EmoteLister interface {
 	GetGlobalEmotes(context.Context) ([]twitch.EmoteMetadata, error)
 	GetChannelEmotes(context.Context, string) ([]twitch.EmoteMetadata, error)

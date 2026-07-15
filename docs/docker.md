@@ -50,10 +50,10 @@ non-secret config values and can hand off to login. In the Linux container,
 through the restrictive credential-file fallback without printing them;
 manual reconnect restarts the live IRC transport while preserving channel UI
 state. Refresh-token persistence after IRC reconnect is current when the
-supported credential store is available; manual Kitty/Ghostty image validation
-is still environment-dependent. Live image asset
-wiring is current when config, credentials, cache, and terminal checks allow
-it.
+supported credential store is available. Live avatar/emote/badge metadata
+wiring is current when config, credentials, and cache checks allow it; avatars,
+badges, emotes, and emoji always render as text (initials chips, badge labels,
+emote tokens, and Unicode glyphs), so there is no terminal graphics dependency.
 
 Username/token credentials currently come from environment variables, the flat
 config file, or saved credentials on supported Unix platforms. The Linux
@@ -99,8 +99,8 @@ docker compose run --rm doctor
 
 `doctor` diagnostics report credential presence, Twitch OAuth
 identity/expiry/scope validation, refresh availability, username mismatch,
-Twitch IRC reachability, terminal hints, Kitty/Ghostty signals, cache
-writability/pruning, image capability, live image-stack readiness, and feature
+Twitch IRC reachability, terminal hints, cache
+writability/pruning, and feature
 modes. `doctor` is safe to share only after you personally review the output. It
 redacts OAuth tokens and client secrets, but local paths and terminal details
 may still be private.

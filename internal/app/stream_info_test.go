@@ -96,7 +96,7 @@ func TestStreamInfoLoadsAndDisplaysChannelInfo(t *testing.T) {
 		Language:      "en",
 		Tags:          []string{"English", "Chill"},
 	}}
-	model.selfUserLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "123", Login: "streamer"}}}
+	model.userLookup = &appFakeUserLookup{users: []twitch.UserIdentity{{UserID: "123", Login: "streamer"}}}
 
 	updated, cmd := model.switchToTab(tabStreamInfo)
 	model = updated.(mockShellModel)
