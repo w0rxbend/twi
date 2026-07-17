@@ -9,7 +9,7 @@ import (
 
 // themeBackgroundSequence returns the OSC 11 escape sequence that overrides
 // the terminal emulator's own default background color (not just the cells
-// lipgloss paints), so the active theme covers the whole terminal, not only
+// lipgloss paints), so the darker application canvas covers the whole terminal, not only
 // the cells that carry an explicit background SGR code. It must be part of
 // View()'s returned string rather than written directly to the output
 // writer: bubbletea's renderer owns that writer from its own goroutine, and
@@ -23,10 +23,11 @@ import (
 // Returns "" outside an interactive session (terminalOutput is only set by
 // RunMockWithOptions/RunClientWithOptions) so piped/test output stays clean.
 func (m mockShellModel) themeBackgroundSequence() string {
-	if m.terminalOutput == nil || strings.TrimSpace(m.theme.Background) == "" {
+	canvas := m.canvasBackground()
+	if m.terminalOutput == nil || strings.TrimSpace(canvas) == "" {
 		return ""
 	}
-	return ansi.SetBackgroundColor(m.theme.Background)
+	return ansi.SetBackgroundColor(canvas)
 }
 
 // primeTerminalBackground writes the OSC 11 override once, synchronously,

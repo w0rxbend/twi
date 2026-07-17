@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -24,15 +23,16 @@ func (m mockShellModel) inspectView(layout mockShellLayout) string {
 		return fitBlock(content, layout.width, layout.inspectHeight)
 	}
 
-	return lipgloss.NewStyle().
-		Width(clampMin(layout.width-2, 0)).
-		Height(layout.inspectContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(m.theme.Accent)).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Padding(0, 1).
-		Render(content)
+	return m.renderPane(paneSpec{
+		icon:          "🔎",
+		title:         "Inspect",
+		content:       content,
+		width:         layout.width,
+		contentHeight: layout.inspectContentHeight,
+		padding:       1,
+		accent:        m.theme.Warning,
+		focused:       true,
+	})
 }
 
 func (m mockShellModel) inspectLines(width, height int) []string {

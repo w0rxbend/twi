@@ -240,7 +240,6 @@ type mockShellLayout struct {
 	miscContentHeight           int
 	miscFramed                  bool
 	composerHeight              int
-	composerContentHeight       int
 	composerFramed              bool
 	emotesHeight                int
 	emotesContentHeight         int
@@ -312,7 +311,7 @@ func RunMockWithOptions(w io.Writer, cfg config.Config, opts ClientOptions) erro
 	model.systemNotifier = opts.SystemNotifier
 	model.splashUntil = splashDeadline(model.animationMode)
 	model.terminalOutput = w
-	primeTerminalBackground(w, model.theme.Background)
+	primeTerminalBackground(w, model.canvasBackground())
 
 	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
@@ -351,7 +350,7 @@ func RunClientWithOptions(w io.Writer, cfg config.Config, client ChatClient, opt
 	}
 	model.splashUntil = splashDeadline(model.animationMode)
 	model.terminalOutput = w
-	primeTerminalBackground(w, model.theme.Background)
+	primeTerminalBackground(w, model.canvasBackground())
 
 	program := tea.NewProgram(model, programOptions(w, cfg)...)
 	_, err := program.Run()
@@ -897,7 +896,7 @@ func (m mockShellModel) View() string {
 	rendered := lipgloss.NewStyle().
 		Width(layout.width).
 		Height(clampMin(m.height, 1)).
-		Background(lipgloss.Color(m.theme.Background)).
+		Background(lipgloss.Color(m.canvasBackground())).
 		Foreground(lipgloss.Color(m.theme.Foreground)).
 		Render(joined)
 	return backgroundOverride + rendered
@@ -938,7 +937,7 @@ func (m mockShellModel) statusLine(width int) string {
 	line := fitLine(" "+left+right, width)
 
 	statusBackground := m.theme.Accent
-	statusForeground := theme.ContrastCorrectedForeground(m.theme.Foreground, statusBackground, m.theme.Background)
+	statusForeground := theme.ContrastCorrectedForeground(m.theme.Foreground, statusBackground, m.canvasBackground())
 	return lipgloss.NewStyle().
 		Width(width).
 		Foreground(lipgloss.Color(statusForeground)).
@@ -962,22 +961,20 @@ func (m mockShellModel) chatView(layout mockShellLayout) string {
 		return fitBlock(content, layout.chatWidth, layout.chatHeight)
 	}
 
-	borderColor := lipgloss.Color(m.theme.Border)
-	if m.focus == mockFocusChat && !m.anyOverlayOpen() {
-		borderColor = lipgloss.Color(m.theme.Accent)
-	}
+	accent := m.theme.Accent
 	if m.sceneFlashActive() {
-		borderColor = lipgloss.Color(m.theme.Foreground)
+		accent = m.theme.Foreground
 	}
-	return lipgloss.NewStyle().
-		Width(clampMin(layout.chatWidth-2, 0)).
-		Height(layout.chatContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(borderColor).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Padding(0, 1).
-		Render(content)
+	return m.renderPane(paneSpec{
+		icon:          "💬",
+		title:         "Chat · #" + m.activeChannelName(),
+		content:       content,
+		width:         layout.chatWidth,
+		contentHeight: layout.chatContentHeight,
+		padding:       1,
+		accent:        accent,
+		focused:       m.focus == mockFocusChat && !m.anyOverlayOpen(),
+	})
 }
 
 func (m mockShellModel) sidebarView(layout mockShellLayout) string {
@@ -986,7 +983,6 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 	}
 	contentWidth := clampMin(layout.sidebarWidth-2, 1)
 	lines := make([]string, 0, layout.sidebarContentHeight)
-	lines = append(lines, fitLine(" Channels", contentWidth))
 	for _, key := range m.channels.order {
 		state := m.channels.states[key]
 		if state == nil {
@@ -1014,18 +1010,14 @@ func (m mockShellModel) sidebarView(layout mockShellLayout) string {
 		lines = lines[:layout.sidebarContentHeight]
 	}
 
-	borderColor := lipgloss.Color(m.theme.Border)
-	if m.focus == mockFocusChat && !m.anyOverlayOpen() {
-		borderColor = lipgloss.Color(m.theme.Accent)
-	}
-	return lipgloss.NewStyle().
-		Width(contentWidth).
-		Height(layout.sidebarContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(borderColor).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Render(strings.Join(lines, "\n"))
+	return m.renderPane(paneSpec{
+		icon:          "📡",
+		title:         fmt.Sprintf("Channels · %02d", len(m.channels.channelNames())),
+		content:       strings.Join(lines, "\n"),
+		width:         layout.sidebarWidth,
+		contentHeight: layout.sidebarContentHeight,
+		accent:        m.theme.Success,
+	})
 }
 
 // activityLogView renders the right-hand activity log column: raids,
@@ -1039,9 +1031,8 @@ func (m mockShellModel) activityLogView(layout mockShellLayout) string {
 	}
 	contentWidth := clampMin(layout.activityWidth-2, 1)
 	lines := make([]string, 0, layout.activityContentHeight)
-	lines = append(lines, fitLine(" Activity", contentWidth))
 
-	maxRows := clampMin(layout.activityContentHeight-1, 0)
+	maxRows := clampMin(layout.activityContentHeight, 0)
 	entries := m.activityLog
 	if len(entries) > maxRows {
 		entries = entries[len(entries)-maxRows:]
@@ -1060,14 +1051,14 @@ func (m mockShellModel) activityLogView(layout mockShellLayout) string {
 		lines = lines[:layout.activityContentHeight]
 	}
 
-	return lipgloss.NewStyle().
-		Width(contentWidth).
-		Height(layout.activityContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(m.theme.Border)).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Render(strings.Join(lines, "\n"))
+	return m.renderPane(paneSpec{
+		icon:          "⚡",
+		title:         fmt.Sprintf("Activity · %02d", len(m.activityLog)),
+		content:       strings.Join(lines, "\n"),
+		width:         layout.activityWidth,
+		contentHeight: layout.activityContentHeight,
+		accent:        m.theme.Warning,
+	})
 }
 
 func channelStatusIndicator(status ConnectionStatus) string {
@@ -1167,59 +1158,6 @@ func (m mockShellModel) emptyFilterRow(width int) string {
 	return fitLine(" filter: "+summary+" - "+detail, width)
 }
 
-func (m mockShellModel) composerView(layout mockShellLayout) string {
-	active := m.activeChannelState()
-	label := fmt.Sprintf(" Message #%s", m.activeChannelName())
-	if m.focus == mockFocusComposer && !m.palette.open {
-		label += " [focus]"
-	}
-	if active.sendState != composerSendIdle && layout.width >= 36 {
-		label += " - " + string(active.sendState)
-	}
-	if layout.width < 28 {
-		label = " >"
-	}
-	input := active.composerText
-	if input == "" {
-		input = "Type a message..."
-	}
-	input = " " + fitLine(input, clampMin(layout.width-4, 1))
-	if !layout.composerFramed {
-		if active.replyTo != nil {
-			input = m.replyContextLine(layout.width) + "\n" + input
-		}
-		return fitBlock(input, layout.width, layout.composerHeight)
-	}
-
-	lines := []string{}
-	if active.replyTo != nil && layout.composerContentHeight >= 3 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).Background(lipgloss.Color(m.theme.Background)).Italic(true).Render(m.replyContextLine(layout.width-4)))
-	}
-	lines = append(lines,
-		lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Background(lipgloss.Color(m.theme.Background)).Render(label),
-		lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Foreground)).Background(lipgloss.Color(m.theme.Background)).Render(input),
-	)
-	box := lipgloss.JoinVertical(lipgloss.Left, lines...)
-
-	if layout.composerContentHeight == 1 {
-		box = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Foreground)).Background(lipgloss.Color(m.theme.Background)).Render(input)
-	}
-
-	borderColor := lipgloss.Color(m.theme.Border)
-	if m.focus == mockFocusComposer && !m.anyOverlayOpen() {
-		borderColor = lipgloss.Color(m.theme.Accent)
-	}
-	return lipgloss.NewStyle().
-		Width(clampMin(layout.width-2, 0)).
-		Height(layout.composerContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(borderColor).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Padding(0, 1).
-		Render(box)
-}
-
 // emotesView renders the third dashboard row: a horizontal quick-select
 // strip of available emotes. Left/right move the selection when focused;
 // enter/tab appends the selected emote name to the composer (see
@@ -1233,10 +1171,16 @@ func (m mockShellModel) emotesView(layout mockShellLayout) string {
 	}
 
 	label := " Emotes"
+	if layout.emotesFramed {
+		label = ""
+	}
 	var line string
 	switch {
 	case len(entries) == 0:
-		line = label + ": (resolving...)"
+		line = "(resolving...)"
+		if label != "" {
+			line = label + ": " + line
+		}
 	default:
 		selected := m.clampedEmoteSelected(entries)
 		parts := make([]string, 0, len(entries))
@@ -1247,7 +1191,11 @@ func (m mockShellModel) emotesView(layout mockShellLayout) string {
 			}
 			parts = append(parts, name)
 		}
-		line = label + ": " + strings.Join(parts, " ")
+		separator := ": "
+		if label == "" {
+			separator = ""
+		}
+		line = label + separator + strings.Join(parts, " ")
 	}
 	content := fitLine(line, contentWidth)
 
@@ -1255,19 +1203,16 @@ func (m mockShellModel) emotesView(layout mockShellLayout) string {
 		return fitBlock(content, layout.width, layout.emotesHeight)
 	}
 
-	borderColor := lipgloss.Color(m.theme.Border)
-	if m.focus == mockFocusEmotes && !m.anyOverlayOpen() {
-		borderColor = lipgloss.Color(m.theme.Accent)
-	}
-	return lipgloss.NewStyle().
-		Width(clampMin(layout.width-2, 0)).
-		Height(layout.emotesContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(borderColor).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Padding(0, 1).
-		Render(content)
+	return m.renderPane(paneSpec{
+		icon:          "✨",
+		title:         fmt.Sprintf("Emotes · %02d", len(entries)),
+		content:       content,
+		width:         layout.width,
+		contentHeight: layout.emotesContentHeight,
+		padding:       1,
+		accent:        m.theme.Error,
+		focused:       m.focus == mockFocusEmotes && !m.anyOverlayOpen(),
+	})
 }
 
 // clampedEmoteSelected keeps emoteSelected in range as the entry list
@@ -1316,6 +1261,9 @@ func (m *mockShellModel) insertSelectedEmote() {
 
 func (m mockShellModel) helpView(width, height int) string {
 	lines := m.helpLines(width, height)
+	if len(lines) > 0 && width >= 6 {
+		lines[0] = "⌨ " + strings.TrimLeft(lines[0], " ")
+	}
 	for i := range lines {
 		lines[i] = fitLine(lines[i], width)
 	}
@@ -1440,15 +1388,12 @@ func (m mockShellModel) layout() mockShellLayout {
 
 	if !onStreamInfo && !onMisc {
 		layout.composerHeight = 4
-		layout.composerContentHeight = 2
 		if m.activeChannelState().replyTo != nil {
 			layout.composerHeight++
-			layout.composerContentHeight++
 		}
-		layout.composerFramed = width >= 5
+		layout.composerFramed = width >= 8
 		if height < 10 {
 			layout.composerHeight = 3
-			layout.composerContentHeight = 1
 		}
 
 		if height >= 12 {
@@ -1467,7 +1412,6 @@ func (m mockShellModel) layout() mockShellLayout {
 	}
 	if remaining < 3 && layout.composerHeight > 3 {
 		layout.composerHeight = 3
-		layout.composerContentHeight = 1
 		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.helpHeight - layout.composerHeight - layout.emotesHeight
 	}
 	if remaining < 1 && layout.helpHeight > 0 {
@@ -1476,8 +1420,7 @@ func (m mockShellModel) layout() mockShellLayout {
 	}
 	if remaining < 1 && layout.composerHeight > 0 {
 		layout.composerHeight = clampMin(height-layout.tabBarHeight-layout.statusHeight-layout.emotesHeight, 0)
-		layout.composerContentHeight = clampMin(layout.composerHeight-2, 0)
-		layout.composerFramed = layout.composerHeight >= 3 && width >= 5
+		layout.composerFramed = layout.composerHeight >= 3 && width >= 8
 		remaining = height - layout.tabBarHeight - layout.statusHeight - layout.composerHeight - layout.emotesHeight
 	}
 
@@ -1856,7 +1799,7 @@ func (m mockShellModel) channelAtMouse(event tea.MouseEvent, layout mockShellLay
 		return "", false
 	}
 	contentRow := event.Y - chatTop - 1
-	channelIndex := contentRow - 1
+	channelIndex := contentRow
 	if channelIndex < 0 || channelIndex >= len(m.channels.order) {
 		return "", false
 	}

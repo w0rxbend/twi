@@ -2,6 +2,7 @@ package theme
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"strconv"
 	"strings"
@@ -136,6 +137,106 @@ func Gradient(start, end string, steps int) []string {
 		})
 	}
 	return colors
+}
+
+// Darken reduces a valid hex color's RGB components by amount. Amount is
+// clamped to [0,1], and invalid custom-theme values are returned unchanged so
+// decorative canvas treatment cannot make a theme unusable.
+func Darken(color string, amount float64) string {
+	parsed, ok := parseHexColor(color)
+	if !ok {
+		return color
+	}
+	if amount < 0 {
+		amount = 0
+	}
+	if amount > 1 {
+		amount = 1
+	}
+	factor := 1 - amount
+	return canonicalHex(rgb{
+		r: uint8(math.Round(float64(parsed.r) * factor)),
+		g: uint8(math.Round(float64(parsed.g) * factor)),
+		b: uint8(math.Round(float64(parsed.b) * factor)),
+	})
+}
+
+// IdentityColor returns a deterministic, random-looking color for identity
+// that meets text contrast against every valid background when possible. It
+// keeps nickname colors stable across frames and sessions without mutable UI
+// state. Empty identities and impossible custom palettes use fallback.
+func IdentityColor(identity string, backgrounds []string, fallback string) string {
+	identity = strings.ToLower(strings.TrimSpace(identity))
+	if identity == "" {
+		return fallback
+	}
+	hasher := fnv.New64a()
+	_, _ = hasher.Write([]byte(identity))
+	hash := hasher.Sum64()
+	hue := float64(hash%360) / 360
+	saturation := 0.62 + float64((hash>>12)%18)/100
+
+	parsedBackgrounds := make([]rgb, 0, len(backgrounds))
+	lightCanvas := false
+	for _, value := range backgrounds {
+		background, ok := parseHexColor(value)
+		if !ok {
+			continue
+		}
+		parsedBackgrounds = append(parsedBackgrounds, background)
+		if relativeLuminance(background) > 0.45 {
+			lightCanvas = true
+		}
+	}
+	if len(parsedBackgrounds) == 0 {
+		return fallback
+	}
+
+	lightnesses := []float64{0.68, 0.74, 0.80, 0.86}
+	if lightCanvas {
+		lightnesses = []float64{0.34, 0.28, 0.22, 0.16}
+	}
+	for _, lightness := range lightnesses {
+		candidate := hslColor(hue, saturation, lightness)
+		readable := true
+		for _, background := range parsedBackgrounds {
+			if contrastRatio(candidate, background) < minimumTextContrast {
+				readable = false
+				break
+			}
+		}
+		if readable {
+			return canonicalHex(candidate)
+		}
+	}
+	return fallback
+}
+
+func hslColor(hue, saturation, lightness float64) rgb {
+	c := (1 - math.Abs(2*lightness-1)) * saturation
+	h := hue * 6
+	x := c * (1 - math.Abs(math.Mod(h, 2)-1))
+	var r, g, b float64
+	switch {
+	case h < 1:
+		r, g = c, x
+	case h < 2:
+		r, g = x, c
+	case h < 3:
+		g, b = c, x
+	case h < 4:
+		g, b = x, c
+	case h < 5:
+		r, b = x, c
+	default:
+		r, b = c, x
+	}
+	m := lightness - c/2
+	return rgb{
+		r: uint8(math.Round((r + m) * 255)),
+		g: uint8(math.Round((g + m) * 255)),
+		b: uint8(math.Round((b + m) * 255)),
+	}
 }
 
 func interpolateComponent(start, end uint8, fraction float64) uint8 {

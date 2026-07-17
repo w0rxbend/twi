@@ -714,10 +714,14 @@ func renderFragment(fragment Fragment) string {
 }
 
 func usernameColor(msg twitch.ChatMessage, palette theme.Palette) string {
-	if msg.AuthorColor == "" {
-		return palette.Accent
+	identity := msg.AuthorLogin
+	if identity == "" {
+		identity = msg.DisplayName
 	}
-	return theme.ContrastCorrectedForeground(msg.AuthorColor, palette.Background, palette.Foreground)
+	if identity == "" {
+		identity = msg.AuthorID
+	}
+	return theme.IdentityColor(identity, []string{palette.Background, palette.Surface}, palette.Foreground)
 }
 
 func displayAuthor(msg twitch.ChatMessage) string {

@@ -7,7 +7,6 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -203,15 +202,16 @@ func (m mockShellModel) categoryPickerView(layout mockShellLayout) string {
 	if !layout.categoryPickerFramed {
 		return fitBlock(content, layout.width, layout.categoryPickerHeight)
 	}
-	return lipgloss.NewStyle().
-		Width(clampMin(layout.width-2, 0)).
-		Height(layout.categoryPickerContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(m.theme.Accent)).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Padding(0, 1).
-		Render(content)
+	return m.renderPane(paneSpec{
+		icon:          "🎮",
+		title:         "Category Search",
+		content:       content,
+		width:         layout.width,
+		contentHeight: layout.categoryPickerContentHeight,
+		padding:       1,
+		accent:        m.theme.Warning,
+		focused:       true,
+	})
 }
 
 func (m mockShellModel) categoryPickerLines(width, height int) []string {

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/worxbend/twi/internal/animation"
 	"github.com/worxbend/twi/internal/render"
 	"github.com/worxbend/twi/internal/twitch"
@@ -344,15 +343,16 @@ func (m mockShellModel) commandPaletteView(layout mockShellLayout) string {
 	if !layout.paletteFramed {
 		return fitBlock(content, layout.width, layout.paletteHeight)
 	}
-	return lipgloss.NewStyle().
-		Width(clampMin(layout.width-2, 0)).
-		Height(layout.paletteContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(m.theme.Accent)).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Padding(0, 1).
-		Render(content)
+	return m.renderPane(paneSpec{
+		icon:          "⌘",
+		title:         "Command Palette",
+		content:       content,
+		width:         layout.width,
+		contentHeight: layout.paletteContentHeight,
+		padding:       1,
+		accent:        m.theme.Accent,
+		focused:       true,
+	})
 }
 
 func (m mockShellModel) commandPaletteLines(width, height int) []string {

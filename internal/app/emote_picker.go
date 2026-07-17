@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/worxbend/twi/internal/assets"
 )
 
@@ -140,15 +139,16 @@ func (m mockShellModel) emotePickerView(layout mockShellLayout) string {
 	if !layout.emotePickerFramed {
 		return fitBlock(content, layout.width, layout.emotePickerHeight)
 	}
-	return lipgloss.NewStyle().
-		Width(clampMin(layout.width-2, 0)).
-		Height(layout.emotePickerContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(m.theme.Accent)).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Padding(0, 1).
-		Render(content)
+	return m.renderPane(paneSpec{
+		icon:          "😀",
+		title:         "Emote Search",
+		content:       content,
+		width:         layout.width,
+		contentHeight: layout.emotePickerContentHeight,
+		padding:       1,
+		accent:        m.theme.Error,
+		focused:       true,
+	})
 }
 
 func (m mockShellModel) emotePickerLines(width, height int) []string {

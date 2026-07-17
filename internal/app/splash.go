@@ -41,6 +41,7 @@ func (m mockShellModel) splashViewAt(now time.Time) string {
 	width := clampMin(m.width, 1)
 	height := clampMin(m.height, 1)
 	fraction := m.splashFraction(now)
+	canvas := m.canvasBackground()
 
 	contentWidth := splashContentWidth(width)
 	logo := splashLogo
@@ -57,26 +58,26 @@ func (m mockShellModel) splashViewAt(now time.Time) string {
 			centered,
 			m.theme.Accent,
 			m.gradientEndColor(),
-			m.theme.Background,
+			canvas,
 			phase+row*2,
 			true,
 		))
 	}
 
 	tagline := revealDisplayCells("twi // terminal Twitch chat", int(float64(27)*clampFraction((fraction-0.12)/0.38)))
-	taglineLine := splashStyledLine(centeredFittedLine(tagline, contentWidth), m.theme.Foreground, m.theme.Background, true)
-	decorativeLine := splashStyledLine(centeredFittedLine("✦  expressive chat, zero browser chrome  ✦", contentWidth), m.theme.Muted, m.theme.Background, false)
-	blankLine := splashStyledLine(centeredFittedLine("", contentWidth), m.theme.Muted, m.theme.Background, false)
+	taglineLine := splashStyledLine(centeredFittedLine(tagline, contentWidth), m.theme.Foreground, canvas, true)
+	decorativeLine := splashStyledLine(centeredFittedLine("✦  expressive chat, zero browser chrome  ✦", contentWidth), m.theme.Muted, canvas, false)
+	blankLine := splashStyledLine(centeredFittedLine("", contentWidth), m.theme.Muted, canvas, false)
 	progressWidth := minInt(splashProgressWidth, clampMin(contentWidth-2, 0))
 	progressLine := gradientForegroundText(
 		centeredFittedLine(splashProgressBar(fraction, progressWidth), contentWidth),
 		m.theme.Accent,
 		m.gradientEndColor(),
-		m.theme.Background,
+		canvas,
 		phase,
 		true,
 	)
-	phaseLine := splashStyledLine(centeredFittedLine(splashPhaseLabel(fraction, m.activeChannelName()), contentWidth), m.theme.Muted, m.theme.Background, false)
+	phaseLine := splashStyledLine(centeredFittedLine(splashPhaseLabel(fraction, m.activeChannelName()), contentWidth), m.theme.Muted, canvas, false)
 	lines := splashLinesForHeight(height, logoLines, taglineLine, decorativeLine, blankLine, progressLine, phaseLine)
 
 	content := strings.Join(lines, "\n")
@@ -84,7 +85,7 @@ func (m mockShellModel) splashViewAt(now time.Time) string {
 		Width(width).
 		Height(height).
 		Align(lipgloss.Center, lipgloss.Center).
-		Background(lipgloss.Color(m.theme.Background)).
+		Background(lipgloss.Color(canvas)).
 		Render(content)
 }
 

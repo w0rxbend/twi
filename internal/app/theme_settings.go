@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/worxbend/twi/internal/config"
 	"github.com/worxbend/twi/internal/theme"
 )
@@ -118,15 +117,16 @@ func (m mockShellModel) themeSettingsView(layout mockShellLayout) string {
 	if !layout.themeSettingsFramed {
 		return fitBlock(content, layout.width, layout.themeSettingsHeight)
 	}
-	return lipgloss.NewStyle().
-		Width(clampMin(layout.width-2, 0)).
-		Height(layout.themeSettingsContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(m.theme.Accent)).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Padding(0, 1).
-		Render(content)
+	return m.renderPane(paneSpec{
+		icon:          "🎨",
+		title:         "Themes",
+		content:       content,
+		width:         layout.width,
+		contentHeight: layout.themeSettingsContentHeight,
+		padding:       1,
+		accent:        m.theme.Accent,
+		focused:       true,
+	})
 }
 
 func (m mockShellModel) themeSettingsLines(width, height int) []string {

@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
 	"github.com/worxbend/twi/internal/twitch"
 )
@@ -368,15 +367,16 @@ func (m mockShellModel) streamInfoView(layout mockShellLayout) string {
 	if !layout.streamInfoFramed {
 		return fitBlock(content, layout.width, layout.streamInfoHeight)
 	}
-	return lipgloss.NewStyle().
-		Width(clampMin(layout.width-2, 0)).
-		Height(layout.streamInfoContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(m.theme.Accent)).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Padding(0, 1).
-		Render(content)
+	return m.renderPane(paneSpec{
+		icon:          "📺",
+		title:         "Stream Info",
+		content:       content,
+		width:         layout.width,
+		contentHeight: layout.streamInfoContentHeight,
+		padding:       1,
+		accent:        m.theme.Success,
+		focused:       true,
+	})
 }
 
 func (m mockShellModel) streamInfoLines(width, height int) []string {

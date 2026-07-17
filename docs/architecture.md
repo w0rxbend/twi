@@ -34,7 +34,7 @@ Live chat starts in `internal/cli`, which loads config, resolves credentials, va
 
 `internal/app` stores per-channel history, unread counts, composer drafts, reply context, selected-message inspect state, send status, scroll offsets, local filters, and connection state. Channel switching changes the active view without losing per-channel state.
 
-`internal/render` converts normalized messages into width-bounded rows. It handles timestamps, badges, usernames, mentions, replies, action messages, notices, deleted messages, emoji fallbacks, emote-token fallbacks, avatar initials, and image placeholder cells.
+`internal/render` converts normalized messages into width-bounded rows. It handles timestamps, badges, usernames, mentions, replies, action messages, notices, deleted messages, emoji fallbacks, emote-token fallbacks, avatar initials, and image placeholder cells. Username color is a deterministic, case-normalized hash of the Twitch login (falling back to display name or author ID), selected for readable contrast against both message surfaces; the same author therefore keeps the same distinct color without UI-owned mutable color state.
 
 ## Asset Flow
 
@@ -78,19 +78,26 @@ Extension work should keep the same rule: the UI depends on internal interfaces 
 `internal/theme` resolves a `Palette` (background, foreground, accent, muted,
 border, surface, warning, error, success) from either a built-in preset name
 or a custom hex palette (`config.Config.ResolveTheme`); `internal/app` reads
-one active palette (`mockShellModel.theme`) and every widget — including a
-full-viewport `Background()` wrap in `View()` — derives its colors from it, so
-adding a widget only means reading `m.theme` rather than a new literal.
+one active palette (`mockShellModel.theme`) and every widget derives its colors
+from it. The full viewport and terminal OSC background use a slightly darker
+derived canvas, while framed panes share a raised surface, icon-bearing title,
+quiet frame, and role-colored left rail. Adding a widget therefore means reading
+`m.theme` and using the shared pane primitive rather than adding new literals.
 
 A single shared `animation.FrameMsg` tick (`internal/animation/clock.go`,
 ~10fps, skipped when `animation_mode = "off"`) drives every chrome animation
-effect — the theme-derived top-bar and splash gradients, pulsing status-bar
-LIVE/REC and incoming-message rails, the channel-switch flash, the staged
+effect — the theme-derived top-bar, focused pane-title/rail, and splash
+gradients, pulsing status-bar LIVE/REC and incoming-message rails, the channel-switch flash, the staged
 block-logo splash, and a command-palette typewriter reveal that reuses the same
 `Sequence`/`Queue` machinery built for chat-row reveals — instead of each
 effect running its own ad hoc ticker. Static messages alternate background
 surfaces and carry a colored rail plus mail glyph; these decorations are added
 at the app layout boundary so the normalized message renderer stays reusable.
+A borderless, inset composer follows the same boundary: it renders a
+theme-surface panel with a focus rail, shared-clock block cursor, optional reply
+context, and a compact channel/send-state footer without changing the existing
+per-channel draft or send-queue model. It collapses to a three-row or plain
+text form when terminal dimensions cannot support the full four-row surface.
 A future animated widget should hook into this same tick rather than
 scheduling a second clock.
 

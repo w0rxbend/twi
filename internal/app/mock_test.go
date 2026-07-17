@@ -237,7 +237,15 @@ func TestMockShellMouseEventsWhenEnabled(t *testing.T) {
 		t.Fatalf("mouse-scrolled viewport missing older row:\n%s", model.View())
 	}
 
-	betaY := layout.tabBarHeight + layout.statusHeight + 1 + 2
+	sidebarContentY := layout.tabBarHeight + layout.statusHeight + 1
+	for row, want := range []string{"alpha", "beta"} {
+		got, ok := model.channelAtMouse(tea.MouseEvent{X: 2, Y: sidebarContentY + row}, layout)
+		if !ok || got != want {
+			t.Fatalf("channel at rendered sidebar row %d = (%q, %v), want (%q, true)", row, got, ok, want)
+		}
+	}
+
+	betaY := sidebarContentY + 1
 	updated, cmd = model.Update(tea.MouseMsg{
 		X:      2,
 		Y:      betaY,

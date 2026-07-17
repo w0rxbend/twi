@@ -370,11 +370,33 @@ func TestRowsExposeRepresentativeFragmentKinds(t *testing.T) {
 	if !ok {
 		t.Fatal("username fragment missing")
 	}
-	if got, want := username.Style.Foreground, theme.DefaultPalette().Foreground; got != want {
-		t.Fatalf("username color = %q, want corrected fallback %q", got, want)
+	if got, notWant := username.Style.Foreground, theme.DefaultPalette().Foreground; got == notWant {
+		t.Fatalf("username color = fallback %q, want a stable identity color", got)
 	}
 	if styled := rows[0].String(); styled == "" || !strings.Contains(styled, "alice") {
 		t.Fatalf("styled row missing username: %q", styled)
+	}
+}
+
+func TestRowsAssignStableDistinctUsernameColors(t *testing.T) {
+	options := DefaultOptions(80)
+	message := twitch.ChatMessage{AuthorLogin: "alice", DisplayName: "Alice", Text: "hello", Type: twitch.MessageTypeChat}
+	first, ok := firstKind(Rows(message, options), FragmentUsername)
+	if !ok {
+		t.Fatal("alice username fragment missing")
+	}
+	second, ok := firstKind(Rows(message, options), FragmentUsername)
+	if !ok || second.Style.Foreground != first.Style.Foreground {
+		t.Fatalf("same username colors = %q and %q, want stable", first.Style.Foreground, second.Style.Foreground)
+	}
+	message.AuthorLogin = "bob"
+	message.DisplayName = "Bob"
+	bob, ok := firstKind(Rows(message, options), FragmentUsername)
+	if !ok {
+		t.Fatal("bob username fragment missing")
+	}
+	if bob.Style.Foreground == first.Style.Foreground {
+		t.Fatalf("alice and bob shared username color %q", bob.Style.Foreground)
 	}
 }
 

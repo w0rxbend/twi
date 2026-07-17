@@ -4,6 +4,39 @@ This file records release-candidate manual evidence for environment-dependent
 terminal behavior. It intentionally avoids screenshots, terminal recordings,
 debug-log contents, and credential values.
 
+## 2026-07-17 TUI Surface Refresh
+
+Environment:
+
+- Host command environment: Linux amd64, Go `go1.26.4`.
+- Active validation terminal: default interactive PTY at `80x24`; terminal
+  program/version was not reported by the environment.
+- Twitch mode: deterministic `--mock`; no live chat connection was attempted.
+
+Commands run:
+
+```sh
+go test ./...
+go vet ./...
+go test -race ./internal/app ./internal/render ./internal/theme
+go build -o /tmp/twi-pane ./cmd/twi
+/tmp/twi-pane chat --mock --channel alpha
+git diff --check
+```
+
+Results:
+
+- Formatting, full tests, vet, focused race tests, build, and whitespace checks
+  passed.
+- The splash animation transitioned to the dashboard without layout jitter.
+- The dashboard showed the configured account and `#alpha` in the top bar; a
+  darker full-terminal canvas; raised Chat and Emotes surfaces with icon titles
+  and colored left rails; the inset composer with its channel/state footer; and
+  the icon-bearing help strip.
+- Mock authors retained different stable nickname colors while messages
+  revealed. Automated contrast tests cover both alternating chat surfaces.
+- `ctrl+c` exited cleanly and restored the terminal background with OSC 111.
+
 ## 2026-07-04 T004 Terminal Matrix
 
 Environment:

@@ -8,7 +8,6 @@ import (
 	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/worxbend/twi/internal/twitch"
 )
 
@@ -238,15 +237,16 @@ func (m mockShellModel) miscView(layout mockShellLayout) string {
 	if !layout.miscFramed {
 		return fitBlock(content, layout.width, layout.miscHeight)
 	}
-	return lipgloss.NewStyle().
-		Width(clampMin(layout.width-2, 0)).
-		Height(layout.miscContentHeight).
-		Border(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color(m.theme.Accent)).
-		BorderBackground(lipgloss.Color(m.theme.Background)).
-		Background(lipgloss.Color(m.theme.Background)).
-		Padding(0, 1).
-		Render(content)
+	return m.renderPane(paneSpec{
+		icon:          "⏺",
+		title:         "Stream Markers",
+		content:       content,
+		width:         layout.width,
+		contentHeight: layout.miscContentHeight,
+		padding:       1,
+		accent:        m.theme.Warning,
+		focused:       true,
+	})
 }
 
 func (m mockShellModel) miscLines(width, height int) []string {

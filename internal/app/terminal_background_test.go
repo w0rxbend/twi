@@ -88,7 +88,7 @@ func TestBackgroundStyledLineWrapsPlainTextOnly(t *testing.T) {
 func TestSplashViewWordmarkAndTaglineCarryExplicitBackground(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
-	background := cfg.ResolveTheme().Background
+	background := newMockShellModel("alpha", cfg).canvasBackground()
 	backgroundCode := backgroundOnlySGRCode(t, background)
 
 	model := newMockShellModel("alpha", cfg)
@@ -164,7 +164,7 @@ func TestCenteredPlainLineStyledAsOneUnstyledFreeSpan(t *testing.T) {
 func TestBorderedFramesApplyBackgroundToBorderCharacters(t *testing.T) {
 	forceColorProfile(t)
 	cfg := config.Default()
-	background := cfg.ResolveTheme().Background
+	background := newMockShellModel("alpha", cfg).canvasBackground()
 	backgroundCode := backgroundOnlySGRCode(t, background)
 
 	model := newMockShellModel("alpha", cfg)
@@ -191,7 +191,7 @@ func TestThemeBackgroundSequenceOnlyWhenInteractive(t *testing.T) {
 
 	var buf bytes.Buffer
 	model.terminalOutput = &buf
-	want := "\x1b]11;" + model.theme.Background + "\x07"
+	want := "\x1b]11;" + model.canvasBackground() + "\x07"
 	if got := model.themeBackgroundSequence(); got != want {
 		t.Fatalf("themeBackgroundSequence() = %q, want %q", got, want)
 	}
@@ -204,7 +204,7 @@ func TestViewEmbedsThemeBackgroundSequenceWhenInteractive(t *testing.T) {
 	model.terminalOutput = &buf
 
 	view := model.View()
-	want := "\x1b]11;" + model.theme.Background + "\x07"
+	want := "\x1b]11;" + model.canvasBackground() + "\x07"
 	if !strings.HasPrefix(view, want) {
 		t.Fatalf("View() does not start with theme background sequence %q:\n%s", want, view)
 	}
@@ -228,7 +228,7 @@ func TestViewEmbedsThemeBackgroundSequenceDuringSplash(t *testing.T) {
 	model.splashUntil = time.Now().Add(splashDuration)
 
 	view := model.View()
-	want := "\x1b]11;" + model.theme.Background + "\x07"
+	want := "\x1b]11;" + model.canvasBackground() + "\x07"
 	if !strings.HasPrefix(view, want) {
 		t.Fatalf("splash View() does not start with theme background sequence %q:\n%s", want, view)
 	}
