@@ -3,9 +3,11 @@ package app
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/rivo/uniseg"
 )
 
 // switchToTab activates tab, closing any open overlay so the new screen
@@ -29,22 +31,112 @@ func (m mockShellModel) switchToTab(tab shellTab) (tea.Model, tea.Cmd) {
 
 // tabBarLine renders the fixed one-row tab strip shown above the status
 // line: one label per entry in shellTabs, tagged with its Alt+<digit>
-// shortcut, active tab marked with a leading "*". Built as plain text and
-// fit/padded with fitLine (like every other region) before a single style
-// wraps the whole line, since fitLine itself is not ANSI-aware.
+// shortcut, active tab marked with a leading "*", and the configured Twitch
+// login plus active chat aligned on the right when space permits. Built as
+// plain text and fit/padded with fitLine (like every other region) before a
+// single style wraps the whole line, since fitLine itself is not ANSI-aware.
 func (m mockShellModel) tabBarLine(width int) string {
-	parts := make([]string, 0, len(shellTabs))
-	for i, entry := range shellTabs {
-		marker := " "
-		if entry.tab == m.activeTab {
-			marker = "*"
-		}
-		parts = append(parts, fmt.Sprintf("%s%d:%s", marker, i+1, entry.label))
+	username, channel := m.tabBarContextParts()
+	context := strings.Join(nonEmptyStrings(username, channel), "  ")
+	tabs := m.tabBarTabs(false)
+	if uniseg.StringWidth(tabs)+2+uniseg.StringWidth(context) > width {
+		tabs = m.tabBarTabs(true)
 	}
-	line := fitLine(" "+strings.Join(parts, "  "), width)
+	if uniseg.StringWidth(tabs)+2+uniseg.StringWidth(context) > width {
+		tabs = m.activeTabLabel()
+	}
+
+	line := tabs
+	available := width - uniseg.StringWidth(tabs)
+	if context != "" && available > 0 {
+		contextWidth := available
+		if available > 2 {
+			contextWidth -= 2
+		}
+		visibleContext := tabBarContextForWidth(username, channel, contextWidth)
+		gap := available - uniseg.StringWidth(visibleContext)
+		line += strings.Repeat(" ", gap) + visibleContext
+	}
+	line = fitLine(line, width)
 	return lipgloss.NewStyle().
 		Width(width).
 		Foreground(lipgloss.Color(m.theme.Muted)).
 		Background(lipgloss.Color(m.theme.Surface)).
 		Render(line)
+}
+
+func (m mockShellModel) tabBarTabs(compact bool) string {
+	parts := make([]string, 0, len(shellTabs))
+	for i, entry := range shellTabs {
+		marker := ""
+		if compact {
+			if entry.tab == m.activeTab {
+				marker = "*"
+			}
+		} else {
+			marker = " "
+			if entry.tab == m.activeTab {
+				marker = "*"
+			}
+		}
+		label := fmt.Sprintf("%s%d", marker, i+1)
+		if !compact {
+			label += ":" + entry.label
+		}
+		parts = append(parts, label)
+	}
+	return " " + strings.Join(parts, "  ")
+}
+
+func (m mockShellModel) activeTabLabel() string {
+	for i, entry := range shellTabs {
+		if entry.tab == m.activeTab {
+			return fmt.Sprintf(" *%d", i+1)
+		}
+	}
+	return ""
+}
+
+func (m mockShellModel) tabBarContextParts() (string, string) {
+	username := sanitizeTabBarValue(m.effectiveConfig.Twitch.Username)
+	if username != "" {
+		username = "@" + username
+	}
+	channel := strings.TrimPrefix(sanitizeTabBarValue(m.activeChannelName()), "#")
+	if channel != "" {
+		channel = "#" + channel
+	}
+	return username, channel
+}
+
+func tabBarContextForWidth(username, channel string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	channelWidth := uniseg.StringWidth(channel)
+	if channelWidth >= width {
+		return truncateDisplayWidth(channel, width)
+	}
+	if username == "" {
+		return channel
+	}
+	usernameWidth := width - channelWidth - 2
+	if usernameWidth <= 0 {
+		return channel
+	}
+	return truncateDisplayWidth(username, usernameWidth) + "  " + channel
+}
+
+func truncateDisplayWidth(value string, width int) string {
+	return strings.TrimRight(fitLine(value, width), " ")
+}
+
+func sanitizeTabBarValue(value string) string {
+	value = strings.TrimSpace(value)
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return '\uFFFD'
+		}
+		return r
+	}, value)
 }

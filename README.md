@@ -272,10 +272,11 @@ unsupported or unavailable notification commands fall back to a terminal bell.
 
 ## Stream Info Tab
 
-`twi` opens with a top tab bar; `alt+1` selects Chat (the default), `alt+2`
-selects Stream Info, and `alt+3` selects Misc. Stream Info is a dedicated
-screen for viewing and editing your own channel's title, category, language,
-and tags without leaving the terminal. On that tab, `up`/`down` selects a
+`twi` opens with a top tab bar that shows the configured Twitch username and
+active chat name; `alt+1` selects Chat (the default), `alt+2` selects Stream
+Info, and `alt+3` selects Misc. Stream Info is a dedicated screen for viewing
+and editing your own channel's title, category, language, and tags without
+leaving the terminal. On that tab, `up`/`down` selects a
 field and `ctrl+s` saves every changed field to Twitch. `enter` on
 Title/Language/Tags edits free text (`enter` again commits, `esc` cancels).
 `enter` on Category instead opens a live search against Twitch's category
