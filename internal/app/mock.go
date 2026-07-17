@@ -249,8 +249,9 @@ type mockShellLayout struct {
 }
 
 type chatRowBlock struct {
-	message twitch.ChatMessage
-	rows    []render.Row
+	message   twitch.ChatMessage
+	rows      []render.Row
+	animating bool
 }
 
 type mockIncomingMessageMsg struct {
@@ -425,10 +426,20 @@ func newMockShellModelWithClock(channel string, cfg config.Config, clock animati
 // demoable without credentials or network access.
 func sampleEmoteEntries() []assets.EmoteEntry {
 	names := []string{
-		"Kappa", "PogChamp", "LUL", "monkaS", "KEKW", "5Head", "EZ", "PagMan",
+		"Kappa", "✨", "💜", "🔥", "😂", "🎉", "👀", "🚀", "💬", "🌈", "⚡",
+		"PogChamp", "LUL", "monkaS", "KEKW", "5Head", "EZ", "PagMan",
 		"OMEGALUL", "Pog", "BibleThump", "TriHard", "VoHiYo", "ResidentSleeper",
 		"NotLikeThis", "SeemsGood", "HeyGuys", "DansGame",
 	}
+	entries := make([]assets.EmoteEntry, len(names))
+	for i, name := range names {
+		entries[i] = assets.EmoteEntry{Name: name}
+	}
+	return entries
+}
+
+func builtInEmojiEntries() []assets.EmoteEntry {
+	names := []string{"✨", "💜", "🔥", "😂", "🎉", "👀", "🚀", "💬", "🌈", "⚡"}
 	entries := make([]assets.EmoteEntry, len(names))
 	for i, name := range names {
 		entries[i] = assets.EmoteEntry{Name: name}
@@ -490,7 +501,7 @@ func seededMockMessages(channel string, startedAt time.Time) []twitch.ChatMessag
 			AuthorLogin: "twi_bot",
 			DisplayName: "twi_bot",
 			AuthorColor: "#9146ff",
-			Text:        "Mock chat is ready in the Bubble Tea shell.",
+			Text:        "✨ Mock chat is ready in the Bubble Tea shell. 💜",
 			Type:        twitch.MessageTypeChat,
 		},
 		{
@@ -500,7 +511,7 @@ func seededMockMessages(channel string, startedAt time.Time) []twitch.ChatMessag
 			AuthorLogin: "viewer42",
 			DisplayName: "viewer42",
 			AuthorColor: "#00d1ff",
-			Text:        "@twi_bot composer, help, and status regions are visible.",
+			Text:        "@twi_bot composer, help, and status regions are visible. 👀",
 			Type:        twitch.MessageTypeChat,
 		},
 		{
@@ -510,7 +521,7 @@ func seededMockMessages(channel string, startedAt time.Time) []twitch.ChatMessag
 			AuthorLogin: "moderator",
 			DisplayName: "moderator",
 			AuthorColor: "#00f593",
-			Text:        "No Twitch credentials or network calls are used for --mock.",
+			Text:        "🔔 No Twitch credentials or network calls are used for --mock.",
 			Type:        twitch.MessageTypeNotice,
 		},
 	}
@@ -525,7 +536,7 @@ func incomingMockMessages(channel string, startedAt time.Time) []twitch.ChatMess
 			AuthorLogin: "new_viewer",
 			DisplayName: "new_viewer",
 			AuthorColor: "#ffb86c",
-			Text:        "This incoming mock message reveals through animation ticks.",
+			Text:        "This incoming message reveals through animated chat frames. 🚀",
 			Type:        twitch.MessageTypeChat,
 		},
 		{
@@ -535,7 +546,7 @@ func incomingMockMessages(channel string, startedAt time.Time) []twitch.ChatMess
 			AuthorLogin: "vip_guest",
 			DisplayName: "vip_guest",
 			AuthorColor: "#f38ba8",
-			Text:        "Scrolling and the composer stay responsive while frames advance.",
+			Text:        "Scrolling and the composer stay responsive while frames advance. 🎉",
 			Type:        twitch.MessageTypeChat,
 		},
 	}
@@ -709,6 +720,7 @@ func (m mockShellModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.refreshActiveRevealRows()
 		m.clampScroll()
 		return m.withAsyncAssetCommands(nil)
 	case tea.FocusMsg:
@@ -1077,13 +1089,13 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 	blocks := m.visibleChatRowBlocks(layout)
 
 	rows := make([]string, 0, chatRowBlockCount(blocks))
-	for _, block := range blocks {
+	for blockIndex, block := range blocks {
 		if len(block.rows) == 0 {
-			rows = append(rows, backgroundStyledLine(fitLine("", rowWidth), m.theme.Background))
+			rows = append(rows, m.messageRowString(block, blockIndex, 0, render.Row{}, rowWidth))
 			continue
 		}
-		for _, row := range block.rows {
-			rows = append(rows, terminalRowString(row, rowWidth, m.theme.Background))
+		for rowIndex, row := range block.rows {
+			rows = append(rows, m.messageRowString(block, blockIndex, rowIndex, row, rowWidth))
 		}
 	}
 	if len(rows) == 0 && active.messageFilters.active() {
@@ -1094,7 +1106,7 @@ func (m mockShellModel) chatRows(layout mockShellLayout) []string {
 
 func (m mockShellModel) visibleChatRowBlocks(layout mockShellLayout) []chatRowBlock {
 	active := m.activeChannelState()
-	rowWidth := m.chatRowWidth(layout)
+	rowWidth := m.chatMessageContentWidth(layout)
 	options := m.renderOptions(rowWidth)
 
 	blocks := make([]chatRowBlock, 0, len(active.messages)+len(active.activeOrder))
@@ -1114,8 +1126,9 @@ func (m mockShellModel) visibleChatRowBlocks(layout mockShellLayout) []chatRowBl
 			continue
 		}
 		blocks = append(blocks, chatRowBlock{
-			message: message,
-			rows:    frames[id],
+			message:   message,
+			rows:      frames[id],
+			animating: true,
 		})
 	}
 	return blocks
@@ -1658,6 +1671,63 @@ func (m mockShellModel) chatRowWidth(layout mockShellLayout) int {
 	return clampMin(rowWidth, 1)
 }
 
+func (m mockShellModel) chatMessageContentWidth(layout mockShellLayout) int {
+	rowWidth := m.chatRowWidth(layout)
+	return clampMin(rowWidth-messageGutterWidth(rowWidth), 1)
+}
+
+func messageGutterWidth(rowWidth int) int {
+	switch {
+	case rowWidth >= 24:
+		return 4
+	case rowWidth >= 12:
+		return 2
+	default:
+		return 0
+	}
+}
+
+func (m mockShellModel) messageRowString(block chatRowBlock, blockIndex, rowIndex int, row render.Row, rowWidth int) string {
+	gutterWidth := messageGutterWidth(rowWidth)
+	background := m.theme.Background
+	if blockIndex%2 == 1 {
+		background = m.theme.Surface
+	}
+	contentWidth := clampMin(rowWidth-gutterWidth, 1)
+	content := terminalRowString(row, contentWidth, background)
+	if gutterWidth == 0 {
+		return content
+	}
+
+	railColors := theme.Gradient(m.theme.Accent, m.gradientEndColor(), 8)
+	colorIndex := blockIndex % len(railColors)
+	if block.animating {
+		colorIndex = (colorIndex + m.gradientPhase(len(railColors))) % len(railColors)
+	}
+	railColor := railColors[colorIndex]
+	rail := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(railColor)).
+		Background(lipgloss.Color(background)).
+		Bold(block.animating).
+		Render("│ ")
+	if gutterWidth == 2 {
+		return rail + content
+	}
+	icon := "  "
+	if rowIndex == 0 {
+		icon = "✉ "
+	}
+	iconColor := railColor
+	if !block.animating {
+		iconColor = m.theme.Muted
+	}
+	return rail + lipgloss.NewStyle().
+		Foreground(lipgloss.Color(iconColor)).
+		Background(lipgloss.Color(background)).
+		Bold(block.animating).
+		Render(icon) + content
+}
+
 func (m *mockShellModel) cycleFocus() {
 	switch m.focus {
 	case mockFocusChat:
@@ -1924,7 +1994,7 @@ func (m *mockShellModel) enqueueMessage(message twitch.ChatMessage) tea.Cmd {
 	}
 
 	layout := m.layout()
-	rowWidth := m.chatRowWidth(layout)
+	rowWidth := m.chatMessageContentWidth(layout)
 
 	revealID := m.nextRevealID(message)
 	result := state.revealQueue.Enqueue(revealID, render.Rows(message, m.renderOptions(rowWidth)))
@@ -2036,7 +2106,7 @@ func (m *mockShellModel) appendStaticMessageReplacingRows(message twitch.ChatMes
 
 func (m mockShellModel) staticMessageRowCount(message twitch.ChatMessage) int {
 	layout := m.layout()
-	rowWidth := m.chatRowWidth(layout)
+	rowWidth := m.chatMessageContentWidth(layout)
 	rows := render.Rows(message, m.renderOptions(rowWidth))
 	if len(rows) == 0 {
 		return 1
@@ -2153,7 +2223,7 @@ func (m *mockShellModel) refreshActiveRevealRows() {
 		return
 	}
 	layout := m.layout()
-	rowWidth := m.chatRowWidth(layout)
+	rowWidth := m.chatMessageContentWidth(layout)
 	for _, id := range state.activeOrder {
 		message, ok := state.activeMessages[id]
 		if !ok {

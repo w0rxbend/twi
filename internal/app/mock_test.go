@@ -1600,6 +1600,36 @@ func TestMockShellResizeDuringAnimationStaysWithinBounds(t *testing.T) {
 	}
 }
 
+func TestMockShellResizeReflowsActiveRevealInBothDirections(t *testing.T) {
+	clock := &appFakeClock{now: time.Date(2026, 7, 2, 20, 0, 0, 0, time.UTC)}
+	model := newMockShellModelWithClock("example", config.Default(), clock)
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	model = updated.(mockShellModel)
+	updated, _ = model.Update(mockIncomingMessageMsg{
+		message: mockIncomingMessage("example", "resize-reflow", strings.Repeat("active reveal wraps responsively ", 8)),
+	})
+	model = updated.(mockShellModel)
+	clock.Add(45 * mockRevealDelay)
+	updated, _ = model.Update(mockAnimationTickMsg{})
+	model = updated.(mockShellModel)
+	revealID := model.activeChannelState().activeOrder[0]
+
+	wideRows := len(model.activeChannelState().revealQueue.Frames()[revealID])
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 24, Height: 8})
+	model = updated.(mockShellModel)
+	narrowRows := len(model.activeChannelState().revealQueue.Frames()[revealID])
+	if narrowRows <= wideRows {
+		t.Fatalf("narrow active rows = %d, want more than wide rows %d", narrowRows, wideRows)
+	}
+
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 80, Height: 16})
+	model = updated.(mockShellModel)
+	restoredRows := len(model.activeChannelState().revealQueue.Frames()[revealID])
+	if restoredRows != wideRows {
+		t.Fatalf("restored active rows = %d, want original wide rows %d", restoredRows, wideRows)
+	}
+}
+
 func TestMockShellNarrowLayoutStaysWithinBounds(t *testing.T) {
 	model := newMockShellModel("example", config.Default())
 	model.activeChannelState().composerText = "hello 😀 表"
@@ -3086,12 +3116,36 @@ func TestScheduleEmoteIndexLookupResolvesAndSkipsWhenCached(t *testing.T) {
 	msg := cmd().(emoteIndexResolvedMsg)
 	model.applyEmoteIndexResult(msg)
 	entries := model.activeEmoteEntries()
-	if len(entries) != 1 || entries[0].Name != "Kappa" {
-		t.Fatalf("activeEmoteEntries() = %#v, want [Kappa]", entries)
+	if len(entries) != 11 || entries[0].Name != "Kappa" || entries[1].Name != "✨" {
+		t.Fatalf("activeEmoteEntries() = %#v, want Kappa followed by built-in emoji", entries)
 	}
 
 	if cmd := model.scheduleEmoteIndexLookup(); cmd != nil {
 		t.Fatal("scheduleEmoteIndexLookup() after resolution returned non-nil, want nil (already cached)")
+	}
+}
+
+func TestApplyEmoteIndexResultPreservesVisibleSelectionsByName(t *testing.T) {
+	model := newLiveShellModelWithClockAndOptions("alpha", config.Default(), NewFakeChatClient(1), nil, ClientOptions{})
+	model.focus = mockFocusEmotes
+	model.emoteSelected = 2
+	model.emotePicker = emotePickerState{open: true, selected: 4}
+
+	model.applyEmoteIndexResult(emoteIndexResolvedMsg{
+		channel: "alpha",
+		entries: []assets.EmoteEntry{
+			{Name: "Kappa"},
+			{Name: "PogChamp"},
+		},
+	})
+
+	quickEntries := model.activeEmoteEntries()
+	if got := quickEntries[model.emoteSelected].Name; got != "🔥" {
+		t.Fatalf("quick selection after resolution = %q, want 🔥", got)
+	}
+	pickerEntries := model.visibleEmotePickerEntries()
+	if got := pickerEntries[model.emotePicker.selected].Name; got != "🎉" {
+		t.Fatalf("picker selection after resolution = %q, want 🎉", got)
 	}
 }
 
@@ -3100,8 +3154,8 @@ func TestScheduleEmoteIndexLookupNoIndex(t *testing.T) {
 	if cmd := model.scheduleEmoteIndexLookup(); cmd != nil {
 		t.Fatal("scheduleEmoteIndexLookup() without EmoteIndex returned non-nil, want nil")
 	}
-	if entries := model.activeEmoteEntries(); entries != nil {
-		t.Fatalf("activeEmoteEntries() = %#v, want nil before resolution", entries)
+	if entries := model.activeEmoteEntries(); len(entries) != 10 || entries[0].Name != "✨" {
+		t.Fatalf("activeEmoteEntries() = %#v, want built-in emoji without an index", entries)
 	}
 }
 

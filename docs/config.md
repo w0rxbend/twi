@@ -143,7 +143,7 @@ Supported variables:
 | `TWI_DEFAULT_CHANNELS` | No | Default channel list. |
 | `TWI_ENABLE_MOUSE` | No | Enable or disable terminal mouse reporting and mouse shortcuts. |
 | `TWI_AVATAR_MODE` | No | Avatar rendering mode: `off` or `initials`. There is no image mode. |
-| `TWI_ANIMATION_MODE` | No | Animation behavior: pulsing status indicators, scene-switch flash, startup splash, and command-palette typewriter reveal, in addition to the existing chat-row reveal speed. |
+| `TWI_ANIMATION_MODE` | No | Animation behavior: gradient motion, pulsing status/message indicators, scene-switch flash, staged startup splash, and command-palette typewriter reveal, in addition to chat-row reveal speed. |
 | `TWI_THEME_NAME` | No | Active theme: one of the 13 built-in preset names, or `custom` to use the `TWI_THEME_*` hex fields below. Defaults to `claude`. |
 | `TWI_THEME_BACKGROUND` / `TWI_THEME_FOREGROUND` / `TWI_THEME_ACCENT` / `TWI_THEME_MUTED` / `TWI_THEME_BORDER` / `TWI_THEME_SURFACE` / `TWI_THEME_WARNING` / `TWI_THEME_ERROR` / `TWI_THEME_SUCCESS` | No | Custom palette hex values, only applied when `TWI_THEME_NAME=custom`. |
 | `TWI_STREAM_STATUS_MODE` | No | Enables (`auto`, default) or disables (`off`) polling Twitch Helix "Get Streams" for the status bar's real LIVE indicator. Requires `TWI_TWITCH_CLIENT_ID`/`TWI_TWITCH_OAUTH_TOKEN` either way. |

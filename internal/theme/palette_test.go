@@ -1,6 +1,9 @@
 package theme
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestPresetNamesIncludesAllThirteen(t *testing.T) {
 	want := []string{
@@ -83,5 +86,21 @@ func TestContrastCorrectedForegroundHandlesInvalidInput(t *testing.T) {
 	got := ContrastCorrectedForeground("not-a-color", "#111018", "#f6f2ff")
 	if want := "#f6f2ff"; got != want {
 		t.Fatalf("color = %q, want %q", got, want)
+	}
+}
+
+func TestGradientInterpolatesEndpointsAndMidpoint(t *testing.T) {
+	got := Gradient("#ff8000", "#00c0ff", 3)
+	want := []string{"#ff8000", "#80a080", "#00c0ff"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Gradient() = %v, want %v", got, want)
+	}
+}
+
+func TestGradientDegradesSafelyForInvalidCustomColors(t *testing.T) {
+	got := Gradient("accent", "#ffffff", 2)
+	want := []string{"accent", "accent"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Gradient() = %v, want %v", got, want)
 	}
 }

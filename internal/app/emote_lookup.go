@@ -94,14 +94,71 @@ func (m *mockShellModel) applyEmoteIndexResult(msg emoteIndexResolvedMsg) {
 		delete(m.emoteEntriesRequested, msg.channel)
 		return
 	}
+	activeChannel := msg.channel == channelKey(m.activeChannelName())
+	quickSelection := ""
+	pickerSelection := ""
+	if activeChannel {
+		quickSelection = selectedEmoteName(m.activeEmoteEntries(), m.emoteSelected)
+		pickerSelection = selectedEmoteName(m.visibleEmotePickerEntries(), m.emotePicker.selected)
+	}
 	if m.emoteEntries == nil {
 		m.emoteEntries = make(map[string][]assets.EmoteEntry)
 	}
 	m.emoteEntries[msg.channel] = msg.entries
+	if activeChannel {
+		m.emoteSelected = emoteIndexByName(m.activeEmoteEntries(), quickSelection, m.emoteSelected)
+		m.emotePicker.selected = emoteIndexByName(m.visibleEmotePickerEntries(), pickerSelection, m.emotePicker.selected)
+	}
 }
 
-// activeEmoteEntries returns the searchable/quick-select emote list for the
-// active channel, or nil while it hasn't resolved yet.
+func selectedEmoteName(entries []assets.EmoteEntry, selected int) string {
+	if selected < 0 || selected >= len(entries) {
+		return ""
+	}
+	return entries[selected].Name
+}
+
+func emoteIndexByName(entries []assets.EmoteEntry, name string, fallback int) int {
+	if name != "" {
+		for index, entry := range entries {
+			if entry.Name == name {
+				return index
+			}
+		}
+	}
+	if len(entries) == 0 {
+		return 0
+	}
+	if fallback < 0 {
+		return 0
+	}
+	if fallback >= len(entries) {
+		return len(entries) - 1
+	}
+	return fallback
+}
+
+// activeEmoteEntries returns the searchable/quick-select list for the active
+// channel. Terminal-native emoji remain available before Twitch emotes resolve
+// or when that lookup is disabled; resolved entries are merged without
+// duplicates and retain their provider ordering.
 func (m mockShellModel) activeEmoteEntries() []assets.EmoteEntry {
-	return m.emoteEntries[channelKey(m.activeChannelName())]
+	resolved := m.emoteEntries[channelKey(m.activeChannelName())]
+	entries := make([]assets.EmoteEntry, 0, len(resolved)+10)
+	seen := make(map[string]bool, len(resolved)+10)
+	for _, entry := range resolved {
+		if entry.Name == "" || seen[entry.Name] {
+			continue
+		}
+		entries = append(entries, entry)
+		seen[entry.Name] = true
+	}
+	for _, entry := range builtInEmojiEntries() {
+		if seen[entry.Name] {
+			continue
+		}
+		entries = append(entries, entry)
+		seen[entry.Name] = true
+	}
+	return entries
 }

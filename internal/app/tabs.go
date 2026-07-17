@@ -6,7 +6,6 @@ import (
 	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
 )
 
@@ -58,11 +57,16 @@ func (m mockShellModel) tabBarLine(width int) string {
 		line += strings.Repeat(" ", gap) + visibleContext
 	}
 	line = fitLine(line, width)
-	return lipgloss.NewStyle().
-		Width(width).
-		Foreground(lipgloss.Color(m.theme.Muted)).
-		Background(lipgloss.Color(m.theme.Surface)).
-		Render(line)
+	return gradientBackgroundLine(
+		line,
+		width,
+		m.theme.Accent,
+		m.gradientEndColor(),
+		m.theme.Foreground,
+		m.theme.Background,
+		m.gradientPhase(width),
+		true,
+	)
 }
 
 func (m mockShellModel) tabBarTabs(compact bool) string {

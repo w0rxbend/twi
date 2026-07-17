@@ -107,6 +107,41 @@ func canonicalHex(color rgb) string {
 	return fmt.Sprintf("#%02x%02x%02x", color.r, color.g, color.b)
 }
 
+// Gradient returns steps colors interpolated between start and end. Invalid
+// endpoints degrade to the original start value so visual enhancements never
+// make a custom theme unusable.
+func Gradient(start, end string, steps int) []string {
+	if steps <= 0 {
+		return nil
+	}
+	from, fromOK := parseHexColor(start)
+	to, toOK := parseHexColor(end)
+	colors := make([]string, steps)
+	if !fromOK || !toOK {
+		for i := range colors {
+			colors[i] = start
+		}
+		return colors
+	}
+	if steps == 1 {
+		colors[0] = canonicalHex(from)
+		return colors
+	}
+	for i := range colors {
+		fraction := float64(i) / float64(steps-1)
+		colors[i] = canonicalHex(rgb{
+			r: interpolateComponent(from.r, to.r, fraction),
+			g: interpolateComponent(from.g, to.g, fraction),
+			b: interpolateComponent(from.b, to.b, fraction),
+		})
+	}
+	return colors
+}
+
+func interpolateComponent(start, end uint8, fraction float64) uint8 {
+	return uint8(math.Round(float64(start) + (float64(end)-float64(start))*fraction))
+}
+
 func contrastRatio(a, b rgb) float64 {
 	la := relativeLuminance(a)
 	lb := relativeLuminance(b)

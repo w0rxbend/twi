@@ -84,11 +84,15 @@ adding a widget only means reading `m.theme` rather than a new literal.
 
 A single shared `animation.FrameMsg` tick (`internal/animation/clock.go`,
 ~10fps, skipped when `animation_mode = "off"`) drives every chrome animation
-effect — the pulsing status-bar LIVE/REC segment, the channel-switch flash,
-the startup splash, and a command-palette typewriter reveal that reuses the
-same `Sequence`/`Queue` machinery built for chat-row reveals — instead of each
-effect running its own ad hoc ticker. A future animated widget should hook
-into this same tick rather than scheduling a second clock.
+effect — the theme-derived top-bar and splash gradients, pulsing status-bar
+LIVE/REC and incoming-message rails, the channel-switch flash, the staged
+block-logo splash, and a command-palette typewriter reveal that reuses the same
+`Sequence`/`Queue` machinery built for chat-row reveals — instead of each
+effect running its own ad hoc ticker. Static messages alternate background
+surfaces and carry a colored rail plus mail glyph; these decorations are added
+at the app layout boundary so the normalized message renderer stays reusable.
+A future animated widget should hook into this same tick rather than
+scheduling a second clock.
 
 The real-broadcast LIVE indicator (`internal/twitch.HelixStreamsClient`) and
 emote autocomplete (`internal/assets.EmoteIndex`) are wired independently of
